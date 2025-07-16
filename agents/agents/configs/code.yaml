@@ -1,0 +1,14 @@
+docker:
+  build:
+    docker_dir: agents/tools/src/dockers/code
+    no_cache: true
+    network_mode: host
+    image: code
+  container_name: code
+  ports:
+    container: 9000
+    host: 9000
+  memory: 100g
+  cpus: 60
+  port: 9000
+debug: true

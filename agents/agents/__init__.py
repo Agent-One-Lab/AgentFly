@@ -1,0 +1,25 @@
+import os
+"""
+Set the environment variables here.
+"""
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Get parent folder
+AGENT_HOME = os.path.dirname(__file__).split("/")[:-3]
+AGENT_HOME = "/".join(AGENT_HOME)
+
+AGENT_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+AGENT_CONFIG_DIR = os.path.join(os.path.dirname(__file__), "configs")
+
+ENROOT_HOME = os.path.join(os.path.dirname(__file__), "data", "enroot")
+
+if not os.path.exists(os.path.join(ENROOT_HOME, "images")):
+    os.makedirs(os.path.join(ENROOT_HOME, "images"))
+
+AGENT_DATA_DIR = os.getenv("AGENT_DATA_DIR", AGENT_DATA_DIR)
+
+AGENT_CONFIG_DIR = os.getenv("AGENT_CONFIG_DIR", AGENT_CONFIG_DIR)
+
+ENROOT_HOME = os.getenv("ENROOT_HOME", ENROOT_HOME)

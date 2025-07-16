@@ -1,0 +1,8 @@
+# Core ALFWorld HTTP Server Dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pyyaml>=6.0
+numpy>=1.24.0
+requests>=2.31.0
+
+# ALFWorld will be installed separately with conda to handle complex dependencies 

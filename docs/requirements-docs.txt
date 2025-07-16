@@ -1,0 +1,7 @@
+# Markdown & MyST
+myst-parser
+# Optional tables
+sphinx-markdown-tables
+# Classic Read-the-Docs look
+sphinx-rtd-theme
+# Sphinx itself is pulled transitively
