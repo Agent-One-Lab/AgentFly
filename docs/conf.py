@@ -1,8 +1,11 @@
 # docs/conf.py
 import os, sys, pathlib
 
-agent_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agents")
-sys.path.insert(0, agent_path)
+# Add both project root and agents directory to the Python path
+project_root = os.path.abspath('..')
+agents_root = os.path.join(project_root, 'agents')
+sys.path.insert(0, project_root)
+sys.path.insert(0, agents_root)
 
 project   = "AgentFly"
 author    = "AgentFly Team"
