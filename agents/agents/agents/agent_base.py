@@ -23,7 +23,11 @@ except ImportError:
 
 class BaseAgent(ChainGeneration, ABC):
     """
-    Base class for all agents.
+    Base class for all agents. All agent should subclass this class. A customized agent can implement the following methods:
+    
+    - generate_async: generate responses asynchronously.
+
+    - parse: parse the tool call from the generated response.
 
     """
     def __init__(
@@ -103,6 +107,16 @@ class BaseAgent(ChainGeneration, ABC):
         return self.llm_engine.generate(messages_list_or_inputs, **args)
 
     async def generate_async(self, messages_list_or_inputs: List[List[Dict]], **args):
+        """
+        Generate responses asynchronously. This method is used to generate responses for a list of messages. In a customized agent, this method can be overridden to implement more complex generation logic. For example, retrieve some relevant context from the database.
+
+        Args:
+            messages_list_or_inputs: List of messages to generate responses for.
+            **args: Additional arguments for generation.
+
+        Returns:
+            List of responses.
+        """
         return await self.llm_engine.generate_async(messages_list_or_inputs, **args)
 
     @property
@@ -177,13 +191,38 @@ class BaseAgent(ChainGeneration, ABC):
                 return last_message_content
 
     @abstractmethod
-    def parse(self, messages: List[List[Dict]], tools: List[Any], **args) -> Tuple[dict, int, int]:
+    def parse(self, responses: List[str], tools: List[Any], **args) -> Tuple[dict, int, int]:
         """
-        Generate an assistant response based on the current conversation history.
+        This method is used to define the interaction logic of the agent. It can be used to parse the tool call from the response. In a customized agent, more complex interaction logic can be defined. For example, take a specific token as the tool call token.
+
+        Args:
+            responses: List of responses to parse.
+            tools: List of tools to use.
+            **args: Additional arguments for parsing.
+
         Returns:
-            message: Assistant message in a tool-calling format.
-            error_code: 0 if success.
-            num_tokens: Token count used.
+            messages: Assistant messages in the following format:
+            
+            .. code-block:: python
+
+                [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "..."
+                            },
+                        ],
+                        "tool_calls": [
+                            {
+                                "id": "...",
+                                "name": "...",
+                                "arguments": "..."
+                            }
+                        ]
+                    }
+                ]
         """
         raise NotImplementedError
     
@@ -208,20 +247,6 @@ class BaseAgent(ChainGeneration, ABC):
 
         return reward_values, other_values
     
-    def reward(self, messages: List[Dict[str, Any]], golden_answer: str) -> float:
-        """
-        Default reward function implementation.
-        Args:
-            trajectory: The trajectory to evaluate
-            **kwargs: Additional arguments for reward calculation
-            
-        Returns:
-            float: The calculated reward
-        """
-        # Extract the last message content
-        final_response = self.extract_final_response(messages)
-        reward_value = self._reward_fn(final_response, golden_answer, trajectory=messages)
-        return reward_value
 
     def get_verl_data_proto(self):
         inputs, other_info_list = self.tokenize_trajectories(return_action_mask=True, return_reward_mask=True)

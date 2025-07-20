@@ -5,9 +5,7 @@ Agent
 .. currentmodule:: agent_base
 .. automodule:: agents.agents.agent_base
     :members:
-    :undoc-members:
     :show-inheritance:
 
-
--------------
-Any random content
+.. autoclass:: agents.agents.chain.chain_base.ChainGeneration
+    :members:

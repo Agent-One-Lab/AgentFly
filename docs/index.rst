@@ -17,7 +17,8 @@ AgentFly is a scalable and extensible Agent-RL framework designed to empower LM 
     :caption: Features
 
     features/agent_rollout
-
+    features/tool_system
+    features/reward_system
 
 .. toctree::
     :maxdepth: 2

@@ -153,8 +153,10 @@ class Template:
             return self.system_template.format(system_message=system_message)
         else:
             system_message = content[0]['text']
-            system_message = self.system_template_with_tools.format(system_message=system_message, tools=tools)
-            return system_message
+            if self.system_template_with_tools is None:
+                return self.system_template.format(system_message=system_message)
+            else:
+                return self.system_template_with_tools.format(system_message=system_message, tools=tools)
     
     def _encode_user_message(self, content: List[Dict]) -> str:
         text = ""
@@ -570,6 +572,22 @@ def get_template(name: str) -> Template:
     """Get a conversation template."""
     return TEMPLATES[name].copy()
 
+
+register_template(
+    Template(
+        name="qwen2.5-no-tool",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        system_message="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        stop_words=["<|im_end|>"],
+        vision_start="<|vision_start|>",
+        vision_end="<|vision_end|>",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+    )
+)
 
 register_template(
     Template(
