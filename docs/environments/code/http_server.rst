@@ -44,27 +44,7 @@ Execute a Python code snippet in the sandbox environment.
    - **400 Bad Request**: Code execution failed or syntax error
    - **408 Request Timeout**: Code execution timed out
 
-Server Configuration
---------------------
 
-The server operates with the following built-in limits:
-
-* **MAX_WALL**: 10 seconds wall-clock execution timeout
-* **CHILD_MEM**: 1 GiB memory limit for child processes
-* **CHILD_CPU**: 100% of a single CPU core
-* **Output Truncation**: Output is limited to 16,384 characters
-* **Error Truncation**: Error messages are limited to 8,192 characters
-
-Security Model
---------------
-
-The HTTP server implements a multi-layer security approach:
-
-* **Process Isolation**: Code runs in separate child processes with ``os.setsid()``
-* **Signal Handling**: Timeout enforcement via ``SIGKILL`` to process groups
-* **Resource Limits**: Memory and CPU constraints on child processes
-* **Output Sanitization**: Automatic truncation prevents memory exhaustion
-* **Error Containment**: Exception handling prevents server crashes
 
 Implementation Details
 ----------------------
