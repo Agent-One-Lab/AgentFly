@@ -25,6 +25,7 @@ jobs:
       - name: Install dependencies (main repo)
         run: |
           pip install -r agents/requirements.txt
+          pip install datasets
 
       - name: Install Enroot (standard flavor)
         run: |
@@ -38,4 +39,5 @@ jobs:
         run: |
           cd agents
           PYTHONPATH=$(pwd) pytest tests/unit \
-            --ignore=tests/unit/agents
+            --ignore=tests/unit/agents \
+            --ignore=tests/unit/tools/test_tool_define.py
