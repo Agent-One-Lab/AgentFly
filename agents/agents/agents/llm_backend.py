@@ -7,7 +7,7 @@ from asyncore import loop
 from collections import deque
 from functools import partial
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable, AsyncGenerator
 import uuid
 from .templates.utils import convert_messages_to_openai_format
 import numpy as np
@@ -54,6 +54,10 @@ class LLMBackend:
     def generate(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt"""
         raise NotImplementedError("Subclasses must implement generate()")
+    
+    async def generate_streaming(self, messages_list: List[List[Dict]], streaming_callback: Optional[Callable] = None, **kwargs) -> AsyncGenerator[str, None]:
+        """Generate text with streaming support"""
+        raise NotImplementedError("Subclasses must implement generate_streaming()")
 
 class TransformersBackend(LLMBackend):
     """HuggingFace Transformers implementation"""
@@ -100,8 +104,50 @@ class TransformersBackend(LLMBackend):
         response_texts = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
         return response_texts
     
-    def generate_async(self, messages_list: str, **kwargs) -> str:
-        raise NotImplementedError("Transformers backend does not support async generation")
+    async def generate_async(self, messages_list: str, **kwargs) -> str:
+        """Async wrapper for generate"""
+        return self.generate(messages_list, **kwargs)
+    
+    async def generate_streaming(self, messages_list: List[List[Dict]], streaming_callback: Optional[Callable] = None, **kwargs) -> AsyncGenerator[str, None]:
+        """Generate text with streaming support using Transformers"""
+        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
+        temperature = kwargs.get("temperature", self.temperature)
+        
+        prompts, _ = self.apply_chat_template(messages_list, self.template)
+        
+        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, padding_side="left").to(self.llm_engine.device)
+        input_length = inputs['input_ids'].shape[1]
+        
+        # Use streaming generation
+        generated_tokens = []
+        for i in range(max_new_tokens):
+            outputs = self.llm_engine.generate(
+                **inputs,
+                max_new_tokens=1,
+                temperature=temperature,
+                do_sample=temperature > 0,
+                pad_token_id=self.tokenizer.eos_token_id,
+                use_cache=True
+            )
+            
+            new_token = outputs[0][-1].unsqueeze(0)
+            generated_tokens.append(new_token)
+            
+            # Decode the new token
+            new_text = self.tokenizer.decode(new_token, skip_special_tokens=True)
+            
+            if streaming_callback:
+                await streaming_callback(new_text)
+            
+            yield new_text
+            
+            # Check for EOS
+            if new_token.item() == self.tokenizer.eos_token_id:
+                break
+            
+            # Update input for next iteration
+            inputs['input_ids'] = torch.cat([inputs['input_ids'], new_token.unsqueeze(0)], dim=1)
+            inputs['attention_mask'] = torch.cat([inputs['attention_mask'], torch.ones(1, 1, device=inputs['attention_mask'].device)], dim=1)
 
 class VLLMBackend(LLMBackend):
     """vLLM implementation"""
@@ -221,6 +267,36 @@ class AsyncVLLMBackend(LLMBackend):
         LOGGER.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
 
         return response_texts
+    
+    async def generate_streaming(self, messages_list: List[List[Dict]], streaming_callback: Optional[Callable] = None, **kwargs) -> AsyncGenerator[str, None]:
+        """Generate text with streaming support using Async vLLM"""
+        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
+        temperature = kwargs.get("temperature", self.temperature)
+        sampling_params = SamplingParams(
+            n=1,
+            max_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+
+        tools = kwargs.get("tools", None)
+        prompts, vision_inputs = self.apply_chat_template(messages_list, self.template, tools=tools)
+        inputs = self._process_inputs(prompts, vision_inputs)
+        
+        # For streaming, we process one input at a time
+        for input_data in inputs:
+            outputs_gen = self.llm_engine.generate(
+                input_data,
+                sampling_params=sampling_params,
+                request_id=str(uuid.uuid4()),
+            )
+            
+            async for output in outputs_gen:
+                for sequence in output.outputs:
+                    # Stream each token
+                    if hasattr(sequence, 'text'):
+                        if streaming_callback:
+                            await streaming_callback(sequence.text)
+                        yield sequence.text
 
 class VerlBackend(LLMBackend):
     """Verl implementation"""

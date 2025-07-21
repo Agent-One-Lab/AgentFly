@@ -2,8 +2,9 @@ import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
 import json
+import time
 from ...utils.timing import Timer
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 import uuid
 from termcolor import colored
 import numpy as np
@@ -13,6 +14,8 @@ from tqdm.asyncio import tqdm_asyncio
 from ...utils.monitor import JsonlSink, MetricEvent, Monitor, WandbSink, emit, serialize_for_json
 from ... import AGENT_DATA_DIR
 import wandb
+from .streaming_observer import StreamingManager, StreamEvent, StreamEventType
+
 @dataclass
 class Node:
     is_terminal: bool = False
@@ -135,6 +138,7 @@ class ChainGeneration:
         self.finished_chains_count = 0
         self.initialize_monitor()
         self.monitor_info = defaultdict(list)
+        self.streaming_manager = StreamingManager()
 
     def reset(self) -> None:
         self.status_code: str = "continue"
@@ -215,33 +219,20 @@ class ChainGeneration:
         max_steps: int,
         start_messages: Union[List[dict], np.ndarray],
         num_chains: int,
-        generation_config: Optional[Dict[str, Any]] = None
+        generation_config: Optional[Dict[str, Any]] = None,
+        enable_streaming: bool = False,
+        streaming_callback: Optional[Callable] = None,
     ):
         """
-        Run the chain-based rollout.
+        Run the chain-based rollout with optional streaming support.
         
         Args:
             max_steps: Maximum number of steps for each chain.
-            start_messages: List of messages to start the chains. Each message should be a dict
-                with "messages" key containing a list of message dictionaries.
+            start_messages: List of messages to start the chains.
             num_chains: Number of chains to run for each message.
             generation_config: Generation configuration dictionary.
-        
-        Example:
-            .. code-block:: python
-            
-                start_messages = [
-                    {
-                        "messages": [{"role": "user", "content": "..."}],
-                        "info": {"question": "..."},
-                        "answer": "..."
-                    },
-                    {
-                        "messages": [{"role": "user", "content": "..."}],
-                        "info": {"question": "..."},
-                        "answer": "..."
-                    }
-                ]
+            enable_streaming: Whether to enable streaming mode.
+            streaming_callback: Optional callback for streaming events.
         """
         assert max_steps >= 1, "max_steps must be at least 1."
         Monitor.ensure_started()
@@ -254,30 +245,34 @@ class ChainGeneration:
         )
         tool_schemas = [tool.schema for tool in self.tools]
 
+        # Emit chain start events if streaming is enabled
+        if enable_streaming:
+            for cid in first_nodes.keys():
+                await self.streaming_manager.emit_event(StreamEvent(
+                    event_type=StreamEventType.CHAIN_START,
+                    chain_id=cid,
+                    timestamp=time.time(),
+                    data={"max_steps": max_steps},
+                    step=0,
+                    depth=0
+                ))
+
         done_q = asyncio.Queue()
         tasks = [
             asyncio.create_task(
-                self._run_chain_async(
+                self._run_single_chain(
                     cid,
                     node,
                     chains[cid],
                     tool_schemas,
                     max_steps=max_steps,
-                    done_queue=done_q)
+                    done_queue=done_q,
+                    enable_streaming=enable_streaming,
+                    streaming_callback=streaming_callback)
                 )
                 for cid, node in first_nodes.items()
         ]
 
-        # Throttle the number of concurrent chains
-        # print([tool.parallel_size for tool in self.tools])
-
-        # minimal_tool_parallel_size = 1
-        # sem = asyncio.Semaphore(minimal_tool_parallel_size)
-        # async def guarded_run(cid, *args):
-        #     async with sem:
-        #         return await self._run_chain_async(cid, *args)
-        # tasks = [guarded_run(cid, node, chains[cid], max_steps, done_q) for cid, node in first_nodes.items()]
-        # await asyncio.gather(*tasks)
         await tqdm_asyncio.gather(*tasks)
 
         self.chains = {}
@@ -289,29 +284,32 @@ class ChainGeneration:
         self.global_step += 1
         self.monitor_step()
 
-    async def _run_chain_async(self,
+    async def _run_single_chain(self,
         chain_id: str,
         first_node: Node,
         chain: Chain,
         tools: List[Dict],
         max_steps: int,
-        done_queue: asyncio.Queue
+        done_queue: asyncio.Queue,
+        enable_streaming: bool = False,
+        streaming_callback: Optional[Callable] = None,
     ):
         """
-        Drives *one* trajectory until it terminates or max_steps is reached.
-        Writes (chain_id, chain) to done_queue when finished.
+        Run a single chain with optional streaming support.
         """
         current_node = first_node
         depth = 0
-        final_result = None
         have_set_tools = False
 
         while not current_node.is_terminal and depth < max_steps:
             newest_messages = current_node.messages
+            
             if not current_node.is_terminal:
-                responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
-                new_msg = self.parse(responses, self.tools)
-                new_msg = new_msg[0]
+                # Generate response
+                new_msg = await self._generate_response(
+                    current_node, tools, depth, chain_id, enable_streaming, streaming_callback
+                )
+                
                 newest_messages.append(new_msg)
                 thought_node = chain.add_node(
                     type="Thought",
@@ -321,47 +319,167 @@ class ChainGeneration:
                 thought_node.is_terminal = new_msg.get("status", "continue") in self.terminal_status
                 current_node = thought_node
 
+            # Handle tool calls
             if current_node.messages[-1].get("tool_calls"):
                 for tool_call in current_node.messages[-1]["tool_calls"]:
-                    tool_name = tool_call["function"]["name"]
-                    tool_input = tool_call["function"]["arguments"]
-                    action_node = chain.add_node(
-                        type="Action",
-                        messages=deepcopy(newest_messages),
-                        description=tool_name
+                    current_node = await self._execute_tool_call(
+                        tool_call, newest_messages, chain, chain_id, depth, 
+                        have_set_tools, enable_streaming
                     )
-                    if not have_set_tools:
-                        await self.set_tools(chain_id, chain.info)
-                        have_set_tools = True
-
-                    result = await submit_tool_call(tool_name, tool_input, id=chain_id)
-                    final_result = result
-                    action_input_node = chain.add_node(
-                        type="Action Input",
-                        messages=deepcopy(newest_messages),
-                        description=result.get("arguments", "")
-                    )
-                    observation = result["observation"]
-                    observation_json = json.dumps({
-                        "name": result["name"],
-                        "content": observation,
-                    }, indent=4)
-                    action_input_node.observation = observation_json
-                    action_input_node.observation_code = result["status"]
-                    newest_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "content": [{"type": "text", "text": observation_json}],
-                    })
-                    action_input_node.messages = deepcopy(newest_messages)
-                    action_input_node.is_terminal = result["status"] in self.terminal_status
-                    current_node = action_input_node
+                    have_set_tools = True
             else:
-                # If there is no tool call, we assume the chain is finished
+                # No tool calls, chain is finished
                 break
 
             depth += 1
 
+        # Finalize chain
+        await self._finalize_chain(chain_id, chain, current_node, depth, enable_streaming)
+        await done_queue.put((chain_id, chain, current_node))
+
+        self.finished_chains_count += 1
+        self.monitor_chain()
+
+    async def _generate_response(self, current_node, tools, depth, chain_id, enable_streaming, streaming_callback):
+        """Generate response with optional streaming support."""
+        if enable_streaming:
+            # Emit generation start event
+            await self.streaming_manager.emit_event(StreamEvent(
+                event_type=StreamEventType.LLM_GENERATION_START,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={"depth": depth},
+                step=depth,
+                depth=depth
+            ))
+
+            # Use streaming generation if available
+            if hasattr(self, 'generate_streaming') and streaming_callback:
+                async def stream_callback(chunk: str):
+                    await self.streaming_manager.emit_event(StreamEvent(
+                        event_type=StreamEventType.LLM_GENERATION_CHUNK,
+                        chain_id=chain_id,
+                        timestamp=time.time(),
+                        data={"content": chunk},
+                        step=depth,
+                        depth=depth
+                    ))
+                    if streaming_callback:
+                        await streaming_callback(chunk)
+                
+                # Collect full response from streaming
+                full_response = ""
+                async for chunk in self.generate_streaming([current_node.messages], tools=tools, streaming_callback=stream_callback):
+                    full_response += chunk
+                
+                # Emit generation end event
+                await self.streaming_manager.emit_event(StreamEvent(
+                    event_type=StreamEventType.LLM_GENERATION_END,
+                    chain_id=chain_id,
+                    timestamp=time.time(),
+                    data={"full_response": full_response},
+                    step=depth,
+                    depth=depth
+                ))
+                
+                # Parse response
+                new_msg = self.parse([full_response], self.tools)
+                return new_msg[0]
+            else:
+                # Fallback to non-streaming generation
+                responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
+                new_msg = self.parse(responses, self.tools)
+                return new_msg[0]
+        else:
+            # Non-streaming generation
+            responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
+            new_msg = self.parse(responses, self.tools)
+            return new_msg[0]
+
+    async def _execute_tool_call(self, tool_call, newest_messages, chain, chain_id, depth, have_set_tools, enable_streaming):
+        """Execute a tool call with optional streaming support."""
+        tool_name = tool_call["function"]["name"]
+        tool_input = tool_call["function"]["arguments"]
+        
+        if enable_streaming:
+            # Emit tool call start event
+            await self.streaming_manager.emit_event(StreamEvent(
+                event_type=StreamEventType.TOOL_CALL_START,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={"tool_name": tool_name, "arguments": tool_input},
+                step=depth,
+                depth=depth
+            ))
+        
+        # Create action node
+        action_node = chain.add_node(
+            type="Action",
+            messages=deepcopy(newest_messages),
+            description=tool_name
+        )
+        
+        # Set up tools if needed
+        if not have_set_tools:
+            await self.set_tools(chain_id, chain.info)
+            have_set_tools = True
+
+        # Execute tool call
+        result = await submit_tool_call(tool_name, tool_input, id=chain_id)
+        
+        if enable_streaming:
+            # Emit tool observation event
+            await self.streaming_manager.emit_event(StreamEvent(
+                event_type=StreamEventType.TOOL_OBSERVATION,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={
+                    "tool_name": tool_name,
+                    "observation": result["observation"],
+                    "status": result["status"]
+                },
+                step=depth,
+                depth=depth
+            ))
+            
+            # Emit tool call end event
+            await self.streaming_manager.emit_event(StreamEvent(
+                event_type=StreamEventType.TOOL_CALL_END,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={"tool_name": tool_name, "result": result},
+                step=depth,
+                depth=depth
+            ))
+        
+        # Create action input node
+        action_input_node = chain.add_node(
+            type="Action Input",
+            messages=deepcopy(newest_messages),
+            description=result.get("arguments", "")
+        )
+        
+        # Process observation
+        observation = result["observation"]
+        observation_json = json.dumps({
+            "name": result["name"],
+            "content": observation,
+        }, indent=4)
+        
+        action_input_node.observation = observation_json
+        action_input_node.observation_code = result["status"]
+        newest_messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": [{"type": "text", "text": observation_json}],
+        })
+        action_input_node.messages = deepcopy(newest_messages)
+        action_input_node.is_terminal = result["status"] in self.terminal_status
+        
+        return action_input_node
+
+    async def _finalize_chain(self, chain_id, chain, current_node, depth, enable_streaming):
+        """Finalize the chain with reward calculation and cleanup."""
         if self._reward_fn is not None:
             trajectory = current_node.messages
             final_response = self.extract_final_response(trajectory)
@@ -369,12 +487,19 @@ class ChainGeneration:
             chain.info["reward"] = await self._reward_fn(prediction=final_response, **other_args, trajectory=trajectory, id=chain_id)
         else:
             chain.info["reward"] = None
+            
         await self.release_resources(chain_id)
 
-        await done_queue.put((chain_id, chain, current_node))
-
-        self.finished_chains_count += 1
-        self.monitor_chain()
+        if enable_streaming:
+            # Emit chain end event
+            await self.streaming_manager.emit_event(StreamEvent(
+                event_type=StreamEventType.CHAIN_END,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={"final_depth": depth, "reward": chain.info.get("reward")},
+                step=depth,
+                depth=depth
+            ))
 
     async def release_resources(self, id: str) -> None:
         for tool in self.tools:

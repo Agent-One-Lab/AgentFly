@@ -1,4 +1,7 @@
 # AgentFly: Scalable and Extendable Reinforcement Larning for LLM Agents
+<div align="center">
+[📃paper]() &#124; [📖documentation]()
+</div>
 
 This library is an extandable framework for building LLM agents with reinforcement learning. It provides a flexible and powerful system for creating agent that interact with tools, learn from rewards in multi-turn manner and complete tasks automatically.
 ![Overview](assets/images/overview.png)
