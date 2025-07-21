@@ -11,6 +11,6 @@ sphinx:
 
 python:
   install:
+    - requirements: agents/requirements.txt
+    - requirements: verl/requirements.txt
     - requirements: docs/requirements-docs.txt
-    - method: pip
-      path: .
