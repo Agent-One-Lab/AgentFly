@@ -37,5 +37,5 @@ jobs:
       - name: Run main repo CPU-only tests
         run: |
           cd agents
-          pytest tests/unit \
+          PYTHONPATH=$(pwd) pytest tests/unit \
             --ignore=tests/unit/agents
