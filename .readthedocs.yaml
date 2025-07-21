@@ -1,6 +1,9 @@
-# .readthedocs.yaml (identical structure to veRL’s)           #:contentReference[oaicite:2]{index=2}
 version: 2
 
+submodules:
+  include: all
+  recursive: true
+  
 build:
   os: ubuntu-22.04
   tools:
