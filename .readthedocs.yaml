@@ -1,8 +1,4 @@
 version: 2
-
-submodules:
-  include: all
-  recursive: true
   
 build:
   os: ubuntu-22.04
@@ -15,5 +11,4 @@ sphinx:
 python:
   install:
     - requirements: agents/requirements.txt
-    - requirements: verl/requirements.txt
     - requirements: docs/requirements-docs.txt
