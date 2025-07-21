@@ -7,13 +7,18 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Get parent folder
 AGENT_HOME = os.path.dirname(__file__).split("/")[:-3]
+
 AGENT_HOME = "/".join(AGENT_HOME)
 
 AGENT_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
+USER_CACHE_DIR = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+
+AGENT_CACHE_DIR = os.path.join(USER_CACHE_DIR, "AgentFly")
+
 AGENT_CONFIG_DIR = os.path.join(os.path.dirname(__file__), "configs")
 
-ENROOT_HOME = os.path.join(os.path.dirname(__file__), "data", "enroot")
+ENROOT_HOME = os.path.join(AGENT_CACHE_DIR, "enroot")
 
 if not os.path.exists(os.path.join(ENROOT_HOME, "images")):
     os.makedirs(os.path.join(ENROOT_HOME, "images"))
