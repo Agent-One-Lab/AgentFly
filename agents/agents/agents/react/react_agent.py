@@ -3,7 +3,7 @@
 import json
 from typing import Any, Callable, Dict, List, Tuple
 from ..utils.json import jsonish
-from agents.tools.tool_base import Tool
+from ...tools.tool_base import Tool
 try:
     from verl.protocol import DataProto
 except ImportError:
