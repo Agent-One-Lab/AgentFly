@@ -36,5 +36,6 @@ jobs:
 
       - name: Run main repo CPU-only tests
         run: |
-          pytest agents/tests/unit \
-            --ignore=agents/tests/unit/agents
+          cd agents
+          pytest tests/unit \
+            --ignore=tests/unit/agents
