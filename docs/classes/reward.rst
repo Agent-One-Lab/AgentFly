@@ -1,9 +1,12 @@
 Reward
 ==============
 
-.. currentmodule:: reward_base
-.. automodule:: agents.rewards.reward_base
+.. autoclass:: agents.rewards.reward_base.RewardFunction
     :members:
-    :undoc-members:
-    :show-inheritance:
+    :special-members: __call__
+
+.. autofunction:: agents.rewards.reward_base.reward
+    :noindex:
+
+
 

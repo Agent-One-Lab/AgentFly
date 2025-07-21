@@ -56,6 +56,13 @@ def make_request(url, payload, headers, timeout=20):
     
 @tool(env_cls=PythonSandboxEnv, name="code_interpreter", description="Run the code in docker container and return the output from stdout or stderr", stateful=True, pool_size=16)
 async def code_interpreter(code: str, env: PythonSandboxEnv):
+    """
+    Run the code in docker container and return the output from stdout or stderr
+    Args:
+        code (str): The code to run.
+    Returns:
+        str: The output from stdout or stderr
+    """
     try:
         obs = await env.step(code)
         return obs

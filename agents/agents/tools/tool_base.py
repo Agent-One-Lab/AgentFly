@@ -18,11 +18,23 @@ from ..envs.manager.env_manager import EnvironmentManager
 class Tool:
     """
     Universal tool wrapper that can handle both stateful and non-stateful tools.
+
     - For stateful tools: manages environments and pools
+    
     - For non-stateful tools: works like a simple wrapper
     
-    Call signature for stateful tools:   tool(action=..., id=...)
-    Call signature for non-stateful tools: tool(action=...)
+    
+    Call signature for stateful tools:
+    
+    .. code-block:: python
+
+        tool(action=..., id=...)
+
+    Call signature for non-stateful tools:
+    
+    .. code-block:: python
+
+        tool(action=...)
     """
     def __init__(
         self,
@@ -77,7 +89,18 @@ class Tool:
 
         
     async def __call__(self, **kwargs):
-        # Process arguments differently based on whether it's stateful
+        """
+        Call the tool with the given arguments.
+        Args:
+            **kwargs: The arguments to call the tool with. The arguments should be in the schema of the tool and must be specified with arg=value. For stateful tools, the id is also required for isolation.
+        Returns:
+            dict: The result of the tool call. The result is a dict with the following keys:
+                - "name": The name of the tool.
+                - "arguments": The arguments used to call the tool.
+                - "observation": The observation of the tool call.
+                - "status": The status of the tool call.
+                - "info": The info of the tool call.
+        """
         try:
             if not self.is_stateful:
                 # For non-stateful tools, directly execute the function
@@ -209,18 +232,19 @@ def tool(
     """
     Decorator that registers a callable as a tool.
     Creates a Tool instance that can handle both stateful and non-stateful behavior.
+
     Args:
-        name: The name of the tool.
-        description: The description of the tool.
-        status: We use this to control the chain search workflow.
-            "terminal": The tool call is the final step in the chain. The search will be stopped.
-            "continue": The tool call is not the final step in the chain. The search will continue.
-        max_length: The maximum length of the tool's output/observation.
-        auto_register: Whether to automatically register the tool. This is used to get tool by name.
-        stateful: Whether the tool is stateful. A stateful tool is a tool that manages its own environment.
-        env_cls: The environment class for the tool.
-        env_kwargs: The kwargs for the environment class.
-        pool_size: The size of the pool for the environment.
+        name (str): The name of the tool.
+        description (str): The description of the tool.
+        status (str): We use this to control the chain search workflow.
+            - "terminal": The tool call is the final step in the chain. The search will be stopped.
+            - "continue": The tool call is not the final step in the chain. The search will continue.
+        max_length (int): The maximum length of the tool's output/observation.
+        auto_register (bool): Whether to automatically register the tool. This is used to get tool by name.
+        stateful (bool): Whether the tool is stateful. A stateful tool is a tool that manages its own environment.
+        env_cls (type[BaseEnv]): The environment class for the tool.
+        env_kwargs (dict): The kwargs for the environment class.
+        pool_size (int): The size of the pool for the environment.
     """
     def decorator(func):
         nonlocal name, description
@@ -370,6 +394,9 @@ def hallucination_tool(tool_name):
 @tool()
 def invalid_input_tool(tool_input):
     return f"Invalid input: {tool_input}, input mush be a valid JSON object."
+
+
+
 
 
 if __name__ == "__main__":

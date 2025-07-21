@@ -122,6 +122,9 @@ class Chain:
 
 
 class ChainGeneration:
+    """
+    Basic class for chain-based rollout. It starts multiple chains and runs them asynchronously.
+    """
     def __init__(self):
         self.reset()
         self.chains: Dict[str, Chain] = {}
@@ -132,10 +135,6 @@ class ChainGeneration:
         self.finished_chains_count = 0
         self.initialize_monitor()
         self.monitor_info = defaultdict(list)
-        # Apply timing to the methods
-        # self.run = self.timer.timed_function("chain")(self.run)
-        # self.take_actions = self.timer.timed_function("actions")(self.take_actions)
-        # self.get_agent_responses = self.timer.timed_function("agent")(self.get_agent_responses)
 
     def reset(self) -> None:
         self.status_code: str = "continue"
@@ -155,8 +154,8 @@ class ChainGeneration:
             "chains": [chain.to_json() for chain in self.chains]
         }
 
-    def initialise_chains(self, msgs_list, info_list, num_chains):
-        chains   = {}
+    def initialise_chains(self, msgs_list: List[List[Dict]], info_list: List[Dict], num_chains: int) -> Tuple[Dict[str, Chain], Dict[str, Node]]:
+        chains = {}
         start_nodes = {}
         group_ids = [str(uuid.uuid4()) for _ in range(len(msgs_list))]
 
@@ -174,137 +173,8 @@ class ChainGeneration:
                 start_nodes[cid] = root
 
         return chains, start_nodes
-    
-    # TODO: We disable the synchronous run for now. But we may need it for transformers backend
-    def run(self,
-        max_steps: int,
-        start_messages: Union[List[List[dict]], List[dict]],
-        num_chains: int=1,
-        generation_config: Dict={}
-    ) -> None:
-        """
-        First turn: generate num_chains candidate responses.
-        This assumes that self.parse supports a parameter like num_return_sequences.
-        """
-        assert max_steps >= 1, "max_steps must be at least 1."
-        maximum_parallel_size = len(start_messages) * num_chains
-        for tool in self.tools:
-            if maximum_parallel_size > tool.parallel_size:
-                raise ValueError(f"Batch size {maximum_parallel_size} is greater than the maximum parallel size {tool.parallel_size} for tool {tool.name}.")
-    
-        messages_list, other_info_list = self.prepare_chain_messages(start_messages)
 
-        responses = self.generate(messages_list_or_inputs=messages_list, tools=self.tools, num_return_sequences=num_chains, **generation_config)
-        first_responses = self.parse(responses, self.tools)
-
-        chains, first_nodes = self.initialise_chains(
-            first_responses,
-            messages_list,
-            other_info_list,
-            num_chains
-        )
-        self.chains = chains
-        self.current_nodes = first_nodes
-        self.active_nodes = self.current_nodes
-        self.logger.info(f"Initialized {len(self.chains)} chains.")
-        self._run_chain(max_steps)
-
-    def _run_chain(self, max_steps: int) -> Node:
-        depth = 0
-        while True:
-            new_active_nodes = {}
-            for id, node in self.active_nodes.items():
-                if depth >= max_steps:
-                    node.is_pruned = True
-                elif node.is_terminal:
-                    pass
-                else:
-                    new_active_nodes[id] = node
-            self.active_nodes = new_active_nodes
-
-            if len(self.active_nodes) == 0:
-                break
-            self.take_actions()
-            new_active_nodes = {}
-            for id, node in self.active_nodes.items():
-                if node.is_terminal:
-                    pass
-                else:
-                    new_active_nodes[id] = node
-            self.active_nodes = new_active_nodes
-            self.get_agent_responses()
-            depth += 1
-            if len(self.active_nodes) == 0:
-                break
-            
-
-    def take_actions(self):
-        """
-        For each chain, call the tool and update the chain.
-        """
-        tool_calls = []
-        node_ids_for_tool_calls = []
-        for id, node in self.active_nodes.items():
-            if node.messages[-1].get("tool_calls"):
-                tool_calls.extend(node.messages[-1].get("tool_calls"))
-                node_ids_for_tool_calls.extend([id] * len(node.messages[-1].get("tool_calls")))
-
-        tool_names = [tool_call["function"]["name"] for tool_call in tool_calls]
-        tool_inputs = [tool_call["function"]["arguments"] for tool_call in tool_calls]
-        results = submit_tool_calls(tool_names, tool_inputs, node_ids_for_tool_calls)
-        
-        for result, node_id_for_tool_call, tool_call in zip(results, node_ids_for_tool_calls, tool_calls):
-            self.current_nodes[node_id_for_tool_call] = self.chains[node_id_for_tool_call].add_node(
-                type="Action",
-                messages=deepcopy(self.current_nodes[node_id_for_tool_call].messages),
-                description=result.get("name", "")
-            )
-            self.current_nodes[node_id_for_tool_call] = self.chains[node_id_for_tool_call].add_node(
-                type="Action Input",
-                messages=deepcopy(self.current_nodes[node_id_for_tool_call].messages),
-                description=result.get("arguments", "")
-            )
-            observation = result["observation"]
-            observation_json = json.dumps({
-                "name": result["name"],
-                "content": observation,
-            }, indent=4)
-            self.current_nodes[node_id_for_tool_call].observation = observation_json
-            self.current_nodes[node_id_for_tool_call].observation_code = result["status"]
-            self.current_nodes[node_id_for_tool_call].messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": observation_json,
-            })
-            self.current_nodes[node_id_for_tool_call].is_terminal = result["status"] in ["finish"]
-
-        # Update active nodes
-        self.active_nodes = {node_id_for_tool_call: self.current_nodes[node_id_for_tool_call] for node_id_for_tool_call in node_ids_for_tool_calls if not self.current_nodes[node_id_for_tool_call].is_terminal}
-
-    def get_agent_responses(self, num_return_sequences: int = 1) -> Tuple[dict, int, int]:
-        # Retrieve available tools from the environment.
-        assert num_return_sequences == 1, "Only support one return sequence for intermediate generation for now."
-        messages_list = []
-        ids = []
-        for id, node in self.active_nodes.items():
-            messages_list.append(node.messages)
-            ids.append(id)
-        
-        responses = self.generate(messages_list, tools=self.tools, num_return_sequences=num_return_sequences)
-        new_messages_list = self.parse(responses, tools=self.tools)
-        new_ids = []
-        for id in ids:
-            new_ids.extend([id] * num_return_sequences)
-        for new_messages, message_id in zip(new_messages_list, new_ids):
-            self.current_nodes[message_id] = self.chains[message_id].add_node(
-                type="Thought",
-                messages=deepcopy(self.active_nodes[message_id].messages),
-                description=new_messages.get("content", "")
-            )
-            self.current_nodes[message_id].messages.append(new_messages)
-            self.active_nodes[message_id] = self.current_nodes[message_id]
-
-    def get_messages(self)  -> List[Any]:
+    def get_messages(self) -> List[Any]:
         messages = []
         for id, node in self.current_nodes.items():
             info = self.chains[id].info
@@ -314,23 +184,7 @@ class ChainGeneration:
             messages.append(message_item)
         return messages
 
-
     def prepare_chain_messages(self, start_messages: Union[List[dict], np.ndarray]):
-        """
-        Input format:
-            List[dict] | np.ndarray: A list/array of dictionaries with the following format:
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "..."
-                        }
-                    ]
-                    "info": {
-                        "question": "..."
-                    }
-                }
-        """
         if isinstance(start_messages, np.ndarray):
             start_messages_list = start_messages.tolist()
         else:
@@ -359,10 +213,36 @@ class ChainGeneration:
     
     async def run_async(self,
         max_steps: int,
-        start_messages,
+        start_messages: Union[List[dict], np.ndarray],
         num_chains: int,
-        generation_config=None
+        generation_config: Optional[Dict[str, Any]] = None
     ):
+        """
+        Run the chain-based rollout.
+        
+        Args:
+            max_steps: Maximum number of steps for each chain.
+            start_messages: List of messages to start the chains. Each message should be a dict
+                with "messages" key containing a list of message dictionaries.
+            num_chains: Number of chains to run for each message.
+            generation_config: Generation configuration dictionary.
+        
+        Example:
+            .. code-block:: python
+            
+                start_messages = [
+                    {
+                        "messages": [{"role": "user", "content": "..."}],
+                        "info": {"question": "..."},
+                        "answer": "..."
+                    },
+                    {
+                        "messages": [{"role": "user", "content": "..."}],
+                        "info": {"question": "..."},
+                        "answer": "..."
+                    }
+                ]
+        """
         assert max_steps >= 1, "max_steps must be at least 1."
         Monitor.ensure_started()
         self.reset()
@@ -496,23 +376,23 @@ class ChainGeneration:
         self.finished_chains_count += 1
         self.monitor_chain()
 
-    async def release_resources(self, id):
+    async def release_resources(self, id: str) -> None:
         for tool in self.tools:
             if isinstance(tool, Tool):
                 await tool.release(id=id)
         if self._reward_fn is not None:
             await self._reward_fn.release(id=id)
 
-    async def set_tools(self, id: str, env_args: Dict):
+    async def set_tools(self, id: str, env_args: Dict[str, Any]) -> None:
         for tool in self.tools:
             if isinstance(tool, Tool):
                 await tool.set_env(id, env_args)
 
-    def initialize_monitor(self):
+    def initialize_monitor(self) -> None:
         Monitor.add_sink("jsonl", JsonlSink(f"{AGENT_DATA_DIR}/demo_metrics.jsonl"))
         Monitor.add_sink("wandb", WandbSink(project=self.project_name, run_name=self.run_name))
 
-    def monitor_step(self):
+    def monitor_step(self) -> None:
         messages = self.get_messages()
         avg_turns = 0
         avg_tool_calls = 0
@@ -599,9 +479,9 @@ class ChainGeneration:
                 emit(evt)
 
 
-    def monitor_chain(self):
+    def monitor_chain(self) -> None:
         self.monitor_info['Agent/chains'].append(self.finished_chains_count)
-        for tool in self. tools:
+        for tool in self.tools:
             if tool.is_stateful and tool.pool_size > 0:
                 self.monitor_info[f"Agent/Tool/{tool.name}/used_env_size"].append(tool.used_env_size)
         

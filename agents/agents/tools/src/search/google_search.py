@@ -82,8 +82,11 @@ async def req_async(query, n=10):
 @tool(name="google_search", description="Get relevant information from Google Search.", stateful=True, env_cls=RedisEnv, pool_size=1)
 async def google_search_serper(query, env: RedisEnv):
     """
-    args:
+    Get relevant information from Google Search. Implemented by Serper API.
+    Args:
         query (str): The query to search for.
+    Returns:
+        str: The context from the search results based on snippets.
     """
     if env._exists(query):
         result = await env.step(query)

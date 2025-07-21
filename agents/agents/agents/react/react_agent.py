@@ -2,7 +2,7 @@
 
 import json
 from typing import Any, Callable, Dict, List, Tuple
-
+from ..utils.json import jsonish
 from ...tools.tool_base import Tool
 try:
     from verl.protocol import DataProto
@@ -101,7 +101,7 @@ class ReactAgent(BaseAgent):
             **kwargs
         )
         
-    def parse(self, responses: List[str], tools: List[Any]) -> Tuple[dict, int, int]:
+    def parse(self, responses: List[str], tools: List[Any]) -> List[Dict]:
         """
         Generates an assistant message compatible with tool-calling.
         Returns:
@@ -125,6 +125,8 @@ class ReactAgent(BaseAgent):
             thought = thought_action["thought"]
             action = thought_action["action"]
             action_input = thought_action["input"]
+            if action_input is not None:
+                action_input = jsonish(action_input)
             if action is None:
                 tool_calls = []
             else:
