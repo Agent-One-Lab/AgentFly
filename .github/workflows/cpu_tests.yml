@@ -1,0 +1,40 @@
+name: CPU-only Unit Tests (agents)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  cpu-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies (main repo)
+        run: |
+          pip install -r agents/requirements.txt
+
+      - name: Install Enroot (standard flavor)
+        run: |
+          arch=$(dpkg --print-architecture)
+          curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot_3.5.0-1_${arch}.deb
+          curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot+caps_3.5.0-1_${arch}.deb
+          sudo apt-get update
+          sudo apt-get install -y ./*.deb
+
+      - name: Run main repo CPU-only tests
+        run: |
+          pytest agents/tests/unit \
+            --ignore=agents/tests/unit/agents
