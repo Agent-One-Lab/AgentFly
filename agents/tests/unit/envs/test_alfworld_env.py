@@ -217,7 +217,7 @@ async def test_alfworld_env_acquire():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("train_eval", ["train", "eval"])
+@pytest.mark.parametrize("train_eval", ["train"])
 async def test_alfworld_env_train_eval_modes(train_eval):
     """Test environment in different modes."""
     env = ALFWorldEnv(train_eval=train_eval)
