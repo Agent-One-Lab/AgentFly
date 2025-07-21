@@ -56,6 +56,8 @@ Decoupled agent and training module. Simply customize your own agent, which can 
 ## Contribute & Discussion
 [WeChat|微信](assets/images/wechat.jpg)
 
+[Discord](https://discord.gg/CchUj7Sp)
+
 ## Training Curves
 Reward curves on Qwen2.5-Instruct 3B and 7B models.
 ![Curves](assets/images/training_curves.png)
