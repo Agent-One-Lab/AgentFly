@@ -108,15 +108,16 @@ def reward(
     
     Args:
         name: The name of the reward (defaults to function name)
-        llm_config: Configuration for an LLM backend (if this reward uses an LLM judge)
+        env_cls: The environment class for the reward
+        env_kwargs: The kwargs for the environment class
+        pool_size: The size of the pool for the environment
         auto_register: Whether to automatically register in REWARD_REGISTRY
         
     Returns:
         A RewardFunction instance
         
     Raises:
-        ValueError: If the decorated function does not have exactly two parameters: prediction and golden_answer
-                    or three parameters: prediction, golden_answer, llm_backend (when llm_config is provided)
+        ValueError: If the decorated function does not have "prediction" as the parameter, it will raise an error.
     """
     def decorator(func):
         # Validate function parameters
