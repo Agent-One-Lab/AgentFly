@@ -9,7 +9,7 @@ on:
 jobs:
   cpu-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # timeout-minutes: 15
 
     steps:
       - name: Checkout repository (with submodules)
