@@ -1,6 +1,6 @@
 import pytest
 from agents.tools import code_interpreter
-from agents.tools.tool_base import tool, current_env, Tool
+from agents.tools.tool_base import tool, Tool
 from agents.envs.python_env import PythonSandboxEnv
 
 
