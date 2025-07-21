@@ -37,5 +37,5 @@ jobs:
 
       - name: Test - all unit tests
         run: |
-          python -m pytest tests/unit/envs/test_alfworld_env.py \ 
-            t
+          cd agents
+          python -m pytest tests/unit/envs/test_alfworld_env.py 
