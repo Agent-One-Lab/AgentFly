@@ -66,7 +66,7 @@ async def code_interpreter(code: str, env: PythonSandboxEnv):
     code = str(code)
     try:
         obs = await env.step(code)
-        return obs
+        return str(obs)
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
 
