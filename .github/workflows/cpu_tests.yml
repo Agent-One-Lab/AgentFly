@@ -75,12 +75,12 @@ jobs:
           python -m pytest tests/unit/envs/test_alfworld_env.py
 
     test-code-env:
-    needs: setup-env-and-cache
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+      needs: setup-env-and-cache
+      runs-on: ubuntu-latest
+      timeout-minutes: 10
 
-    steps:
-      - name: Run code env tests
-        run: |
-          cd agents
-          python -m pytest tests/unit/envs/test_code_env.py
+      steps:
+        - name: Run code env tests
+          run: |
+            cd agents
+            python -m pytest tests/unit/envs/test_code_env.py
