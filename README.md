@@ -1,4 +1,7 @@
-# AgentFly: Scalable and Extendable Reinforcement Larning for LLM Agents
+# AgentFly: Scalable and Extendable Reinforcement Learning for LLM Agents
+
+![Static Badge](https://img.shields.io/badge/Docs-AgentFly-%23669bbc?style=flat&logo=%F0%9F%93%9A&link=https%3A%2F%2Fagentfly.readthedocs.io%2F)
+
 
 This library is an extandable framework for building LLM agents with reinforcement learning. It provides a flexible and powerful system for creating agent that interact with tools, learn from rewards in multi-turn manner and complete tasks automatically.
 ![Overview](assets/images/overview.png)
@@ -55,6 +58,8 @@ Decoupled agent and training module. Simply customize your own agent, which can 
 
 ## Contribute & Discussion
 [WeChat|微信](assets/images/wechat.jpg)
+
+[Discord](https://discord.gg/CchUj7Sp)
 
 ## Training Curves
 Reward curves on Qwen2.5-Instruct 3B and 7B models.
