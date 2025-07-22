@@ -46,7 +46,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-agentfly-cache
 
-      - name: Test - all unit tests
+      - name: Test - alfworld env tests
         run: |
           cd agents
           python -m pytest tests/unit/envs/test_alfworld_env.py 
