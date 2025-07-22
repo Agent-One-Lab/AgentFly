@@ -35,6 +35,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ./*.deb
 
+      - name: Clear AgentFly cache
+        run: rm -rf ~/.cache/AgentFly
+
+      # - name: Cache AgentFly cache
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/.cache/AgentFly
+      #     key: ${{ runner.os }}-agentfly-cache
+      #     restore-keys: |
+      #       ${{ runner.os }}-agentfly-cache
+
       - name: Test - all unit tests
         run: |
           cd agents
