@@ -14,7 +14,7 @@ from tqdm.asyncio import tqdm_asyncio
 from ...utils.monitor import JsonlSink, MetricEvent, Monitor, WandbSink, emit, serialize_for_json
 from ... import AGENT_DATA_DIR
 import wandb
-from .streaming_observer import StreamingManager, StreamEvent, StreamEventType
+from .streaming_observer import ConsoleStreamObserver, StreamingManager, StreamEvent, StreamEventType
 
 @dataclass
 class Node:
@@ -214,6 +214,14 @@ class ChainGeneration:
             other_info_list.append(info)
         
         return messages_list, other_info_list
+
+    def validate_run_args(self, max_steps: int, num_chains: int):
+        assert max_steps >= 1, "max_steps must be at least 1."
+        assert num_chains >= 1, "num_chains must be at least 1."
+        for observer in self.streaming_manager.observers:
+            if isinstance(observer, ConsoleStreamObserver):
+                assert num_chains == 1, "num_chains must be 1 when ConsoleStreamObserver is used."
+        
     
     async def run_async(self,
         max_steps: int,
@@ -234,7 +242,7 @@ class ChainGeneration:
             enable_streaming: Whether to enable streaming mode.
             streaming_callback: Optional callback for streaming events.
         """
-        assert max_steps >= 1, "max_steps must be at least 1."
+        self.validate_run_args(max_steps, num_chains)
         Monitor.ensure_started()
         self.reset()
         messages_list, other_info_list = self.prepare_chain_messages(start_messages)
@@ -260,15 +268,15 @@ class ChainGeneration:
         done_q = asyncio.Queue()
         tasks = [
             asyncio.create_task(
-                self._run_single_chain(
-                    cid,
-                    node,
-                    chains[cid],
-                    tool_schemas,
-                    max_steps=max_steps,
-                    done_queue=done_q,
-                    enable_streaming=enable_streaming,
-                    streaming_callback=streaming_callback)
+                    self._run_single_chain(
+                        cid,
+                        node,
+                        chains[cid],
+                        tool_schemas,
+                        max_steps=max_steps,
+                        done_queue=done_q,
+                        enable_streaming=enable_streaming
+                    )
                 )
                 for cid, node in first_nodes.items()
         ]
@@ -291,8 +299,7 @@ class ChainGeneration:
         tools: List[Dict],
         max_steps: int,
         done_queue: asyncio.Queue,
-        enable_streaming: bool = False,
-        streaming_callback: Optional[Callable] = None,
+        enable_streaming: bool = False
     ):
         """
         Run a single chain with optional streaming support.
@@ -302,12 +309,12 @@ class ChainGeneration:
         have_set_tools = False
 
         while not current_node.is_terminal and depth < max_steps:
-            newest_messages = current_node.messages
+            newest_messages = deepcopy(current_node.messages)
             
             if not current_node.is_terminal:
                 # Generate response
                 new_msg = await self._generate_response(
-                    current_node, tools, depth, chain_id, enable_streaming, streaming_callback
+                    current_node, tools, depth, chain_id, enable_streaming
                 )
                 
                 newest_messages.append(new_msg)
@@ -340,7 +347,7 @@ class ChainGeneration:
         self.finished_chains_count += 1
         self.monitor_chain()
 
-    async def _generate_response(self, current_node, tools, depth, chain_id, enable_streaming, streaming_callback):
+    async def _generate_response(self, current_node, tools, depth, chain_id, enable_streaming):
         """Generate response with optional streaming support."""
         if enable_streaming:
             # Emit generation start event
@@ -353,9 +360,22 @@ class ChainGeneration:
                 depth=depth
             ))
 
-            # Use streaming generation if available
-            if hasattr(self, 'generate_streaming') and streaming_callback:
-                async def stream_callback(chunk: str):
+            # Check if we have streaming capabilities
+            has_streaming = False
+            if hasattr(self, 'generate_streaming'):
+                has_streaming = True
+            elif hasattr(self, 'llm_engine') and hasattr(self.llm_engine, 'generate_streaming'):
+                has_streaming = True
+                # Create a wrapper to use the LLM engine's streaming
+                async def generate_streaming_wrapper(messages_list, **kwargs):
+                    async for chunk in self.llm_engine.generate_streaming(messages_list, **kwargs):
+                        yield chunk
+                self.generate_streaming = generate_streaming_wrapper
+
+            if has_streaming:
+                # Collect full response from streaming
+                full_response = ""
+                async for chunk in self.generate_streaming([current_node.messages], tools=tools):
                     await self.streaming_manager.emit_event(StreamEvent(
                         event_type=StreamEventType.LLM_GENERATION_CHUNK,
                         chain_id=chain_id,
@@ -364,13 +384,8 @@ class ChainGeneration:
                         step=depth,
                         depth=depth
                     ))
-                    if streaming_callback:
-                        await streaming_callback(chunk)
-                
-                # Collect full response from streaming
-                full_response = ""
-                async for chunk in self.generate_streaming([current_node.messages], tools=tools, streaming_callback=stream_callback):
-                    full_response += chunk
+                    # chunk is the whole generated text
+                    full_response = chunk
                 
                 # Emit generation end event
                 await self.streaming_manager.emit_event(StreamEvent(
@@ -389,6 +404,37 @@ class ChainGeneration:
                 # Fallback to non-streaming generation
                 responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
                 new_msg = self.parse(responses, self.tools)
+                
+                # Emit a single chunk event for the full response
+                full_response = new_msg[0].get("content", "")
+                if isinstance(full_response, list) and len(full_response) > 0:
+                    # Handle case where content is a list of content blocks
+                    if isinstance(full_response[0], dict) and "text" in full_response[0]:
+                        full_response = full_response[0]["text"]
+                    else:
+                        full_response = str(full_response)
+                elif not isinstance(full_response, str):
+                    full_response = str(full_response)
+                
+                await self.streaming_manager.emit_event(StreamEvent(
+                    event_type=StreamEventType.LLM_GENERATION_CHUNK,
+                    chain_id=chain_id,
+                    timestamp=time.time(),
+                    data={"content": full_response},
+                    step=depth,
+                    depth=depth
+                ))
+                
+                # Emit generation end event
+                await self.streaming_manager.emit_event(StreamEvent(
+                    event_type=StreamEventType.LLM_GENERATION_END,
+                    chain_id=chain_id,
+                    timestamp=time.time(),
+                    data={"full_response": full_response},
+                    step=depth,
+                    depth=depth
+                ))
+                
                 return new_msg[0]
         else:
             # Non-streaming generation
@@ -401,17 +447,6 @@ class ChainGeneration:
         tool_name = tool_call["function"]["name"]
         tool_input = tool_call["function"]["arguments"]
         
-        if enable_streaming:
-            # Emit tool call start event
-            await self.streaming_manager.emit_event(StreamEvent(
-                event_type=StreamEventType.TOOL_CALL_START,
-                chain_id=chain_id,
-                timestamp=time.time(),
-                data={"tool_name": tool_name, "arguments": tool_input},
-                step=depth,
-                depth=depth
-            ))
-        
         # Create action node
         action_node = chain.add_node(
             type="Action",
@@ -423,6 +458,7 @@ class ChainGeneration:
         if not have_set_tools:
             await self.set_tools(chain_id, chain.info)
             have_set_tools = True
+
 
         # Execute tool call
         result = await submit_tool_call(tool_name, tool_input, id=chain_id)
@@ -442,15 +478,6 @@ class ChainGeneration:
                 depth=depth
             ))
             
-            # Emit tool call end event
-            await self.streaming_manager.emit_event(StreamEvent(
-                event_type=StreamEventType.TOOL_CALL_END,
-                chain_id=chain_id,
-                timestamp=time.time(),
-                data={"tool_name": tool_name, "result": result},
-                step=depth,
-                depth=depth
-            ))
         
         # Create action input node
         action_input_node = chain.add_node(

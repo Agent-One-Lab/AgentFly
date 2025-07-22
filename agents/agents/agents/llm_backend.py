@@ -202,6 +202,35 @@ class VLLMBackend(LLMBackend):
     def generate_async(self, messages_list: str, **kwargs) -> str:
         raise NotImplementedError("VLLM backend does not support async generation")
 
+    async def generate_streaming(self, messages_list: List[List[Dict]], streaming_callback: Optional[Callable] = None, **kwargs) -> AsyncGenerator[str, None]:
+        """Generate text with streaming support using vLLM"""
+        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
+        temperature = kwargs.get("temperature", self.temperature)
+        sampling_params = SamplingParams(
+            n=1,
+            max_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+
+        tools = kwargs.get("tools", None)
+        prompts, vision_inputs = self.apply_chat_template(messages_list, self.template, tools=tools)
+        inputs = self._process_inputs(prompts, vision_inputs)
+        
+        # For streaming, we process one input at a time
+        for input_data in inputs:
+            outputs_gen = self.llm_engine.generate(
+                input_data,
+                sampling_params=sampling_params,
+                request_id=str(uuid.uuid4()),
+            )
+            
+            async for output in outputs_gen:
+                for sequence in output.outputs:
+                    # Stream each token
+                    if hasattr(sequence, 'text'):
+                        if streaming_callback:
+                            await streaming_callback(sequence.text)
+                        yield sequence.text
 
 class AsyncVLLMBackend(LLMBackend):
     """Async vLLM implementation"""
@@ -268,7 +297,7 @@ class AsyncVLLMBackend(LLMBackend):
 
         return response_texts
     
-    async def generate_streaming(self, messages_list: List[List[Dict]], streaming_callback: Optional[Callable] = None, **kwargs) -> AsyncGenerator[str, None]:
+    async def generate_streaming(self, messages_list: List[List[Dict]], **kwargs) -> AsyncGenerator[str, None]:
         """Generate text with streaming support using Async vLLM"""
         max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
         temperature = kwargs.get("temperature", self.temperature)
@@ -294,8 +323,6 @@ class AsyncVLLMBackend(LLMBackend):
                 for sequence in output.outputs:
                     # Stream each token
                     if hasattr(sequence, 'text'):
-                        if streaming_callback:
-                            await streaming_callback(sequence.text)
                         yield sequence.text
 
 class VerlBackend(LLMBackend):

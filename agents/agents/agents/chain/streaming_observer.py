@@ -1,6 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+import os
 from typing import Any, Dict, List, Optional, Callable, AsyncGenerator, Set
 from enum import Enum
 import json
@@ -119,6 +120,9 @@ class ConsoleStreamObserver(StreamObserver):
     def __init__(self, show_timestamps: bool = True, chain_filter: Optional[str] = None):
         self.show_timestamps = show_timestamps
         self.chain_filter = chain_filter  # Only show events for this chain_id
+        self.chain_colors = ["red", "green", "blue", "yellow", "magenta", "cyan"]
+        self.chain_id_data = {}
+
     
     async def on_event(self, event: StreamEvent) -> None:
         # Filter by chain if specified
@@ -126,55 +130,48 @@ class ConsoleStreamObserver(StreamObserver):
             return
             
         timestamp = f"[{event.timestamp:.2f}s] " if self.show_timestamps else ""
-        step_info = f" (step {event.step})" if event.step is not None else ""
-        depth_info = f" (depth {event.depth})" if event.depth is not None else ""
+        turn_info = f" (turn {event.step})" if event.step is not None else ""
         
         # Use different colors for different chains
-        chain_colors = ["red", "green", "blue", "yellow", "magenta", "cyan"]
-        chain_index = hash(event.chain_id) % len(chain_colors)
-        chain_color = chain_colors[chain_index]
-        
-        print(colored(f"{timestamp}Chain {event.chain_id}{step_info}{depth_info}: {event.event_type.value}", color=chain_color))
-        
-        if event.event_type == StreamEventType.LLM_GENERATION_CHUNK:
+        chain_index = hash(event.chain_id) % len(self.chain_colors)
+        chain_color = self.chain_colors[chain_index]
+        if event.chain_id not in self.chain_id_data:
+            self.chain_id_data[event.chain_id] = {
+                "color": chain_color,
+                "timestamp": event.timestamp,
+                "step": event.step,
+                "depth": event.depth,
+                "event_type": event.event_type.value,
+                "content_buffer": ""
+            }
+        else:
+            self.chain_id_data[event.chain_id]["timestamp"] = event.timestamp
+
+        if event.event_type == StreamEventType.LLM_GENERATION_START:
+            print(colored(f"{timestamp} {turn_info}", color=chain_color), end="", flush=True)
+        elif event.event_type == StreamEventType.LLM_GENERATION_CHUNK:
             content = event.data.get("content", "")
             if content:
-                print(colored(f"  → {content}", color=chain_color))
+                # clear the terminal
+                if self.chain_id_data[event.chain_id]["event_type"] == StreamEventType.LLM_GENERATION_CHUNK:
+                    print(colored(f"""{content[len(self.chain_id_data[event.chain_id]["content_buffer"]):]}""", color=chain_color), end="", flush=True)
+                    self.chain_id_data[event.chain_id]["content_buffer"] = content
+                else:
+                    self.chain_id_data[event.chain_id]["content_buffer"] = content
+                    print(colored(f"{content}", color=chain_color), end="", flush=True)
+                    self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.LLM_GENERATION_CHUNK
+        elif event.event_type == StreamEventType.LLM_GENERATION_END:
+            print(colored(f"\n{event.data.get('timestamp', '')}", color=chain_color), end="", flush=True)
+            self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.LLM_GENERATION_END
         elif event.event_type == StreamEventType.TOOL_OBSERVATION:
             observation = event.data.get("observation", "")
             tool_name = event.data.get("tool_name", "")
-            print(colored(f"  🔧 {tool_name}: {observation[:200]}{'...' if len(observation) > 200 else ''}", color=chain_color))
+            print(colored(f"Tool: [{tool_name}] {observation[:200]}{'...' if len(observation) > 200 else ''}", color=chain_color))
+            self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.TOOL_OBSERVATION
         elif event.event_type == StreamEventType.ERROR:
             error_msg = event.data.get("error", "")
             print(colored(f"  ❌ Error: {error_msg}", color=chain_color))
-
-
-class JSONStreamObserver(StreamObserver):
-    """JSON-based stream observer for structured logging"""
-    
-    def __init__(self, file_path: Optional[str] = None, chain_filter: Optional[str] = None):
-        self.file_path = file_path
-        self.chain_filter = chain_filter
-    
-    async def on_event(self, event: StreamEvent) -> None:
-        # Filter by chain if specified
-        if self.chain_filter and event.chain_id != self.chain_filter:
-            return
-            
-        event_dict = {
-            "event_type": event.event_type.value,
-            "chain_id": event.chain_id,
-            "timestamp": event.timestamp,
-            "step": event.step,
-            "depth": event.depth,
-            "data": event.data
-        }
-        
-        if self.file_path:
-            with open(self.file_path, "a") as f:
-                f.write(json.dumps(event_dict) + "\n")
-        else:
-            print(json.dumps(event_dict))
+            self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.ERROR
 
 
 class AsyncGeneratorStreamObserver(StreamObserver):
