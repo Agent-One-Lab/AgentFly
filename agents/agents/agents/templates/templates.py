@@ -145,7 +145,10 @@ class Template:
         if tools is None:
             return self.system_template.format(system_message=self.system_message)
         else:
-            return self.system_template_with_tools.format(system_message=self.system_message, tools=tools)
+            if self.system_template_with_tools:
+                return self.system_template_with_tools.format(system_message=self.system_message, tools=tools)
+            else:
+                return self.system_template.format(system_message=self.system_message)
 
     def _encode_system_message(self, content, tools=None) -> str:
         if tools is None:
