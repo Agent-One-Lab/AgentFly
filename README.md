@@ -1,9 +1,12 @@
 # AgentFly: Scalable and Extendable Reinforcement Learning for LLM Agents
 
-![Static Badge](https://img.shields.io/badge/Docs-AgentFly-%23669bbc?style=flat&logo=%F0%9F%93%9A&link=https%3A%2F%2Fagentfly.readthedocs.io%2F)
+<p align="center">
+<a href="https://arxiv.org/pdf/2507.14897"><img alt="Static Badge" src="https://img.shields.io/badge/Paper-arXiv-%23ffc8dd?style=plastic&link=https%3A%2F%2Farxiv.org%2Fpdf%2F2507.14897"><a>
+<a href="https://agentfly.readthedocs.io/"><img alt="Static Badge" src="https://img.shields.io/badge/Docs-AgentFly-%23a2d2ff?style=plastic&link=https%3A%2F%2Fagentfly.readthedocs.io%2F"><a>
+</p>
 
 
-This library is an extandable framework for building LLM agents with reinforcement learning. It provides a flexible and powerful system for creating agent that interact with tools, learn from rewards in multi-turn manner and complete tasks automatically.
+This library is an extensible framework for building LLM agents with reinforcement learning. It provides a flexible and powerful system for creating agent that interact with tools, learn from rewards in multi-turn manner and complete tasks automatically.
 ![Overview](assets/images/overview.png)
 
 ## Installation

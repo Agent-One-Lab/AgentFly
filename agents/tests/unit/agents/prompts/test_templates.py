@@ -2,7 +2,7 @@ from agents.agents.templates.utils import compare_hf_template
 from transformers import AutoTokenizer
 import pytest
 
-@pytest.mark.parametrize("template", ["qwen2.5-think"])
+@pytest.mark.parametrize("template", ["qwen2.5-think", "qwen2.5", "qwen2.5-no-tool"])
 @pytest.mark.parametrize("messages", [
     [
         {"role": "user", "content": "Hello, how are you?"},
@@ -38,6 +38,7 @@ def test_chat_template_equal(template, messages, tools, add_generation_prompt):
     template_tokenizer_mapping = {
         "qwen2.5": "Qwen/Qwen2.5-3B-Instruct",
         "qwen2.5-think": "Qwen/Qwen2.5-3B-Instruct",
+        "qwen2.5-no-tool": "Qwen/Qwen2.5-3B-Instruct",
     }
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template])
 
