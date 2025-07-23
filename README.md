@@ -1,4 +1,4 @@
-# AgentFly: Scalable and Extendable Reinforcement Learning for LLM Agents
+# AgentFly: Scalable and Extensible Reinforcement Learning for LLM Agents
 
 <p align="center">
 <a href="https://arxiv.org/pdf/2507.14897"><img alt="Static Badge" src="https://img.shields.io/badge/Paper-arXiv-%23ffc8dd?style=plastic&link=https%3A%2F%2Farxiv.org%2Fpdf%2F2507.14897"><a>
