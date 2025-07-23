@@ -54,7 +54,7 @@ def make_request(url, payload, headers, timeout=20):
 #     else:
 #         return str(response)
     
-@tool(env_cls=PythonSandboxEnv, name="code_interpreter", description="Run the code in docker container and return the output from stdout or stderr", stateful=True, pool_size=16)
+@tool(env_cls=PythonSandboxEnv, name="code_interpreter", description="Run the code in docker container and return the output from stdout or stderr. Output should be printed.", stateful=True, pool_size=16)
 async def code_interpreter(code: str, env: PythonSandboxEnv):
     """
     Run the code in docker container and return the output from stdout or stderr

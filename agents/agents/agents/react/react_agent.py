@@ -1,7 +1,7 @@
 
 
 import json
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Dict, List, Optional
 from ..utils.json import jsonish
 from ...tools.tool_base import Tool
 try:
@@ -12,12 +12,6 @@ from ..agent_base import BaseAgent
 import torch
 import numpy as np
 import re
-
-import re
-from typing import List, Dict
-
-import re
-from typing import Dict, Optional
 
 def parse_react_step(text: str) -> Dict[str, Optional[str]]:
     """
@@ -45,7 +39,32 @@ def parse_react_step(text: str) -> Dict[str, Optional[str]]:
         "input": m.group("input").strip(),
     }
 
-
+def extract_tool_calls(action_input: str) -> List[Dict]:
+    if action_input is None:
+        return []
+    
+    tool_call_str = ""
+    # Extract the tool call from the action input
+    # 1. Extract with qwen style
+    pattern = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+    m = pattern.search(action_input)
+    # If we find a tool call, extract it
+    if m:
+        tool_call_str = m.group(1).strip()
+        try:
+            tool_call = jsonish(tool_call_str)
+            return [tool_call]
+        except:
+            pass
+    
+    # 2. Extract directly
+    try:
+        tool_call = jsonish(action_input)
+        return [tool_call]
+    except:
+        pass
+    
+    return []
 
 
 ReactSystemPromptTemplate = """You are a ReAct-style agent. When you receive a user query, in each step, you must:
@@ -122,26 +141,47 @@ class ReactAgent(BaseAgent):
 
         new_messages_list = []
         for response, thought_action in zip(responses, thought_actions):
+            
             thought = thought_action["thought"]
             action = thought_action["action"]
             action_input = thought_action["input"]
-            if action_input is not None:
-                action_input = jsonish(action_input)
             if action is None:
                 tool_calls = []
             else:
-                tool_calls = [{
-                    "id": None,
-                    "type": "function",
-                    "function": {
-                        "name": action,
-                        "arguments": action_input
-                    }
-                }]
+                tool_calls = extract_tool_calls(action_input)
+            
+            formatted_tool_calls = []
+            # We only support one tool call for now
+            if len(tool_calls) == 1:
+                tool_call = tool_calls[0]
+                try:
+                    tool_call = json.loads(tool_call)
+                    # {"name": "...", "arguments": "..."}
+                    if "name" in tool_call and "arguments" in tool_call:
+                        name = tool_call["name"]
+                        arguments = tool_call["arguments"]
+                    # {"param1": "...", "param2": "..."}
+                    else:
+                        name = action
+                        arguments = tool_call
+                    formatted_tool_calls.append({
+                        "id": None,
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": arguments
+                        }
+                    })
+                except Exception as e:
+                    name = action
+                    arguments = tool_call
+            else:
+                pass
+
             message = {
                 "role": "assistant",
                 "content": [{"type": "text", "text": response}],
-                "tool_calls": tool_calls,
+                "tool_calls": formatted_tool_calls,
                 "loss": True
             }
             new_messages_list.append(message)

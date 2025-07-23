@@ -164,7 +164,7 @@ class ConsoleStreamObserver(StreamObserver):
             observation = event.data.get("observation", "")
             tool_name = event.data.get("tool_name", "")
             print(colored(f"{event.timestamp - self.chain_id_data[event.chain_id]['timestamp']:.2f}s {turn_info} =====================", color=chain_color), flush=True)
-            print(colored(f"Tool: [{tool_name}] {observation[:200]}{'...' if len(observation) > 200 else ''}", color=chain_color))
+            print(colored(f"Tool: [{tool_name}] {observation[:1024]}{'...' if len(observation) > 200 else ''}", color=chain_color))
             self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.TOOL_OBSERVATION
         elif event.event_type == StreamEventType.ERROR:
             error_msg = event.data.get("error", "")
