@@ -114,4 +114,5 @@ jobs:
         run: |
           cd agents
           python -m pytest tests/unit/envs/test_code_env.py
+          echo "Done"
           
