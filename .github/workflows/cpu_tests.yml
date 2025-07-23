@@ -7,62 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  setup-env-and-cache:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout repository (with submodules)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - name: Check for existing venv artifact
-        id: check-venv
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: python-venv
-          path: ~/venv
-      - name: Set up virtualenv and install dependencies
-        if: steps.check-venv.outcome == 'failure'
-        run: |
-          python -m venv ~/venv
-          source ~/venv/bin/activate
-          pip install -r agents/requirements.txt
-      - name: Upload venv as artifact
-        if: steps.check-venv.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-venv
-          path: ~/venv
-      - name: Cache Enroot packages
-        uses: actions/cache@v4
-        with:
-          path: ~/enroot-packages
-          key: ${{ runner.os }}-enroot-3.5.0
-          restore-keys: |
-            ${{ runner.os }}-enroot-
-
-      - name: Install Enroot (standard flavor)
-        run: |
-          if [ ! -d ~/enroot-packages ]; then
-            mkdir -p ~/enroot-packages
-            cd ~/enroot-packages
-            arch=$(dpkg --print-architecture)
-            if [ ! -f enroot_3.5.0-1_${arch}.deb ]; then
-              curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot_3.5.0-1_${arch}.deb
-              curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot+caps_3.5.0-1_${arch}.deb
-            fi
-            sudo apt-get update
-            sudo apt-get install -y ./*.deb
-          fi
-
   test-alfworld-env:
-    needs: setup-env-and-cache
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -75,6 +20,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('agents/requirements_test.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Install dependencies (main repo)
+        run: |
+          pip install -r agents/requirements_test.txt
+          pip install datasets
       - name: Cache AgentFly cache
         uses: actions/cache@v4
         with:
@@ -89,19 +45,23 @@ jobs:
           key: ${{ runner.os }}-enroot-3.5.0
           restore-keys: |
             ${{ runner.os }}-enroot-
-      - name: Download venv
-        uses: actions/download-artifact@v4
-        with:
-          name: python-venv
-          path: ~/venv
-      - name: Activate venv and run ALFWorld env tests
+      - name: install enroot
         run: |
-          source ~/venv/bin/activate
+          mkdir -p ~/enroot-packages
+          cd ~/enroot-packages
+          arch=$(dpkg --print-architecture)
+          if [ ! -f enroot_3.5.0-1_${arch}.deb ]; then
+            curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot_3.5.0-1_${arch}.deb
+            curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot+caps_3.5.0-1_${arch}.deb
+          fi
+          sudo apt-get update
+          sudo apt-get install -y ./*.deb
+      - name: Run ALFWorld env tests
+        run: |
           cd agents
           python -m pytest tests/unit/envs/test_alfworld_env.py
 
   test-code-env:
-    needs: setup-env-and-cache
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -114,6 +74,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('agents/requirements_test.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Install dependencies (main repo)
+        run: |
+          pip install -r agents/requirements_test.txt
+          pip install datasets
       - name: Cache AgentFly cache
         uses: actions/cache@v4
         with:
@@ -128,14 +99,19 @@ jobs:
           key: ${{ runner.os }}-enroot-3.5.0
           restore-keys: |
             ${{ runner.os }}-enroot-
-      - name: Download venv
-        uses: actions/download-artifact@v4
-        with:
-          name: python-venv
-          path: ~/venv
-      - name: Activate venv and run code env tests
+      - name: install enroot
         run: |
-          source ~/venv/bin/activate
+          mkdir -p ~/enroot-packages
+          cd ~/enroot-packages
+          arch=$(dpkg --print-architecture)
+          if [ ! -f enroot_3.5.0-1_${arch}.deb ]; then
+            curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot_3.5.0-1_${arch}.deb
+            curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot+caps_3.5.0-1_${arch}.deb
+          fi
+          sudo apt-get update
+          sudo apt-get install -y ./*.deb
+      - name: Run code env tests
+        run: |
           cd agents
           python -m pytest tests/unit/envs/test_code_env.py
           
