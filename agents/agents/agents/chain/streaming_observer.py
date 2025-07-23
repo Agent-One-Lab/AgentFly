@@ -128,8 +128,7 @@ class ConsoleStreamObserver(StreamObserver):
         # Filter by chain if specified
         if self.chain_filter and event.chain_id != self.chain_filter:
             return
-            
-        timestamp = f"[{event.timestamp:.2f}s] " if self.show_timestamps else ""
+
         turn_info = f" (turn {event.step})" if event.step is not None else ""
         
         # Use different colors for different chains
@@ -144,11 +143,9 @@ class ConsoleStreamObserver(StreamObserver):
                 "event_type": event.event_type.value,
                 "content_buffer": ""
             }
-        else:
-            self.chain_id_data[event.chain_id]["timestamp"] = event.timestamp
 
         if event.event_type == StreamEventType.LLM_GENERATION_START:
-            print(colored(f"{timestamp} {turn_info}", color=chain_color), end="", flush=True)
+            print(colored(f"{event.timestamp - self.chain_id_data[event.chain_id]['timestamp']:.2f}s {turn_info} =====================", color=chain_color), flush=True)
         elif event.event_type == StreamEventType.LLM_GENERATION_CHUNK:
             content = event.data.get("content", "")
             if content:
@@ -161,11 +158,12 @@ class ConsoleStreamObserver(StreamObserver):
                     print(colored(f"{content}", color=chain_color), end="", flush=True)
                     self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.LLM_GENERATION_CHUNK
         elif event.event_type == StreamEventType.LLM_GENERATION_END:
-            print(colored(f"\n{event.data.get('timestamp', '')}", color=chain_color), end="", flush=True)
+            print(colored(f"\n{event.timestamp - self.chain_id_data[event.chain_id]['timestamp']:.2f}s", color=chain_color), flush=True)
             self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.LLM_GENERATION_END
         elif event.event_type == StreamEventType.TOOL_OBSERVATION:
             observation = event.data.get("observation", "")
             tool_name = event.data.get("tool_name", "")
+            print(colored(f"{event.timestamp - self.chain_id_data[event.chain_id]['timestamp']:.2f}s {turn_info} =====================", color=chain_color), flush=True)
             print(colored(f"Tool: [{tool_name}] {observation[:200]}{'...' if len(observation) > 200 else ''}", color=chain_color))
             self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.TOOL_OBSERVATION
         elif event.event_type == StreamEventType.ERROR:
