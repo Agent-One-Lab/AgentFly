@@ -31,6 +31,34 @@ Run RL training of code
 cd verl
 bash examples/run_agents/run_code_agent.sh
 ```
+Data Format:
+Data should be a json file, which contain a list of dicts with the following keys:
+```json
+[
+    {
+        "question": ...
+        "optional_field1": ...
+        "optional_field2": ...
+        ...
+    }
+]
+```
+During training, `question` will be used to format the input messages, while other fields can be used in reward function. You can also accept `prediction` and `trajectory` as the argument, which is the agent's final response and the whole trajectory. You can use these information to calculate the reward.
+```python
+{
+    "messages": [
+        {"role": "user", "content": [{"type": "text", "text": question}]}
+    ]
+    "optional_field1": ...
+    "optional_field2": ...
+    ...
+}
+
+@reward(name="customized_reward")
+def customized_reward(prediction, trajectory, optional_field1, optional_field2):
+    # calculate reward
+    ...
+```
 
 
 ## Features
