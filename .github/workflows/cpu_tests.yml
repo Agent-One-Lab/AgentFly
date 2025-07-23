@@ -14,9 +14,9 @@ jobs:
     strategy:
       matrix:
         test-file:
+          - tests/unit/envs/ --ignore tests/unit/envs/test_alfworld_env.py --ignore tests/unit/envs/test_webshop_text_env.py
           - tests/unit/envs/test_alfworld_env.py
-          - tests/unit/envs/test_code_env.py
-          - tests/unit/envs/test_scienceworld_env.py
+          - tests/unit/envs/test_webshop_text_env.py
 
     steps:
       - name: Checkout repository (with submodules)
