@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["agents", "verl"]
+
+[project]
+name = "AgentFly"
+version = "0.0.1"
+description = "A simple Python project"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+    "multiprocess",
+    "requests",
+    "PyYAML",
+    "timeout-decorator",
+    "redis",
+    "docker",
+    "openai",
+    "faiss-cpu",
+    "vllm==0.9.2",
+    "termcolor",
+    "tenacity",
+    "bs4",
+    "qwen_vl_utils",
+]
+
+[project.optional-dependencies]
+verl = [
+    "accelerate",
+    "codetiming",
+    "datasets",
+    "dill",
+    "flash-attn",
+    "hydra-core",
+    "liger-kernel",
+    "numpy",
+    "pandas",
+    "peft",
+    "pyarrow>=15.0.0",
+    "pybind11",
+    "pylatexenc",
+    "pre-commit",
+    "ray[default]",
+    "tensordict<=0.6.2",
+    "torchdata",
+    "transformers",
+    "wandb",
+    "packaging>=20.0",
+    "uvicorn",
+    "fastapi"
+]
+dev = [
+    "pytest",
+    "nest-asyncio",
+    "pytest-asyncio",
+]
+docs = [
+    "myst-parser",
+    "sphinx-markdown-tables",
+    "sphinx-rtd-theme",
+]
