@@ -1,8 +1,9 @@
-# AgentFly: Scalable and Extendable Reinforcement Learning for LLM Agents
+# AgentFly: Scalable and Extensible Reinforcement Learning for LLM Agents
 
 <p align="center">
-<a href="https://arxiv.org/pdf/2507.14897"><img alt="Static Badge" src="https://img.shields.io/badge/Paper-arXiv-%23ffc8dd?style=plastic&link=https%3A%2F%2Farxiv.org%2Fpdf%2F2507.14897"><a>
-<a href="https://agentfly.readthedocs.io/"><img alt="Static Badge" src="https://img.shields.io/badge/Docs-AgentFly-%23a2d2ff?style=plastic&link=https%3A%2F%2Fagentfly.readthedocs.io%2F"><a>
+<a href="https://arxiv.org/pdf/2507.14897" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/Paper-arXiv-%23ffc8dd?style=plastic&link=https%3A%2F%2Farxiv.org%2Fpdf%2F2507.14897"><a>
+<a href="https://agentfly.readthedocs.io/" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/Docs-AgentFly-%23a2d2ff?style=plastic&link=https%3A%2F%2Fagentfly.readthedocs.io%2F"><a>
+<a href="https://huggingface.co/collections/Agent-One/agentfly-6882061c6cf08537cb66c12b" target="_blcnk"><img alt="Static Badge" src="https://img.shields.io/badge/Model-%F0%9F%A4%97HuggingFace-%23ffb703"></a>
 </p>
 
 
@@ -59,6 +60,12 @@ def customized_reward(prediction, trajectory, optional_field1, optional_field2):
     # calculate reward
     ...
 ```
+
+## Demo
+The following shows an example of WebShop agent.
+
+https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
+
 
 
 ## Features
