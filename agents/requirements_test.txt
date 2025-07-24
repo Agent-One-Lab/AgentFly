@@ -1,0 +1,16 @@
+multiprocess
+requests
+PyYAML
+timeout-decorator
+redis
+docker
+openai
+faiss-cpu
+termcolor
+tenacity
+transformers
+nest-asyncio
+pytest
+pytest-asyncio
+bs4
+qwen_vl_utils
