@@ -145,7 +145,7 @@ class ConsoleStreamObserver(StreamObserver):
             }
 
         if event.event_type == StreamEventType.LLM_GENERATION_START:
-            print(colored(f"{event.timestamp - self.chain_id_data[event.chain_id]['timestamp']:.2f}s {turn_info} =====================", color=chain_color), flush=True)
+            print(f"{event.timestamp - self.chain_id_data[event.chain_id]['timestamp']:.2f}s {turn_info}".center(80, "="), flush=True)
         elif event.event_type == StreamEventType.LLM_GENERATION_CHUNK:
             content = event.data.get("content", "")
             if content:
@@ -163,8 +163,8 @@ class ConsoleStreamObserver(StreamObserver):
         elif event.event_type == StreamEventType.TOOL_OBSERVATION:
             observation = event.data.get("observation", "")
             tool_name = event.data.get("tool_name", "")
-            print(colored(f"{event.timestamp - self.chain_id_data[event.chain_id]['timestamp']:.2f}s {turn_info} =====================", color=chain_color), flush=True)
             print(colored(f"Tool: [{tool_name}] {observation[:1024]}{'...' if len(observation) > 200 else ''}", color=chain_color))
+            print(f"".center(80, "="), flush=True)
             self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.TOOL_OBSERVATION
         elif event.event_type == StreamEventType.ERROR:
             error_msg = event.data.get("error", "")
