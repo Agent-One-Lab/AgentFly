@@ -530,6 +530,47 @@ def math_reward_thought(prediction: str, answer: str, trajectory: List[Dict]) ->
     }
 
 
+@reward(name="math_reward_thought_with_tool")
+def math_reward_thought_with_tool(prediction: str, answer: str, trajectory: List[Dict]) -> float:
+    has_called_tool = False
+    for msg in trajectory:
+        if msg["role"] == "tool":
+            has_called_tool = True
+            break
+
+    all_have_thought = True
+    for msg in trajectory:
+        if msg["role"] == "assistant":
+            if isinstance(msg["content"], str):
+                content = msg["content"]
+            elif isinstance(msg["content"], list):
+                content = msg["content"][-1]["text"]
+            else:
+                raise ValueError(f"Invalid content type: {type(msg['content'])}")
+            if not content.strip().lower().startswith("thought"):
+                all_have_thought = False
+                break
+    
+    reward = 0.0
+    answer_correct = symbolic_math_equal(prediction, answer)
+    if not has_called_tool:
+        reward = 0.0
+    elif has_called_tool and not all_have_thought and not answer_correct:
+        reward = 0.0
+    elif has_called_tool and all_have_thought and not answer_correct:
+        reward = 0.1
+    elif has_called_tool and not all_have_thought and answer_correct:
+        reward = 0.0
+    elif has_called_tool and all_have_thought and answer_correct:
+        reward = 1.0
+    else:
+        raise ValueError(f"Invalid prediction or trajectory for math reward with format: Trajectory: {trajectory}")
+    return {
+        "reward": reward,
+        "acc": 1.0 if answer_correct else 0.0,
+    }
+
+
 def parse_thinking_response(response: str):
     try:
         # First try to match complete <think>...</think> pattern
