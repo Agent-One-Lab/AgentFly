@@ -60,6 +60,11 @@ def customized_reward(prediction, trajectory, optional_field1, optional_field2):
     ...
 ```
 
+## Demo
+
+https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
+
+
 
 ## Features
 ### 1. Multi-Chain Agent Rollout and Multi-Turn Training
