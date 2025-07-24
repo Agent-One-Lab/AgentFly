@@ -9,14 +9,16 @@ on:
 jobs:
   test-envs:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 15
 
     strategy:
       matrix:
         test-file:
           - tests/unit/envs/ --ignore tests/unit/envs/test_alfworld_env.py --ignore tests/unit/envs/test_webshop_text_env.py
           - tests/unit/envs/test_alfworld_env.py
-          - tests/unit/envs/test_webshop_text_env.py
+          # - tests/unit/envs/test_webshop_text_env.py # TODO: add minimal variant of the webshop docker image
+          - tests/unit/rewards/ --ignore tests/unit/rewards/test_env_id.py --ignore tests/unit/rewards/test_webshop_reward.py
+          - tests/unit/tools/ --ignore tests/unit/tools/test_webshop_tool.py
 
     steps:
       - name: Checkout repository (with submodules)
