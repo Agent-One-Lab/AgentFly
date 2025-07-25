@@ -16,7 +16,7 @@ async def test_alfworld_reset():
     assert isinstance(result['observation'], str)
     assert len(result['observation']) > 0
     
-    await alfworld_reset.release_env(id='demo_reset')
+    await alfworld_reset.release(id='demo_reset')
     print('done')
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -43,7 +43,7 @@ async def test_alfworld_get_objective():
     assert len(result['observation'].split('Task:')[1].split('\n')[0].strip()) > 0
     
     # Clean up the environment
-    await alfworld_get_task_objective.release_env(id='demo_objective')
+    await alfworld_get_task_objective.release(id='demo_objective')
     print('done')
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -63,7 +63,7 @@ async def test_alfworld_step():
     assert 'reward' in result['info']
     assert 'done' in result['info']
     assert isinstance(result['info']['reward'], (int, float))
-    await alfworld_step.release_env(id='demo_step')
+    await alfworld_step.release(id='demo_step')
     print('done')
 
 
@@ -82,7 +82,7 @@ async def test_alfworld_commands():
     # The observation should contain a list of commands
     assert isinstance(result['observation'], (list, str))  # Some tools return list, others string representation
     
-    await alfworld_get_admissible_commands.release_env(id='demo_commands')
+    await alfworld_get_admissible_commands.release(id='demo_commands')
     print('done')
 
 
@@ -96,7 +96,7 @@ async def test_pool_async_calls():
         step_result = await alfworld_step(action="look", id=f"c{i}")
         assert step_result['status'] == 'success'
         
-        await alfworld_step.release_env(id=f"c{i}")
+        await alfworld_step.release(id=f"c{i}")
 
     await asyncio.gather(*[
         one_chain(i) for i in range(3)   # Safe for 16GB RAM
@@ -113,8 +113,8 @@ async def test_double_release():
     assert step_result['status'] == 'success'
     
     # manual double call
-    await alfworld_step.release_env(id="x")
-    await alfworld_step.release_env(id="x")   # must return instantly
+    await alfworld_step.release(id="x")
+    await alfworld_step.release(id="x")   # must return instantly
 
 
 @pytest.mark.asyncio(loop_scope="session")
