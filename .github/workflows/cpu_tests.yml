@@ -17,7 +17,8 @@ jobs:
           - tests/unit/envs/ --ignore tests/unit/envs/test_webshop_text_env.py
           # - tests/unit/envs/test_webshop_text_env.py # TODO: add minimal variant of the webshop docker image
           - tests/unit/rewards/ --ignore tests/unit/rewards/test_env_id.py --ignore tests/unit/rewards/test_webshop_reward.py
-          - tests/unit/tools/ --ignore tests/unit/tools/test_webshop_tool.py
+          - tests/unit/tools/ --ignore tests/unit/tools/test_webshop_tool.py --ignore tests/unit/tools/test_scienceworld_tool.py
+          - tests/unit/tools/test_scienceworld_tool.py
           # - test/unit/agents/ # TODO: recheck this
 
     steps:
