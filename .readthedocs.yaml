@@ -1,6 +1,5 @@
-# .readthedocs.yaml (identical structure to veRL’s)           #:contentReference[oaicite:2]{index=2}
 version: 2
-
+  
 build:
   os: ubuntu-22.04
   tools:
@@ -11,6 +10,5 @@ sphinx:
 
 python:
   install:
+    - requirements: agents/requirements.txt
     - requirements: docs/requirements-docs.txt
-    - method: pip
-      path: .
