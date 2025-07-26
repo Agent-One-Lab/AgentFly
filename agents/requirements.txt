@@ -6,7 +6,7 @@ redis
 docker
 openai
 faiss-cpu
-vllm==0.9.1
+vllm==0.9.2
 termcolor
 tenacity
 nest-asyncio
@@ -14,3 +14,4 @@ pytest
 pytest-asyncio
 bs4
 qwen_vl_utils
+onnxruntime

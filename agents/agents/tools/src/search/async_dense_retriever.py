@@ -26,7 +26,7 @@ except ImportError as e:
 
 from .faiss_indexer import Indexer
 from ...tool_base import tool
-from ....__init__ import AGENT_DATA_DIR
+from ....__init__ import AGENT_CACHE_DIR
 import builtins
 import numpy as np
 import importlib
@@ -575,7 +575,7 @@ GLOBAL_RETRIEVER = None
     max_length=4096,
 )
 async def asyncdense_retrieve(query: str):
-    global GLOBAL_RETRIEVER, AGENT_DATA_DIR
+    global GLOBAL_RETRIEVER, AGENT_CACHE_DIR
 
     if not query.startswith("query:"):
         query = "query: " + query
@@ -584,10 +584,10 @@ async def asyncdense_retrieve(query: str):
     if GLOBAL_RETRIEVER is None:
         GLOBAL_RETRIEVER = DenseRetriever(
             corpus_file=os.path.join(
-                AGENT_DATA_DIR, "search", "wiki-18.jsonl"
+                AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl"
             ),
             index_file=os.path.join(
-                AGENT_DATA_DIR, "search", "e5_Flat.index"
+                AGENT_CACHE_DIR, "data", "search", "e5_Flat.index"
             ),
         )
 

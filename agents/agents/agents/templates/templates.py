@@ -523,6 +523,8 @@ class Chat:
                     pass
 
     def convert_to_hf_format_messages(self, messages: List[Dict]) -> List[Dict]:
+        if messages is None:
+            return None
         role_label, content_label = self._detect_labels(messages)
         hf_messages = []
         for message in messages:
@@ -628,6 +630,16 @@ register_template(
     )
 )
 
+register_template(
+    Template(
+        name="deepseek-prover",
+        system_template="{system_message}\n",
+        system_message="You are an AI programming assistant, utilizing the Deepseek Coder model, developed by Deepseek Company, and you only answer questions related to computer science. For politically sensitive questions, security and privacy issues, and other non-computer science questions, you will refuse to answer.",
+        user_template="### Instruction:\n{content}\n",
+        assistant_template="### Response:\n{content}\n<|EOT|>\n",
+        stop_words=["<|EOT|>"],
+    )
+)
 
 # register_conv_template(
 #     Template(
