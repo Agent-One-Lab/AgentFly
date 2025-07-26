@@ -92,7 +92,7 @@ class Tool:
     def _validate_call_args(self, kwargs):
         # TODO: raise error, return error message, or filter the invalid arguments, make it configurable. Currently, we just return the error message.
         for arg in kwargs:
-            if arg not in self.args:
+            if arg not in self.args and not (arg == "id" and self.is_stateful):
                 # raise ValueError(f"""Invalid argument "{arg}" for tool {self.name}.""")
                 result = f"""Invalid argument "{arg}" for tool {self.name}."""
                 return result
