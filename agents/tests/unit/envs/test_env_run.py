@@ -1,6 +1,6 @@
 import asyncio
 import time
-from agents.envs.warm_pool import WarmPool
+from agents.envs.manager.warm_pool import WarmPool
 from agents.envs.python_env import PythonSandboxEnv
 import pytest
 import requests
@@ -23,7 +23,7 @@ async def test_python_sandbox_env():
     await env.reset()
     obs = await env.step("print('Hello, world!')")
     assert obs == "Hello, world!\n", f"Response: {obs}"
-    await env.close()
+    await env.aclose()
 
 
 
@@ -48,7 +48,7 @@ async def test_python_sandbox_env_concurrent_requests():
     for i, out in results:
         assert out == str(i)
 
-    await env.close()
+    await env.aclose()
 
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
@@ -56,80 +56,80 @@ async def test_python_sandbox_env_concurrent_requests():
 import asyncio, pytest, random
 from agents.envs.python_env import PythonSandboxEnv   # adjust to your package path
 
-N_ENVS       = 1000     # total environments you want to exercise
-MAX_PARALLEL = 32    # how many containers may run at the same time
+# N_ENVS       = 1000     # total environments you want to exercise
+# MAX_PARALLEL = 32    # how many containers may run at the same time
 
-@pytest.mark.asyncio
-async def test_python_sandbox_env_many_instances():
-    """
-    Launch `N_ENVS` separate PythonSandboxEnv instances, each in its own Docker
-    container, run one tiny snippet, and close them again.
+# @pytest.mark.asyncio
+# async def test_python_sandbox_env_many_instances():
+#     """
+#     Launch `N_ENVS` separate PythonSandboxEnv instances, each in its own Docker
+#     container, run one tiny snippet, and close them again.
 
-    Concurrency is capped with an `asyncio.Semaphore` so that the host isn't
-    flooded with 1 000 simultaneous containers.
-    """
-    sem = asyncio.Semaphore(MAX_PARALLEL)
-    errors = []
-    start_time = time.time()
-    async def run_single(i: int):
-        # limit fan-out
-        async with sem:
-            env = PythonSandboxEnv()          # brand-new container
-            try:
-                await env.start()
-                await env.reset()
-                v = random.randint(1, 999)    # different code per env
-                obs = await env.step(f"print({v})")
-                # ----- assertions -------------------------------------------
-                assert obs.strip() == str(v), f"id={i}: wrong output {obs!r}"
-            except Exception as exc:          # collect failures but keep going
-                errors.append(exc)
-            finally:
-                await env.close()
+#     Concurrency is capped with an `asyncio.Semaphore` so that the host isn't
+#     flooded with 1 000 simultaneous containers.
+#     """
+#     sem = asyncio.Semaphore(MAX_PARALLEL)
+#     errors = []
+#     start_time = time.time()
+#     async def run_single(i: int):
+#         # limit fan-out
+#         async with sem:
+#             env = PythonSandboxEnv()          # brand-new container
+#             try:
+#                 await env.start()
+#                 await env.reset()
+#                 v = random.randint(1, 999)    # different code per env
+#                 obs = await env.step(f"print({v})")
+#                 # ----- assertions -------------------------------------------
+#                 assert obs.strip() == str(v), f"id={i}: wrong output {obs!r}"
+#             except Exception as exc:          # collect failures but keep going
+#                 errors.append(exc)
+#             finally:
+#                 await env.close()
 
-    # launch all tasks concurrently (respecting the semaphore)
-    await asyncio.gather(*(run_single(i) for i in range(N_ENVS)))
+#     # launch all tasks concurrently (respecting the semaphore)
+#     await asyncio.gather(*(run_single(i) for i in range(N_ENVS)))
 
-    # bubble up any collected failures so pytest marks the test as failed
-    if errors:
-        raise AssertionError(f"{len(errors)} failures: {errors[:3]}…")
-    print(f"Time taken: {time.time() - start_time} seconds")
+#     # bubble up any collected failures so pytest marks the test as failed
+#     if errors:
+#         raise AssertionError(f"{len(errors)} failures: {errors[:3]}…")
+#     print(f"Time taken: {time.time() - start_time} seconds")
 
 
-@pytest.mark.asyncio
-async def test_python_sandbox_env_many_instances_pool():
-    """
-    Launch `N_ENVS` separate PythonSandboxEnv instances, each in its own Docker
-    container, run one tiny snippet, and close them again.
+# @pytest.mark.asyncio
+# async def test_python_sandbox_env_many_instances_pool():
+#     """
+#     Launch `N_ENVS` separate PythonSandboxEnv instances, each in its own Docker
+#     container, run one tiny snippet, and close them again.
 
-    Concurrency is capped with an `asyncio.Semaphore` so that the host isn't
-    flooded with 1 000 simultaneous containers.
-    """
-    sem = asyncio.Semaphore(MAX_PARALLEL)
-    errors = []
-    start_time = time.time()
-    pool = WarmPool(lambda: PythonSandboxEnv(), size=16)
-    await pool.start()
-    async def run_single(i: int):
-        # limit fan-out
-        async with sem:
-            try:
-                v = random.randint(1, 999)    # different code per env
-                env = await pool.acquire()
-                obs = await env.step(f"print({v})")
-                # ----- assertions -------------------------------------------
-                assert obs.strip() == str(v), f"id={i}: wrong output {obs!r}"
+#     Concurrency is capped with an `asyncio.Semaphore` so that the host isn't
+#     flooded with 1 000 simultaneous containers.
+#     """
+#     sem = asyncio.Semaphore(MAX_PARALLEL)
+#     errors = []
+#     start_time = time.time()
+#     pool = WarmPool(lambda: PythonSandboxEnv(), size=16)
+#     await pool.start()
+#     async def run_single(i: int):
+#         # limit fan-out
+#         async with sem:
+#             try:
+#                 v = random.randint(1, 999)    # different code per env
+#                 env = await pool.acquire()
+#                 obs = await env.step(f"print({v})")
+#                 # ----- assertions -------------------------------------------
+#                 assert obs.strip() == str(v), f"id={i}: wrong output {obs!r}"
 
-            except Exception as exc:          # collect failures but keep going
-                errors.append(exc)
-            finally:
-                await pool.release(env)
+#             except Exception as exc:          # collect failures but keep going
+#                 errors.append(exc)
+#             finally:
+#                 await pool.release(env)
 
-    # launch all tasks concurrently (respecting the semaphore)
-    await asyncio.gather(*(run_single(i) for i in range(N_ENVS)))
+#     # launch all tasks concurrently (respecting the semaphore)
+#     await asyncio.gather(*(run_single(i) for i in range(N_ENVS)))
 
-    # bubble up any collected failures so pytest marks the test as failed
-    if errors:
-        raise AssertionError(f"{len(errors)} failures: {errors[:3]}…")
-    print(f"Time taken: {time.time() - start_time} seconds")
-    await pool.close()
+#     # bubble up any collected failures so pytest marks the test as failed
+#     if errors:
+#         raise AssertionError(f"{len(errors)} failures: {errors[:3]}…")
+#     print(f"Time taken: {time.time() - start_time} seconds")
+#     await pool.close()

@@ -580,7 +580,7 @@ def get_template(name: str) -> Template:
 
 register_template(
     Template(
-        name="qwen2.5-no-tool",
+        name="qwen2.5-no-system-tool",
         system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
         system_message="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",

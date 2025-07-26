@@ -7,5 +7,5 @@ async def test_code_reward_test():
     reward = await code_reward_test(code, id="test")
     assert reward["reward"] == 1.0
     assert reward["output"] == "Hello, World!\n"
-    await code_reward_test.release_env("test")
+    await code_reward_test.release("test")
 

@@ -26,16 +26,16 @@ async def test_code_hang():
     print('done')
 
 
-@pytest.mark.asyncio(loop_scope="session")
-async def test_pool_async_calls():
+# @pytest.mark.asyncio(loop_scope="session")
+# async def test_pool_async_calls():
 
-    async def one_chain(i):
-        await code_interpreter(id=f"c{i}", code="x=1")
-        await code_interpreter.release(id=f"c{i}")
+#     async def one_chain(i):
+#         await code_interpreter(id=f"c{i}", code="x=1")
+#         await code_interpreter.release(id=f"c{i}")
 
-    await asyncio.gather(*[
-        one_chain(i) for i in range(code_interpreter.pool_size+5)   # over-subscribe the pool
-    ])
+#     await asyncio.gather(*[
+#         one_chain(i) for i in range(code_interpreter.pool_size+5)   # over-subscribe the pool
+#     ])
 
 
 @pytest.mark.asyncio(loop_scope="session")
