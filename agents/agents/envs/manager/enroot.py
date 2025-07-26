@@ -348,6 +348,10 @@ class EnrootClient:
     def close(self):
         pass
 
-
 def from_env() -> EnrootClient:
     return EnrootClient()
+
+
+def clear_enroot_containers() -> None:
+    _run_enroot(["remove", "--force", "$(enroot list)"], capture=False)
+    print("Cleared all enroot containers")

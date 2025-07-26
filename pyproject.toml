@@ -8,7 +8,7 @@ include = ["agents", "verl"]
 [project]
 name = "AgentFly"
 version = "0.0.1"
-description = "A simple Python project"
+description = "Agent reinforcement learning framework."
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
 license = { text = "Apache-2.0" }
@@ -27,6 +27,7 @@ dependencies = [
     "tenacity",
     "bs4",
     "qwen_vl_utils",
+    "onnxruntime",
 ]
 
 [project.optional-dependencies]
