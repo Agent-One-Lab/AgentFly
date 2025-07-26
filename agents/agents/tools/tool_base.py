@@ -42,6 +42,7 @@ class Tool:
         name: str | None = None,
         description: str | None = None,
         schema: dict | None = None,
+        args: dict | None = None,
         max_length: int = 2048,
         env_cls: type[BaseEnv] | None = None,
         env_kwargs: dict | None = None,
@@ -54,6 +55,7 @@ class Tool:
         self.name = name or func.__name__
         self.description = description or ""
         self.schema = schema
+        self.args = args
         self.max_length = max_length
         self.status = status
         
@@ -87,6 +89,14 @@ class Tool:
             return len(self._envs)
         return 0
 
+    def _validate_call_args(self, kwargs):
+        # TODO: raise error, return error message, or filter the invalid arguments, make it configurable. Currently, we just return the error message.
+        for arg in kwargs:
+            if arg not in self.args:
+                # raise ValueError(f"""Invalid argument "{arg}" for tool {self.name}.""")
+                result = f"""Invalid argument "{arg}" for tool {self.name}."""
+                return result
+        return None
         
     async def __call__(self, **kwargs):
         """
@@ -101,30 +111,38 @@ class Tool:
                 - "status": The status of the tool call.
                 - "info": The info of the tool call.
         """
-        try:
-            if not self.is_stateful:
-                # For non-stateful tools, directly execute the function
-                result = await self.user_func(**kwargs) if inspect.iscoroutinefunction(self.user_func) \
-                        else self.user_func(**kwargs)
-            else:
-                # For stateful tools, handle environment management
-                id = kwargs.pop('id', None)
-                if id is None:
-                    result = "Error: 'id' parameter is required for stateful tools"
+        # Check arguments before calling the tool
+        result = self._validate_call_args(kwargs)
+
+        # If the arguments are valid, call the tool
+        if result is None:
+            try:
+                if not self.is_stateful:
+                    # For non-stateful tools, directly execute the function
+                    result = await self.user_func(**kwargs) if inspect.iscoroutinefunction(self.user_func) \
+                            else self.user_func(**kwargs)
                 else:
-                    await self._initialize_envs()
-                    env = await self._acquire_env(id)
-                    
-                    async with self._locks[id]:
-                        # token = current_env.set(env)
-                        assert kwargs.get("env", None) is None, "env is not allowed to be passed to stateful tools"
-                        try:
-                            result = await self.user_func(env=env,**kwargs) if inspect.iscoroutinefunction(self.user_func) \
-                                  else self.user_func(**kwargs)
-                        finally:
-                            pass
-        except Exception as e:
-            result = str(e)
+                    # For stateful tools, handle environment management
+                    id = kwargs.pop('id', None)
+                    if id is None:
+                        result = "Error: 'id' parameter is required for stateful tools"
+                    else:
+                        await self._initialize_envs()
+                        env = await self._acquire_env(id)
+                        
+                        async with self._locks[id]:
+                            # token = current_env.set(env)
+                            assert kwargs.get("env", None) is None, "env is not allowed to be passed to stateful tools"
+                            try:
+                                result = await self.user_func(env=env,**kwargs) if inspect.iscoroutinefunction(self.user_func) \
+                                    else self.user_func(**kwargs)
+                            finally:
+                                pass
+            except Exception as e:
+                result = str(e)
+        # If the arguments are invalid, simply use the result from the validation
+        else:
+            pass
 
         # Result must be a string or a dict
         if isinstance(result, str):
@@ -258,7 +276,7 @@ def tool(
         signature  = extract_signatures(func)
         docs       = parse_docstring(inspect.getdoc(func))
         final_desc = description or docs.get("summary", "")
-        final_schema = validate_schema(final_name, final_desc, signature, docs)
+        validated_schema = validate_schema(final_name, final_desc, signature, docs)
 
         # Create the tool
         def factory():
@@ -266,7 +284,8 @@ def tool(
                 func=func,
                 name=final_name,
                 description=final_desc,
-                schema=final_schema,
+                schema=validated_schema["schema"],
+                args=validated_schema["args"],
                 max_length=max_length,
                 env_cls=env_cls,
                 env_kwargs=env_kwargs,

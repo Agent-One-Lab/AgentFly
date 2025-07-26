@@ -1,7 +1,7 @@
 import re
 import inspect
 import warnings
-
+from copy import deepcopy
 
 def extract_signatures(func):
     sig = inspect.signature(func)
@@ -185,7 +185,14 @@ def validate_schema(name, description, signature, docs):
             }
         }
     }
-    return schema
+    arguments = deepcopy(signature)
+    if "env" in arguments:
+        del arguments["env"]
+
+    return {
+        "schema": schema,
+        "args": arguments
+    }
 
 if __name__ == '__main__':
     # Retrieve and parse the docstring using inspect.
