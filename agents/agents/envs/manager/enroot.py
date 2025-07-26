@@ -269,7 +269,7 @@ class Containers:
         name = name or _random_name()
 
         # ensure rootfs exists
-        if name not in _parse_list(_run_enroot(["list"], capture=False)):
+        if name not in _parse_list(_run_enroot(["list"], capture=True)):
             img_path = None
             path = pathlib.Path(str(image))
             if path.suffix == ".sqsh" and path.exists():
@@ -348,6 +348,10 @@ class EnrootClient:
     def close(self):
         pass
 
-
 def from_env() -> EnrootClient:
     return EnrootClient()
+
+
+def clear_enroot_containers() -> None:
+    _run_enroot(["remove", "--force", "$(enroot list)"], capture=False)
+    print("Cleared all enroot containers")

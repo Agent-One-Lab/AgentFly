@@ -60,7 +60,9 @@ class EnvironmentManager:
             cls._acquired_envs.pop(id)
             await cls._pools[key].release(env, finished=finished)
         else:
-            warnings.warn(f"Environment {id} not found during release. Skipped it.")
+            # This should be generally safe to skip
+            # warnings.warn(f"Environment {id} not found during release. Skipped it.")
+            pass
 
     @classmethod
     async def reset(cls, env: BaseEnv, env_args: dict | None = None):

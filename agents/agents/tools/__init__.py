@@ -11,7 +11,7 @@ from .src.search.dense_retriever import dense_retrieve
 from .src.search.async_dense_retriever import asyncdense_retrieve
 # from .src.search.http_retriever import http_retrieve
 from .src.webshop.tools import webshop_browser
-from .src.react.tools import answer
+from .src.react.tools import answer_qa, answer_math
 from .src.search.async_dense_retriever import asyncdense_retrieve
 from .src.scienceworld.tools import scienceworld_explorer
 
@@ -25,7 +25,8 @@ __all__ = [
     "alfworld_reset", 
     "alfworld_get_admissible_commands",
     "google_search_serper",
-    "answer",
+    "answer_qa",
+    "answer_math",
     "hallucination_tool",
     "invalid_input_tool",
     "submit_tool_call",
@@ -49,7 +50,8 @@ EXPLICIT_TOOLS = {
     "alfworld_get_task_objective": alfworld_get_task_objective,
     "alfworld_get_admissible_commands": alfworld_get_admissible_commands,
     "google_search": google_search_serper,
-    "answer": answer,
+    "answer_qa": answer_qa,
+    "answer_math": answer_math,
     "hallucination_tool": hallucination_tool,
     "invalid_input_tool": invalid_input_tool,
     "dense_retrieve": dense_retrieve

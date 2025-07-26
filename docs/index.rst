@@ -21,6 +21,20 @@ AgentFly is a scalable and extensible Agent-RL framework designed to empower LM 
     features/reward_system
 
 .. toctree::
+   :maxdepth: 2
+   :caption: Environments
+
+   environments/alfworld/index
+   environments/code/index
+   environments/retrieval/index
+
+.. toctree::
+    :maxdepth: 2
+    :caption: Rewards
+
+    rewards/index
+
+.. toctree::
     :maxdepth: 2
     :caption: Classes
 

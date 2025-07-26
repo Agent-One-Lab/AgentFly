@@ -54,7 +54,7 @@ def make_request(url, payload, headers, timeout=20):
 #     else:
 #         return str(response)
     
-@tool(env_cls=PythonSandboxEnv, name="code_interpreter", description="Run the code in docker container and return the output from stdout or stderr. Output should be printed.", stateful=True, pool_size=16)
+@tool(env_cls=PythonSandboxEnv, name="code_interpreter", description="Run the code in docker container and return the output from stdout or stderr", stateful=True, pool_size=32)
 async def code_interpreter(code: str, env: PythonSandboxEnv):
     """
     Run the code in docker container and return the output from stdout or stderr
@@ -63,9 +63,10 @@ async def code_interpreter(code: str, env: PythonSandboxEnv):
     Returns:
         str: The output from stdout or stderr
     """
+    code = str(code)
     try:
         obs = await env.step(code)
-        return obs
+        return str(obs)
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
 

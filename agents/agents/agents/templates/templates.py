@@ -145,7 +145,10 @@ class Template:
         if tools is None:
             return self.system_template.format(system_message=self.system_message)
         else:
-            return self.system_template_with_tools.format(system_message=self.system_message, tools=tools)
+            if self.system_template_with_tools:
+                return self.system_template_with_tools.format(system_message=self.system_message, tools=tools)
+            else:
+                return self.system_template.format(system_message=self.system_message)
 
     def _encode_system_message(self, content, tools=None) -> str:
         if tools is None:
@@ -520,6 +523,8 @@ class Chat:
                     pass
 
     def convert_to_hf_format_messages(self, messages: List[Dict]) -> List[Dict]:
+        if messages is None:
+            return None
         role_label, content_label = self._detect_labels(messages)
         hf_messages = []
         for message in messages:
@@ -575,7 +580,7 @@ def get_template(name: str) -> Template:
 
 register_template(
     Template(
-        name="qwen2.5-no-tool",
+        name="qwen2.5-no-system-tool",
         system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
         system_message="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
@@ -625,6 +630,16 @@ register_template(
     )
 )
 
+register_template(
+    Template(
+        name="deepseek-prover",
+        system_template="{system_message}\n",
+        system_message="You are an AI programming assistant, utilizing the Deepseek Coder model, developed by Deepseek Company, and you only answer questions related to computer science. For politically sensitive questions, security and privacy issues, and other non-computer science questions, you will refuse to answer.",
+        user_template="### Instruction:\n{content}\n",
+        assistant_template="### Response:\n{content}\n<|EOT|>\n",
+        stop_words=["<|EOT|>"],
+    )
+)
 
 # register_conv_template(
 #     Template(

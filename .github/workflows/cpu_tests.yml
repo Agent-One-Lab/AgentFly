@@ -1,0 +1,79 @@
+name: CPU-only Unit Tests (agents)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-envs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      matrix:
+        test-file:
+          - tests/unit/envs/ --ignore tests/unit/envs/test_webshop_text_env.py --ignore tests/unit/envs/test_alfworld_env.py
+          - tests/unit/envs/test_alfworld_env.py
+          # - tests/unit/envs/test_webshop_text_env.py # TODO: add minimal variant of the webshop docker image
+          - tests/unit/rewards/ --ignore tests/unit/rewards/test_env_id.py --ignore tests/unit/rewards/test_webshop_reward.py
+          - tests/unit/tools/ --ignore tests/unit/tools/test_webshop_tool.py --ignore tests/unit/tools/test_scienceworld_tool.py --ignore tests/unit/tools/test_code_tool.py
+          - tests/unit/tools/test_scienceworld_tool.py
+          - tests/unit/tools/test_code_tool.py
+          # - test/unit/agents/ # TODO: recheck this
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Free up disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+
+          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          docker system prune -af || true
+
+          echo "After cleanup:"
+          df -h
+
+      - name: Install dependencies (main repo)
+        run: |
+          pip install -r agents/requirements.txt
+          pip install datasets
+
+      - name: Cache AgentFly cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/AgentFly
+          key: ${{ runner.os }}-agentfly-cache
+          restore-keys: |
+            ${{ runner.os }}-agentfly-cache
+
+      - name: Install enroot
+        run: |
+          mkdir -p ~/enroot-packages
+          cd ~/enroot-packages
+          arch=$(dpkg --print-architecture)
+          if [ ! -f enroot_3.5.0-1_${arch}.deb ]; then
+            curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot_3.5.0-1_${arch}.deb
+            curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot+caps_3.5.0-1_${arch}.deb
+          fi
+          sudo apt-get update
+          sudo apt-get install -y ./*.deb
+
+      - name: Run unit test (${{ matrix.test-file }})
+        run: |
+          cd agents
+          python -m pytest ${{ matrix.test-file }}

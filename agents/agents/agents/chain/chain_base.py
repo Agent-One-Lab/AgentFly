@@ -253,18 +253,6 @@ class ChainGeneration:
         )
         tool_schemas = [tool.schema for tool in self.tools]
 
-        # Emit chain start events if streaming is enabled
-        if enable_streaming:
-            for cid in first_nodes.keys():
-                await self.streaming_manager.emit_event(StreamEvent(
-                    event_type=StreamEventType.CHAIN_START,
-                    chain_id=cid,
-                    timestamp=time.time(),
-                    data={"max_steps": max_steps},
-                    step=0,
-                    depth=0
-                ))
-
         done_q = asyncio.Queue()
         tasks = [
             asyncio.create_task(
@@ -341,7 +329,7 @@ class ChainGeneration:
             depth += 1
 
         # Finalize chain
-        await self._finalize_chain(chain_id, chain, current_node, depth, enable_streaming)
+        await self._finalize_chain(chain_id, chain, current_node, depth)
         await done_queue.put((chain_id, chain, current_node))
 
         self.finished_chains_count += 1
@@ -459,7 +447,6 @@ class ChainGeneration:
             await self.set_tools(chain_id, chain.info)
             have_set_tools = True
 
-
         # Execute tool call
         result = await submit_tool_call(tool_name, tool_input, id=chain_id)
         
@@ -505,7 +492,7 @@ class ChainGeneration:
         
         return action_input_node
 
-    async def _finalize_chain(self, chain_id, chain, current_node, depth, enable_streaming):
+    async def _finalize_chain(self, chain_id, chain, current_node, depth):
         """Finalize the chain with reward calculation and cleanup."""
         if self._reward_fn is not None:
             trajectory = current_node.messages
@@ -517,16 +504,6 @@ class ChainGeneration:
             
         await self.release_resources(chain_id)
 
-        if enable_streaming:
-            # Emit chain end event
-            await self.streaming_manager.emit_event(StreamEvent(
-                event_type=StreamEventType.CHAIN_END,
-                chain_id=chain_id,
-                timestamp=time.time(),
-                data={"final_depth": depth, "reward": chain.info.get("reward")},
-                step=depth,
-                depth=depth
-            ))
 
     async def release_resources(self, id: str) -> None:
         for tool in self.tools:

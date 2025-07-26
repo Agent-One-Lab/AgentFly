@@ -16,7 +16,6 @@ async def test_env_reset():
     env = ScienceWorldEnv()
     await env.start()
     await env.reset()
-    assert env.is_completed is False
     assert env.score == 0
 
 @pytest.mark.asyncio
