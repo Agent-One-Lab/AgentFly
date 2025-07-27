@@ -14,6 +14,7 @@ from .chain.chain_base import ChainGeneration
 import os
 import transformers
 import warnings
+from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 try:
     from verl.protocol import DataProto
 except ImportError:
@@ -43,6 +44,7 @@ class BaseAgent(ChainGeneration, ABC):
         log_file: str = "agent",
         project_name: str = None,
         run_name: str = None,
+        streaming: str = "console",
         **kwargs # To pass other unused arguments
     ):
         """
@@ -68,6 +70,12 @@ class BaseAgent(ChainGeneration, ABC):
         self.jinja_template = get_template(self.template).jinja_template()
         self.project_name = project_name
         self.run_name = run_name
+        self.streaming_manager = StreamingManager()
+        if streaming == "console":
+            self.streaming_manager.add_observer(ConsoleStreamObserver())
+        else:
+            # TODO: Support other streaming modes
+            raise ValueError(f"Streaming mode {streaming} is not supported.")
         super().__init__()
         if kwargs:
             warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
@@ -118,6 +126,27 @@ class BaseAgent(ChainGeneration, ABC):
             List of responses.
         """
         return await self.llm_engine.generate_async(messages_list_or_inputs, **args)
+    
+    async def generate_streaming(self, messages_list_or_inputs: List[List[Dict]], streaming_callback=None, **args):
+        """
+        Generate responses with streaming support. This method yields response chunks as they are generated.
+
+        Args:
+            messages_list_or_inputs: List of messages to generate responses for.
+            streaming_callback: Optional callback function for streaming chunks.
+            **args: Additional arguments for generation.
+
+        Yields:
+            str: Response chunks as they are generated.
+        """
+        if hasattr(self.llm_engine, 'generate_streaming'):
+            async for chunk in self.llm_engine.generate_streaming(messages_list_or_inputs, streaming_callback=streaming_callback, **args):
+                yield chunk
+        else:
+            # Fallback to non-streaming generation
+            responses = await self.generate_async(messages_list_or_inputs, **args)
+            for response in responses:
+                yield response
 
     @property
     def timing_data(self):
