@@ -10,7 +10,7 @@ def test_react_agent_initialization():
     agent = ReactAgent(
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
-        template="qwen-7b-chat",
+        template="qwen2.5",
         task_info=task_info,
         backend="client"
     )
@@ -35,7 +35,7 @@ Input: {"query": "Python programming language"}"""
     # Test with missing components
     text_missing = "Thought: I'm thinking about something."
     result_missing = parse_react_step(text_missing)
-    assert result_missing["thought"] is None
+    assert result_missing["thought"] == "I'm thinking about something."
     assert result_missing["action"] is None
     assert result_missing["input"] is None
 
@@ -45,25 +45,19 @@ def test_react_agent_parse():
     agent = ReactAgent(
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
-        template="qwen-7b-chat",
+        template="qwen2.5",
         backend="client"
     )
     
-    # Mock the generate method to return a predefined response
-    def mock_generate(*args, **kwargs):
-        return ["""Thought: I need to search for information.
+    responses = ["""Thought: I need to search for information.
 Action: google_search
 Input: {"query": "test query"}"""]
     
-    agent.generate = mock_generate
-    
-    # Test the parse method
-    messages_list = [[{"role": "user", "content": "Find information about Python"}]]
-    result = agent.parse(messages_list, tools)
-    
+    result = agent.parse(responses, tools)
+    print(result) 
     assert len(result) == 1
     assert result[0]["role"] == "assistant"
-    assert "Thought: I need to search for information." in result[0]["content"]
+    assert "Thought: I need to search for information." in result[0]["content"][0]["text"]
     assert len(result[0]["tool_calls"]) == 1
     assert result[0]["tool_calls"][0]["function"]["name"] == "google_search"
-    assert result[0]["tool_calls"][0]["function"]["arguments"] == '{"query": "test query"}' 
+    assert result[0]["tool_calls"][0]["function"]["arguments"] == {"query": "test query"}
