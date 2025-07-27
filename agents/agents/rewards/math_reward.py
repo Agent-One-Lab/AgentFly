@@ -489,8 +489,8 @@ def math_reward_tool(prediction: str, answer: str, trajectory: List[Dict]) -> fl
         "acc": 1.0 if answer_correct else 0.0,
     }
 
-@reward(name="math_reward_thought")
-def math_reward_thought(prediction: str, answer: str, trajectory: List[Dict]) -> float:
+@reward(name="math_reward_thought_with_tool")
+def math_reward_thought_with_tool(prediction: str, answer: str, trajectory: List[Dict]) -> float:
     has_called_tool = False
     for msg in trajectory:
         if msg["role"] == "tool":
@@ -519,7 +519,7 @@ def math_reward_thought(prediction: str, answer: str, trajectory: List[Dict]) ->
     elif has_called_tool and all_have_thought and not answer_correct:
         reward = 0.1
     elif has_called_tool and not all_have_thought and answer_correct:
-        reward = 0.1
+        reward = 0.0
     elif has_called_tool and all_have_thought and answer_correct:
         reward = 1.0
     else:

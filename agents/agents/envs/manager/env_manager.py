@@ -19,6 +19,7 @@ class EnvironmentManager:
         or add more envs to the existing pool if the size is larger.
         If the size is smaller, do nothing.
         """
+        # TODO: Currently, WarmPool will start all the envs at once. This should be fine for training, but might be wasteful for showing the demo, we may need to support feature to start a new env when acquiring, or make it a configurable option.
         key = env_cls
         if key not in cls._pools:
             cls._pools[key] = WarmPool(

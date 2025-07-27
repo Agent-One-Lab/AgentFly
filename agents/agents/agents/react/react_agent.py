@@ -15,29 +15,36 @@ import re
 
 def parse_react_step(text: str) -> Dict[str, Optional[str]]:
     """
-    Parse a single ReAct-style step (one Thought→Action→Input) into its components.
+    Parse a single ReAct-style step into its components.
 
     Args:
-        text: A string containing exactly one Thought:, one Action:, and one Input:.
+        text: A string that may contain Thought:, Action:, and/or Input: components.
 
     Returns:
-        A dict with keys 'thought', 'action', and 'input', or None if not found.
+        A dict with keys 'thought', 'action', and 'input', with None for missing components.
     """
-    pattern = re.compile(
-        r"Thought:\s*(?P<thought>.*?)\s*"
-        r"Action:\s*(?P<action>.*?)\s*"
-        r"Input:\s*(?P<input>.*)",
-        re.IGNORECASE | re.DOTALL
-    )
-    m = pattern.search(text)
-    if not m:
-        return {"thought": None, "action": None, "input": None}
-
-    return {
-        "thought": m.group("thought").strip(),
-        "action": m.group("action").strip(),
-        "input": m.group("input").strip(),
-    }
+    # Initialize result with None values
+    result = {"thought": None, "action": None, "input": None}
+    
+    # Pattern for Thought:
+    thought_pattern = re.compile(r"Thought:\s*(.*?)(?=\s*(?:Action:|Input:|$))", re.IGNORECASE | re.DOTALL)
+    thought_match = thought_pattern.search(text)
+    if thought_match:
+        result["thought"] = thought_match.group(1).strip()
+    
+    # Pattern for Action:
+    action_pattern = re.compile(r"Action:\s*(.*?)(?=\s*(?:Thought:|Input:|$))", re.IGNORECASE | re.DOTALL)
+    action_match = action_pattern.search(text)
+    if action_match:
+        result["action"] = action_match.group(1).strip()
+    
+    # Pattern for Input:
+    input_pattern = re.compile(r"Input:\s*(.*?)(?=\s*(?:Thought:|Action:|$))", re.IGNORECASE | re.DOTALL)
+    input_match = input_pattern.search(text)
+    if input_match:
+        result["input"] = input_match.group(1).strip()
+    
+    return result
 
 def extract_tool_calls(action_input: str) -> List[Dict]:
     if action_input is None:
