@@ -138,7 +138,6 @@ class ChainGeneration:
         self.finished_chains_count = 0
         self.initialize_monitor()
         self.monitor_info = defaultdict(list)
-        self.streaming_manager = StreamingManager()
 
     def reset(self) -> None:
         self.status_code: str = "continue"

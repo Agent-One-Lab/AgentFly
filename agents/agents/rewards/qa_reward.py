@@ -52,11 +52,11 @@ def em_score(prediction, ground_truth):
 
 
 @reward(name="qa_f1_reward")
-def qa_f1_reward(prediction: str, golden_answer: str, trajectory: List[str]) -> float:
+def qa_f1_reward(prediction: str, answer: str, trajectory: List[str]) -> float:
     # Extract answer from agent's response
     response = prediction
-    f1, precision, recall = f1_score(response, golden_answer)
-    em = em_score(response, golden_answer)
+    f1, precision, recall = f1_score(response, answer)
+    em = em_score(response, answer)
 
     return {
         "reward": f1,

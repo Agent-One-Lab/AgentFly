@@ -4,7 +4,7 @@ import datasets
 from transformers import AutoTokenizer, AutoModel
 from torch import Tensor
 from ...tool_base import tool
-from ....__init__ import AGENT_DATA_DIR
+from ....__init__ import AGENT_CACHE_DIR
 
 def load_corpus(corpus_path: str):
     corpus = datasets.load_dataset(
@@ -49,12 +49,12 @@ GLOBAL_RETRIEVER = None
 
 @tool(name="dense_retrieve", description="Use a dense retriever to retrieve documents from a corpus.", max_length=4096)
 async def dense_retrieve(query: str):
-    global AGENT_DATA_DIR
+    global AGENT_CACHE_DIR
     if not query.startswith("query:"):
         query = "query: " + query
     global GLOBAL_RETRIEVER
     if GLOBAL_RETRIEVER is None:
-        GLOBAL_RETRIEVER = DenseRetriever(corpus_file=os.path.join(AGENT_DATA_DIR, "search", "wiki-18.jsonl"), index_file=os.path.join(AGENT_DATA_DIR, "search", "e5_Flat.index"))
+        GLOBAL_RETRIEVER = DenseRetriever(corpus_file=os.path.join(AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl"), index_file=os.path.join(AGENT_CACHE_DIR, "data", "search", "e5_Flat.index"))
     doc_list = await GLOBAL_RETRIEVER.search(query, 3)
     doc_list = doc_list[0]
     content = ""
