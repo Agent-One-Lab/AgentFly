@@ -4,7 +4,6 @@ from agents.tools import code_interpreter
 import pytest
 
 
-
 def test_code_schema():
     schema = code_interpreter.schema
     print(schema)

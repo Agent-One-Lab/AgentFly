@@ -132,4 +132,5 @@ outputs
 
 # Notebooks
 agents/tests/*.ipynb
+agents/agents/*.ipynb
 
