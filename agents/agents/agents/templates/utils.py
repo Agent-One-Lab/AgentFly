@@ -139,7 +139,14 @@ def tokenize_conversation(
     :return: input_ids, attention_mask, labels, action_mask
     """
     chat = Chat(template=template, messages=messages, tokenizer=tokenizer)
-    return chat.tokenize(tokenizer,  add_generation_prompt=add_generation_prompt, tools=tools)
+    inputs = chat.tokenize(tokenizer,  add_generation_prompt=add_generation_prompt, tools=tools)
+    if max_length is not None:
+        inputs['input_ids'] = inputs['input_ids'][:, :max_length]
+        inputs['attention_mask'] = inputs['attention_mask'][:, :max_length]
+        inputs['labels'] = inputs['labels'][:, :max_length]
+        inputs['action_mask'] = inputs['action_mask'][:, :max_length]
+
+    return inputs
 
 def convert_inputs_to_vision_inputs(template: str,
                                     inputs: dict,

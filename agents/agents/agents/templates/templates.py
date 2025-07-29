@@ -215,6 +215,13 @@ class Template:
         attention_mask = []
         labels = []
         action_mask = []
+
+        if tokenizer.bos_token and tokenizer.add_bos_token:
+            input_ids.append(tokenizer.bos_token_id)
+            attention_mask.append(1)
+            labels.append(-100)
+            action_mask.append(0)
+        
         for element, mask_flag in zip(elements, mask_flags):
             cur_input_ids = tokenizer.encode(element, add_special_tokens=False)
             input_ids.extend(cur_input_ids)

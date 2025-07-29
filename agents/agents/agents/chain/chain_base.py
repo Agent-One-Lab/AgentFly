@@ -214,11 +214,11 @@ class ChainGeneration:
         
         return messages_list, other_info_list
 
-    def validate_run_args(self, max_steps: int, num_chains: int):
+    def validate_run_args(self, max_steps: int, num_chains: int, enable_streaming: bool):
         assert max_steps >= 1, "max_steps must be at least 1."
         assert num_chains >= 1, "num_chains must be at least 1."
         for observer in self.streaming_manager.observers:
-            if isinstance(observer, ConsoleStreamObserver):
+            if isinstance(observer, ConsoleStreamObserver) and enable_streaming:
                 assert num_chains == 1, "num_chains must be 1 when ConsoleStreamObserver is used."
         
     
@@ -241,7 +241,7 @@ class ChainGeneration:
             enable_streaming: Whether to enable streaming mode.
             streaming_callback: Optional callback for streaming events.
         """
-        self.validate_run_args(max_steps, num_chains)
+        self.validate_run_args(max_steps, num_chains, enable_streaming)
         Monitor.ensure_started()
         self.reset()
         messages_list, other_info_list = self.prepare_chain_messages(start_messages)
