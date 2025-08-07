@@ -1,10 +1,3 @@
-"""
-This file is a modified version of the original fastchat/conversation.py file.
-
-The original file can be found at:
-https://github.com/LM-SYS/fastchat/blob/main/fastchat/conversation.py
-
-"""
 
 from collections import defaultdict
 from copy import copy
@@ -13,11 +6,22 @@ from enum import Enum, auto, IntEnum
 import json
 from typing import List, Any, Dict, Union, Tuple
 import warnings
-
+import logging
 import torch
 from .preprocess import open_image_from_any
 from transformers import PreTrainedTokenizer
+from .vision_processor import is_vision_template
 import re
+
+Logger = logging.getLogger(__name__)
+
+# Add console handler if no handlers exist
+if not Logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    Logger.addHandler(console_handler)
 
 class Role(Enum):
     SYSTEM = "system"
@@ -25,19 +29,6 @@ class Role(Enum):
     ASSISTANT = "assistant"
     TOOL = "tool"
     ASSISTANT_PREFIX = "assistant_prefix"
-    
-
-class SeparatorStyle(IntEnum):
-    """Separator styles."""
-    NO_COLON_SINGLE = auto()
-    LLAMA2 = auto()
-    LLAMA3 = auto()
-    CHATGLM = auto()
-    CHATML = auto()
-    ADD_SPACE_TWO = auto()
-    GENERAL = auto() # No sep, we take all sep as part of the role
-    GENERAL_STOP_ALL = auto() # No sep, and add stop_str at each turn
-
 
 
 @dataclasses.dataclass
@@ -67,6 +58,58 @@ class Template:
     vision_end: str = None
     image_token: str = None
     video_token: str = None
+
+    def __post_init__(self):
+        """Post-initialization to automatically register vision processor if vision tokens are defined"""
+        if self.image_token or self.video_token:
+            self._register_vision_processor()
+    
+    def _register_vision_processor(self):
+        """Automatically register a vision processor for this template"""
+        from .vision_processor import VisionProcessorConfig, register_processor
+        
+        # Determine model type based on template name
+        model_type = self._infer_model_type()
+        
+        # Create vision config
+        config = VisionProcessorConfig(
+            model_type=model_type,
+            image_token=self.image_token or "",
+            video_token=self.video_token or "",
+            vision_start=self.vision_start or "",
+            vision_end=self.vision_end or "",
+            processor_class="AutoProcessor",
+            expansion_strategy="patch_based"
+        )
+        
+        # Register the processor
+        register_processor(self.name, config)
+    
+    def _infer_model_type(self) -> str:
+        """Infer model type from template name"""
+        name_lower = self.name.lower()
+        
+        if "qwen" in name_lower:
+            return "qwen_vl"
+        elif "llava" in name_lower:
+            return "llava"
+        elif "gemma" in name_lower:
+            return "gemma3"
+        elif "paligemma" in name_lower:
+            return "paligemma"
+        elif "internvl" in name_lower:
+            return "internvl"
+        elif "minicpm" in name_lower:
+            return "minicpm"
+        elif "mllama" in name_lower:
+            return "mllama"
+        elif "pixtral" in name_lower:
+            return "pixtral"
+        elif "video" in name_lower:
+            return "video_llava"
+        else:
+            # Default to patch-based for unknown models
+            return "patch_based"
 
     def render(self, messages: List[Dict], tools=None, add_generation_prompt: bool = False) -> str:
         """Render the template with the given messages and kwargs.
@@ -208,8 +251,21 @@ class Template:
         return generation_prefix, content, suffix
 
 
-    def encode(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None) -> str:
-        prompt, elements, roles = self.render(messages, tools=tools)
+    def encode(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None) -> str:
+        if processor is None and self.supports_vision():
+            raise ValueError(f"Processor is required for vision templates: {self.name}")
+        
+        if self.supports_vision():
+            # Use vision-aware encoding with proper alignment
+            return self._encode_with_vision_processor(messages, tokenizer, return_tensors, tools, add_generation_prompt=add_generation_prompt, processor=processor)
+        else:
+            # Use standard encoding
+            return self._encode_standard(messages, tokenizer, return_tensors, tools, add_generation_prompt=add_generation_prompt)
+
+    def _encode_standard(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False) -> str:
+        Logger.debug(f"[Template] Encoding standard for template: {self.name}")
+        """Standard encoding without vision support"""
+        prompt, elements, roles = self.render(messages, tools=tools, add_generation_prompt=add_generation_prompt)
         elements, mask_flags = self._postprocess_elements(elements, roles)
         input_ids = []
         attention_mask = []
@@ -241,6 +297,36 @@ class Template:
         if return_tensors == "pt":
             inputs = {k: torch.tensor([v]) for k, v in inputs.items()}
         return inputs
+
+    def _encode_with_vision_processor(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None) -> str:
+        Logger.debug(f"[Template] Encoding with vision processor for template: {self.name}")
+        """Encode with vision processor handling proper alignment"""
+        from .vision_processor import get_processor
+        from .utils import extract_vision_inputs_from_messages
+        
+        # Get vision processor
+        vision_processor = get_processor(self.name)
+        if vision_processor is None:
+            raise ValueError(f"No vision processor registered for template: {self.name}")
+        
+        # Get base prompt and mask information
+        prompt, elements, roles = self.render(messages, tools=tools, add_generation_prompt=add_generation_prompt)
+        elements, mask_flags = self._postprocess_elements(elements, roles)
+        
+        # Extract vision inputs
+        images, videos = extract_vision_inputs_from_messages(messages)
+        
+        # Use vision processor with alignment support
+        return vision_processor.process_for_llm(
+            prompt=prompt,
+            elements=elements,
+            mask_flags=mask_flags,
+            images=images,
+            videos=videos,
+            processor=processor,
+            tokenizer=tokenizer,
+            return_tensors=return_tensors
+        )
         
 
     def _postprocess_elements(self, elements: List[str], roles) -> List[str]:
@@ -302,6 +388,14 @@ class Template:
             merged_mask_flags.append(prev_mask_flag)
         return merged_elements, merged_mask_flags
 
+    def supports_vision(self) -> bool:
+        """Check if this template supports vision processing"""
+        return is_vision_template(self.name)
+
+    def get_vision_config(self):
+        """Get vision configuration for this template"""
+        from .vision_processor import VisionProcessorRegistry
+        return VisionProcessorRegistry.get_config(self.name)
 
     def get_vision_inputs(self):
         vision_inputs = defaultdict(list)
@@ -317,9 +411,6 @@ class Template:
                     else:
                         raise ValueError(f"Invalid message type: {item['type']}")
         return vision_inputs
-
-        # if self.name == "qwen2.5-vl":
-        # jinja_template = """{% set image_count = namespace(value=0) %}{% set video_count = namespace(value=0) %}{% for message in messages %}{% if loop.first and message['role'] != 'system' %}<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n{% endif %}<|im_start|>{{ message['role'] }}\n{% if message['role'] == 'tool'%}<tool_response>\n{% endif %}{% if message['content'] is string %}{{ message['content'] }}<|im_end|>\n{% else %}{% for content in message['content'] %}{% if content['type'] == 'image' or 'image' in content or 'image_url' in content %}{% set image_count.value = image_count.value + 1 %}{% if add_vision_id %}Picture {{ image_count.value }}: {% endif %}<|vision_start|><|image_pad|><|vision_end|>{% elif content['type'] == 'video' or 'video' in content %}{% set video_count.value = video_count.value + 1 %}{% if add_vision_id %}Video {{ video_count.value }}: {% endif %}<|vision_start|><|video_pad|><|vision_end|>{% elif 'text' in content %}{{ content['text'] }}{% endif %}{% if message['role'] == 'tool' %}\n\n</tool_response>{% endif %}{% endfor %}<|im_end|>\n{% endif %}{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}"""
 
     def jinja_template(self) -> str:
         """
@@ -554,12 +645,12 @@ class Chat:
         prompt_with_mask, _, _ = self.template.render_with_mask(messages=self.messages, add_generation_prompt=add_generation_prompt, tools=tools)
         return prompt_with_mask
 
-    def tokenize(self, tokenizer: PreTrainedTokenizer = None, add_generation_prompt=False, tools=None) -> List[int]:
+    def tokenize(self, tokenizer: PreTrainedTokenizer = None, add_generation_prompt=False, tools=None, processor=None) -> List[int]:
         if tokenizer is None:
             tokenizer = self.tokenizer
         if tools is None:
             tools = self.tools
-        return self.template.encode(messages=self.messages, tokenizer=tokenizer, return_tensors="pt", tools=tools)
+        return self.template.encode(messages=self.messages, tokenizer=tokenizer, return_tensors="pt", tools=tools, add_generation_prompt=add_generation_prompt, processor=processor)
 
     def append(self, message: Union[Dict, List[Dict]]):
         self._convert_single_message_to_hf_format(message)
@@ -600,6 +691,23 @@ register_template(
         video_token="<|video_pad|>",
     )
 )
+
+register_template(
+    Template(
+        name="qwen2.5-vl",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        system_message="You are a helpful assistant.",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",
+        vision_start="<|vision_start|>",
+        vision_end="<|vision_end|>",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        stop_words=["<|im_end|>"],
+    )
+)
+
 
 register_template(
     Template(
@@ -648,47 +756,15 @@ register_template(
     )
 )
 
-# register_conv_template(
-#     Template(
-#         name="qwen3",
-#         system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
-#         # system_message="",
-#         system_template_tool="""<|im_start|>system\n{system_message}# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
-#         roles=("<|im_start|>user\n", "<|im_start|>assistant\n", "<|im_start|>user\n<tool_response>\n{observation}\n</tool_response>"),
-#         tool_aggregator="STACKED",
-#         sep_style=SeparatorStyle.GENERAL_STOP_ALL,
-#         sep="",
-#         stop_token_ids=[
-#             151643,
-#             151644,
-#             151645,
-#         ],  # "<|endoftext|>", "<|im_start|>", "<|im_end|>"
-#         stop_str="<|im_end|>\n",
-#     )
-# )
-
-# register_conv_template(
-#     Template(
-#         name="qwen2.5-vl",
-#         system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
-#         system_message="You are a helpful assistant.",
-#         roles=("<|im_start|>user\n", "<|im_start|>assistant\n", "<|im_start|>tool\n<tool_response>\n{observation}\n</tool_response>"),
-#         tool_aggregator="STACKED",
-#         sep_style=SeparatorStyle.GENERAL_STOP_ALL,
-#         sep="",
-#         vision_start="<|vision_start|>",
-#         vision_end="<|vision_end|>",
-#         image_token="<|image_pad|>",
-#         video_token="<|video_pad|>",
-#         stop_token_ids=[
-#             151643,
-#             151644,
-#             151645,
-#         ],  # "<|endoftext|>", "<|im_start|>", "<|im_end|>"
-#         stop_str="<|im_end|>\n",
-#     )
-# )
-
+register_template(
+    Template(
+        name="deepseek-prover-v2",
+        system_template="<｜begin▁of▁sentence｜>{system_message}",
+        user_template="<｜User｜>{content}",
+        assistant_template="<｜Assistant｜>{content}<｜end▁of▁sentence｜>",
+        stop_words=["<｜end▁of▁sentence｜>"],
+    )
+)
 
 
 if __name__ == "__main__":
