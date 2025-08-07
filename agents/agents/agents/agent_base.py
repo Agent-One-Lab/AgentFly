@@ -9,7 +9,8 @@ from ..utils.logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
-from .templates.utils import is_vlm_template, tokenize_conversations
+from .templates.utils import tokenize_conversations
+from .templates.vision_processor import is_vision_template
 from .chain.chain_base import ChainGeneration
 import os
 import transformers
@@ -100,7 +101,7 @@ class BaseAgent(ChainGeneration, ABC):
             raise ValueError("model_name_or_path must be a string.")
 
         tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path)
-        if is_vlm_template(self.template):
+        if is_vision_template(self.template):
             processor = transformers.AutoProcessor.from_pretrained(model_name_or_path)
         else:
             processor = None
