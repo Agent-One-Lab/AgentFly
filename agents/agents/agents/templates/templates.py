@@ -726,10 +726,6 @@ register_template(
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
-        vision_start="<|vision_start|>",
-        vision_end="<|vision_end|>",
-        image_token="<|image_pad|>",
-        video_token="<|video_pad|>",
     )
 )
 

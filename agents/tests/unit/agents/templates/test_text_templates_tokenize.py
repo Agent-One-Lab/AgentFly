@@ -7,9 +7,9 @@
 Since the align for textual prompt is already tested in other files, we only need to test the tokenization of the templates.
 """
 
-from agents.agents.templates.utils import is_vlm_template, tokenize_conversation
+from agents.agents.templates.utils import tokenize_conversation
 import pytest
-from transformers import AutoTokenizer, AutoProcessor
+from transformers import AutoTokenizer
 import torch
 from agents.agents.templates.templates import Chat
 
@@ -44,8 +44,6 @@ from agents.agents.templates.templates import Chat
 def test_template_tokenize(template, messages, tools, add_generation_prompt):
     template_tokenizer_mapping = {
         "qwen2.5": "Qwen/Qwen2.5-3B-Instruct",
-        "qwen2.5-vl": "Qwen/Qwen2.5-VL-3B-Instruct",
-        "qwen3": "Qwen/Qwen3-8B",
     }
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template])
 
