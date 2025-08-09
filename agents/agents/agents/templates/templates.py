@@ -209,7 +209,7 @@ class Template:
         for item in content:
             if item["type"] == "text":
                 text += item["text"]
-            elif item["type"] == "image":
+            elif item["type"] in ["image", "image_url"]:
                 text += self.vision_start + self.image_token + self.vision_end
             elif item["type"] == "video":
                 text += self.vision_start + self.video_token + self.vision_end
@@ -315,6 +315,11 @@ class Template:
         
         # Extract vision inputs
         images, videos = extract_vision_inputs_from_messages(messages)
+
+        Logger.debug(f"[Template] images: {len(images)}")
+        Logger.debug(f"[Template] videos: {len(videos)}")
+
+        Logger.debug(f"[Template] messages: {messages}")
         
         # Use vision processor with alignment support
         return vision_processor.process_for_llm(
@@ -392,24 +397,23 @@ class Template:
         """Check if this template supports vision processing"""
         return is_vision_template(self.name)
 
-    def get_vision_config(self):
-        """Get vision configuration for this template"""
-        from .vision_processor import VisionProcessorRegistry
-        return VisionProcessorRegistry.get_config(self.name)
-
-    def get_vision_inputs(self):
+    def get_vision_inputs(self, messages: List[Dict]):
         vision_inputs = defaultdict(list)
-        for role, message, _ in self.messages:
-            if isinstance(message, list):
-                for item in message:
+        Logger.debug(f"[Template] get_vision_inputs: messages: {messages}")
+        for message in messages:
+            content = message["content"]
+            if isinstance(content, list):
+                for item in content:
                     if item['type'] == 'text':
                         continue
-                    elif item['type'] == 'image':
-                        vision_inputs['image'].append(open_image_from_any(item['image']))
+                    elif item['type'] in ['image', 'image_url', 'image_base64']:
+                        vision_inputs["image"].append(open_image_from_any(item[item['type']]))
                     elif item['type'] == 'video':
                         raise NotImplementedError("Video is not supported for chat template.")
                     else:
                         raise ValueError(f"Invalid message type: {item['type']}")
+            else:
+                raise ValueError(f"Invalid message content: {content}, the content should be a list of dicts")
         return vision_inputs
 
     def jinja_template(self) -> str:
@@ -644,6 +648,9 @@ class Chat:
     def prompt_with_mask(self, add_generation_prompt=False, tools=None) -> str:
         prompt_with_mask, _, _ = self.template.render_with_mask(messages=self.messages, add_generation_prompt=add_generation_prompt, tools=tools)
         return prompt_with_mask
+
+    def vision_inputs(self) -> List[Any]:
+        return self.template.get_vision_inputs(self.messages)
 
     def tokenize(self, tokenizer: PreTrainedTokenizer = None, add_generation_prompt=False, tools=None, processor=None) -> List[int]:
         if tokenizer is None:

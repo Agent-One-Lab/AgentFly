@@ -122,6 +122,10 @@ class VisionProcessor(ABC):
     ) -> Dict[str, torch.Tensor]:
         """Generate multi-modal inputs for the model"""
         pass
+
+    def process_vision_info(self, messages: List[Dict]) -> Dict[str, torch.Tensor]:
+        """Process vision information from messages"""
+        pass
     
     # def process_for_llm(
     #     self,
@@ -528,6 +532,19 @@ class PatchBasedProcessor(VisionProcessor):
             mm_inputs.update(self.preprocess_videos(videos, processor))
         
         return mm_inputs
+
+    def process_vision_info(self, messages: List[Dict], processor: Any):
+        """Process vision information from messages"""
+        image_message_types = ["image", "image_url", "image_base64"]
+        images = []
+        for message in messages:
+            for content in message["content"]:
+                if content["type"] in image_message_types:
+                    content_type = content["type"]
+                    images.append(content[content_type])
+        mm_inputs = self.get_mm_inputs(images, [], processor)
+        return mm_inputs
+
 
 class QwenVLProcessor(PatchBasedProcessor):
     """Qwen-VL specific processor with custom image preprocessing"""

@@ -15,6 +15,7 @@ from .chain.chain_base import ChainGeneration
 import os
 import transformers
 import warnings
+import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 try:
     from verl.protocol import DataProto
@@ -22,6 +23,7 @@ except ImportError:
     print("verl can not be imported.")
     pass
 
+Logger = logging.getLogger(__name__)
 
 class BaseAgent(ChainGeneration, ABC):
     """
@@ -107,10 +109,11 @@ class BaseAgent(ChainGeneration, ABC):
             processor = None
         return llm_engine, tokenizer, processor
 
-    def set_llm_engine(self, llm_engine: Any, tokenizer: Any):
+    def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"
         self.llm_engine.llm_engine = llm_engine
         self.tokenizer = tokenizer
+        self.processor = processor
         
     def generate(self, messages_list_or_inputs: List[List[Dict]], **args):
         return self.llm_engine.generate(messages_list_or_inputs, **args)
