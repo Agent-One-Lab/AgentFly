@@ -9,11 +9,13 @@ from ..utils.logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
-from .templates.utils import is_vlm_template, tokenize_conversations
+from .templates.utils import tokenize_conversations
+from .templates.vision_processor import is_vision_template
 from .chain.chain_base import ChainGeneration
 import os
 import transformers
 import warnings
+import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 from .utils.tokenizer import create_tokenizer
 from .backend_config import BACKEND_CONFIGS
@@ -23,6 +25,7 @@ except ImportError:
     print("verl can not be imported.")
     pass
 
+Logger = logging.getLogger(__name__)
 
 class BaseAgent(ChainGeneration, ABC):
     """
@@ -150,10 +153,11 @@ class BaseAgent(ChainGeneration, ABC):
 
         return llm_engine
 
-    def set_llm_engine(self, llm_engine: Any, tokenizer: Any):
+    def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"
         self.llm_engine.llm_engine = llm_engine
         self.tokenizer = tokenizer
+        self.processor = processor
         
     def generate(self, messages_list_or_inputs: List[List[Dict]], **args):
         return self.llm_engine.generate(messages_list_or_inputs, **args)

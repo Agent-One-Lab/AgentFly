@@ -1,8 +1,19 @@
-from agents.agents.templates.utils import compare_hf_template
-from transformers import AutoTokenizer
-import pytest
+""" This file is for testing the tokenization of the templates. The templates should align on following aspects:
+    - The tokenized prompt should be the same as the one obtained from HF template with all the following options:
+        - add_generation_prompt
+        - tools
+    - We need to observe the labels and action_mask to make sure the the they are correct.
 
-@pytest.mark.parametrize("template", ["qwen2.5-think", "qwen2.5", "qwen2.5-no-tool"])
+Since the align for textual prompt is already tested in other files, we only need to test the tokenization of the templates.
+"""
+
+from agents.agents.templates.utils import is_vlm_template, tokenize_conversation
+import pytest
+from transformers import AutoTokenizer, AutoProcessor
+import torch
+from agents.agents.templates.templates import Chat
+
+@pytest.mark.parametrize("template", ["qwen2.5"])
 @pytest.mark.parametrize("messages", [
     [
         {"role": "user", "content": "Hello, how are you?"},
@@ -29,21 +40,20 @@ import pytest
         {"type": "function", "function": {"name": "multiply", "description": "A function that multiplies two numbers", "parameters": {"type": "object", "properties": {"x": {"type": "number", "description": "The first number to multiply"}, "y": {"type": "number", "description": "The second number to multiply"}}, "required": ["x", "y"]}}},
     ]
 ])
-@pytest.mark.parametrize("add_generation_prompt", [True, False])
-def test_chat_template_equal(template, messages, tools, add_generation_prompt):
-    # Filter invalid combinations
-    if add_generation_prompt and messages[-1]['role'] == 'assistant':
-        return
-    
+@pytest.mark.parametrize("add_generation_prompt", [False, True])
+def test_template_tokenize(template, messages, tools, add_generation_prompt):
     template_tokenizer_mapping = {
         "qwen2.5": "Qwen/Qwen2.5-3B-Instruct",
-        "qwen2.5-think": "Qwen/Qwen2.5-3B-Instruct",
-        "qwen2.5-no-tool": "Qwen/Qwen2.5-3B-Instruct",
+        "qwen2.5-vl": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen3": "Qwen/Qwen3-8B",
     }
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template])
 
-    is_equal, is_equal_between_implemented_prompts, is_equal_between_jinja_prompts, official_prompt, implemented_prompt, implemented_jinja_prompt, highlighted_prompt = compare_hf_template(tokenizer, template, messages=messages, tools=tools,add_generation_prompt=add_generation_prompt)
-    # assert is_equal, print(f"Template: {template}\n\nMessages: {messages}\n\ntools: {tools}\n\nadd_generation_prompt: {add_generation_prompt}\n\nOfficial prompt:\n\n{official_prompt}\n\nImplemented prompt:\n\n{implemented_prompt}")
-    assert is_equal_between_jinja_prompts, print(f"Template: {template}\n\nMessages: {messages}\n\ntools: {tools}\n\nadd_generation_prompt: {add_generation_prompt}\n\nImplemented prompt:\n\n{implemented_prompt}\n\nJinja prompt:\n\n{implemented_jinja_prompt}")
-    print(f"Highlighted prompt:\n\n{highlighted_prompt}")
+    chat = Chat(template, messages, tools=tools)
+    prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools)
 
+    hf_inputs = tokenizer(prompt, return_tensors="pt")
+
+    implemented_inputs = tokenize_conversation(messages, tokenizer, template, max_length=2048, tools=tools, add_generation_prompt=add_generation_prompt, return_tensors="pt")
+
+    assert torch.equal(hf_inputs["input_ids"], implemented_inputs["input_ids"]), f"template: {template}\n\nmessages: {messages}\n\ntools: {tools}\n\nadd_generation_prompt: {add_generation_prompt}\n\nprompt: {prompt}\n\nimplemented_prompt: {tokenizer.decode(implemented_inputs['input_ids'][0])}\n\nhf_inputs: {hf_inputs}\n\nimplemented_inputs: {implemented_inputs}"
