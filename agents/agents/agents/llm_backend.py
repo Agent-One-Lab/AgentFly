@@ -20,6 +20,7 @@ os.environ["VLLM_USE_V1"] = "1"
 from vllm import LLM, AsyncLLMEngine, SamplingParams, AsyncEngineArgs
 import openai
 from .templates.templates import Chat
+from .templates.vision_processor import get_processor
 import logging
 import PIL
 
@@ -46,8 +47,8 @@ class LLMBackend:
         for messages in messages_list:
             chat = Chat(template, messages)
             prompts.append(chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools))
-            # We don't support vision inputs for now
-            vision_inputs.append(None)
+            # We only support image inputs for now
+            vision_inputs.append(chat.vision_inputs())
 
         return prompts, vision_inputs
     
@@ -417,12 +418,6 @@ class AsyncVerlBackend(LLMBackend):
 
         gen_batch_output = await self.llm_engine.generate_sequences_async(batch, **generation_config)
         response_texts = gen_batch_output.batch['responses'].tolist() # np.array of strings with length BS
-        # print(f"[AsyncVerlbackend] response_texts: {response_texts.shape} {type(response_texts)}")
-        # print(f"[AsyncVerlBackend] response_texts: {response_texts[0]}")
-        # raise NotImplementedError("Async Verl backend does not support sync generation")
-        # response_texts = [text for text in response_texts]
-        # response_texts = self.tokenizer.batch_decode(responses, skip_special_tokens=True) # List of string with length BS
-        # response_texts = responses[:len(prompts)*n]
         return response_texts
 
 

@@ -193,12 +193,12 @@ def extract_vision_inputs_from_messages(messages: list) -> tuple[list, list]:
     for message in messages:
         if isinstance(message.get('content'), list):
             for item in message['content']:
-                if item.get('type') == 'image':
+                if item.get('type') in ['image', 'image_url']:
                     if 'image' in item:
                         images.append(item['image'])
                     elif 'image_url' in item:
                         images.append(item['image_url']['url'])
-                elif item.get('type') == 'video':
+                elif item.get('type') in ['video', 'video_url']:
                     if 'video' in item:
                         videos.append(item['video'])
                     elif 'video_url' in item:
