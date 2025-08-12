@@ -20,6 +20,7 @@ os.environ["VLLM_USE_V1"] = "1"
 from vllm import LLM, AsyncLLMEngine, SamplingParams, AsyncEngineArgs
 import openai
 from .templates.templates import Chat
+from .templates.vision_processor import get_processor
 import logging
 import PIL
 
@@ -46,8 +47,8 @@ class LLMBackend:
         for messages in messages_list:
             chat = Chat(template, messages)
             prompts.append(chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools))
-            # We don't support vision inputs for now
-            vision_inputs.append(None)
+            # We only support image inputs for now
+            vision_inputs.append(chat.vision_inputs())
 
         return prompts, vision_inputs
     
@@ -325,49 +326,6 @@ class AsyncVLLMBackend(LLMBackend):
                     if hasattr(sequence, 'text'):
                         yield sequence.text
 
-class VerlBackend(LLMBackend):
-    """Verl implementation"""
-    
-    def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=8192, **kwargs):
-        super().__init__(**kwargs)
-        self.model_name = model_name_or_path
-        self.max_length = max_length
-        self.template = template
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, 
-            trust_remote_code=True,
-        )
-        self.llm_engine = llm_engine
-    
-    def generate(self, messages_list: str, **kwargs) -> str:
-        """Generate text from prompt using Verl"""
-        # We need to build a DataProto from the prompts
-        prompts = self.apply_chat_template(messages_list, self.template)
-        inputs = self.tokenizer(prompts, return_tensors="pt", padding=True, padding_side="left")
-        # We need to do padding for compatibility with the verl DataProto, which 
-        # assumes that the batch size must be divisible by the dp size
-        world_size = self.llm_engine.world_size
-        inputs['input_ids'] = pad_tensor_to_rank_size(inputs['input_ids'], world_size)
-        inputs['attention_mask'] = pad_tensor_to_rank_size(inputs['attention_mask'], world_size)
-
-        position_ids = torch.clip(torch.cumsum(inputs.attention_mask, dim=-1) - 1, min=0, max=None)
-        inputs['position_ids'] = position_ids
-
-        n = kwargs.get("num_return_sequences", 1)
-        temperature = kwargs.get("temperature", 1.0)
-        use_agent = True
-        batch = DataProto.from_single_dict(inputs, meta_info={"n": n, "use_agent": use_agent, "temperature": temperature})
-
-        gen_batch_output = self.llm_engine.generate_sequences(batch)
-        responses = gen_batch_output.batch['responses'] # BS x L
-        response_texts = self.tokenizer.batch_decode(responses, skip_special_tokens=True) # List of string with length BS
-        response_texts = response_texts[:len(prompts)*n]
-        return response_texts
-    
-    def generate_async(self, messages_list: str, **kwargs) -> str:
-        raise NotImplementedError("Verl backend does not support async generation")
-    
-
 class AsyncVerlBackend(LLMBackend):
     """Verl implementation"""
     
@@ -417,12 +375,6 @@ class AsyncVerlBackend(LLMBackend):
 
         gen_batch_output = await self.llm_engine.generate_sequences_async(batch, **generation_config)
         response_texts = gen_batch_output.batch['responses'].tolist() # np.array of strings with length BS
-        # print(f"[AsyncVerlbackend] response_texts: {response_texts.shape} {type(response_texts)}")
-        # print(f"[AsyncVerlBackend] response_texts: {response_texts[0]}")
-        # raise NotImplementedError("Async Verl backend does not support sync generation")
-        # response_texts = [text for text in response_texts]
-        # response_texts = self.tokenizer.batch_decode(responses, skip_special_tokens=True) # List of string with length BS
-        # response_texts = responses[:len(prompts)*n]
         return response_texts
 
 
@@ -465,24 +417,39 @@ class ClientBackend(LLMBackend):
     # --------------------------------------------------------------------- #
     # Low‑level single request (runs in threadpool so it doesn't block loop)
     # --------------------------------------------------------------------- #
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=15))
-    def _blocking_call(self, messages: List[List[Dict]], **kw) -> str:
-        if "num_return_sequences" in kw:
-            n = kw.pop("num_return_sequences")
+    @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
+    def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
+        if "num_return_sequences" in kwargs:
+            n = kwargs.pop("num_return_sequences")
         else:
             n = 1
+
+        if "tool_choice" in kwargs:
+            tool_choice = kwargs.pop("tool_choice")
+        else:
+            tool_choice = "none"
+
+        print(f"[ClientBackend] messages: {messages}")
         resp = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
             timeout=self.timeout,
             max_tokens=self.max_new_tokens,
             n=n,
-            tool_choice="none",
-            **kw,
+            tool_choice=tool_choice,
+            **kwargs,
         )
-        response_texts = [choice.message.content for choice in resp.choices]
+        resp_json = resp.dict()
+        response_texts = [choice["message"]["content"] for choice in resp_json["choices"]]
+        tool_calls = [choice["message"]["tool_calls"] for choice in resp_json["choices"]]
 
-        return response_texts
+        if tool_choice == "none":
+            return response_texts
+        else:
+            return {
+                "response_texts": response_texts,
+                "tool_calls": tool_calls,
+            }
 
     async def _call(self, messages: List[List[Dict]], **kw) -> str:
         # acquire a rate‑limit token
@@ -495,7 +462,7 @@ class ClientBackend(LLMBackend):
     def async_generate(
         self,
         messages: List[List[Dict]] | List[Dict],
-        **kw,
+        **kwargs,
     ) -> List[str] | asyncio.Task:
         """
         • Pass a *list of messages* → single completion.
@@ -510,14 +477,24 @@ class ClientBackend(LLMBackend):
             messages_list = [messages]  # single
         else:
             messages_list = messages     # batch
-
+        print(f"[ClientBackend] messages_list: {messages_list}")
         messages_list = [convert_messages_to_openai_format(messages) for messages in messages_list]
 
         async def _runner():
-            tasks = [asyncio.create_task(self._call(_input, **kw)) for _input in messages_list]
-            texts_list = await asyncio.gather(*tasks)
-            response_texts = [text for texts in texts_list for text in texts]
-            return response_texts
+            tasks = [asyncio.create_task(self._call(_input, **kwargs)) for _input in messages_list]
+            # Flatten the response list
+            response_texts_list_or_dict = await asyncio.gather(*tasks)
+            # return is a dict if tool_choice is not none, otherwise a list of strings
+            if isinstance(response_texts_list_or_dict[0], dict):
+                response_texts = [text for response in response_texts_list_or_dict for text in response["response_texts"]]
+                tool_calls = [tool_call for response in response_texts_list_or_dict for tool_call in response["tool_calls"]]
+                return {
+                    "response_texts": response_texts,
+                    "tool_calls": tool_calls,
+                }
+            else:
+                response_texts = [text for response in response_texts_list_or_dict for text in response]
+                return response_texts
 
         try:
             loop = asyncio.get_running_loop()  # ➊ already inside a loop?
@@ -532,8 +509,8 @@ class ClientBackend(LLMBackend):
 
     async def generate_async(self,
             messages: List[List[Dict]] | List[Dict],
-            **kw) -> List[str]:
-        return await self.async_generate(messages, **kw)
+            **kwargs) -> List[str]:
+        return await self.async_generate(messages, **kwargs)
 
     # Background token‑bucket refill (one token each 60/max_rpm seconds)
     async def _refill_tokens(self):
