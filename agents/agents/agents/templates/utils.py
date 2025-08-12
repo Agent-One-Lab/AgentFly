@@ -305,6 +305,9 @@ def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add
     plain_highlighted_prompt = strip_ansi(highlighted_prompt)
     is_equal_between_implemented_prompts = implemented_prompt == plain_highlighted_prompt
     jinja_template = chat.template.jinja_template()
+    # Save jinja template to file
+    with open("jinja_template.jinja", "w") as f:
+        f.write(jinja_template)
     tokenizer.chat_template = jinja_template
     implemented_jinja_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt)
     is_equal_between_jinja_prompts = implemented_jinja_prompt == implemented_prompt
