@@ -104,3 +104,18 @@ def qa_f1_reward_format(prediction: str, answer: str, trajectory: List[str]) -> 
         raise ValueError(f"Invalid prediction or trajectory for qa reward with format: Trajectory: {trajectory}")
     
     return rewards_dict
+
+
+@reward(name="ok_vqa_reward")
+def ok_vqa_reward(prediction: str, answers: List[str], trajectory: List[str]) -> float:
+    """
+    Calculate the reward for the agent's response based on the F1 score and EM score.
+    The reward is 0.0 if the agent has not called any tool.
+    The reward is the F1 score if the agent has called a tool.
+    """
+    f1_scores = []
+    for answer in answers:
+        f1, precision, recall = f1_score(prediction, answer)
+        f1_scores.append(f1)
+    # All answers are the correct answer, take the max f1 score
+    return max(f1_scores)

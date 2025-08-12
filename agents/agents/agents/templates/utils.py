@@ -10,7 +10,8 @@ import re
 import logging
 from .templates import Chat, get_template
 from ... import AGENT_DATA_DIR
-
+from typing import Any
+from .vision_processor import get_processor
 # Set up logging that won't be overridden by other modules
 LOGGER = logging.getLogger(__name__)
 
@@ -20,9 +21,6 @@ def strip_ansi(s: str) -> str:
     """Remove ANSI escape sequences from a string."""
     return ANSI_RE.sub('', s)
 
-def is_vlm_template(template: str) -> bool:
-    return template in ["qwen2.5-vl"]
-
 
 def convert_messages_to_openai_format(messages: list) -> list:
     """
@@ -31,10 +29,10 @@ def convert_messages_to_openai_format(messages: list) -> list:
     """
     messages = copy.deepcopy(messages)
     for message in messages:
-        if "tool_calls" in message:
-            del message["tool_calls"]
-        if "tool_call_id" in message:
-            del message["tool_call_id"]
+        # if "tool_calls" in message:
+        #     del message["tool_calls"]
+        # if "tool_call_id" in message:
+        #     del message["tool_call_id"]
         if "tool_choice" in message:
             del message["tool_choice"]
     return messages
@@ -139,12 +137,15 @@ def tokenize_conversation(
     :return: input_ids, attention_mask, labels, action_mask
     """
     chat = Chat(template=template, messages=messages, tokenizer=tokenizer)
-    inputs = chat.tokenize(tokenizer,  add_generation_prompt=add_generation_prompt, tools=tools)
+    inputs = chat.tokenize(tokenizer, add_generation_prompt=add_generation_prompt, tools=tools, processor=processor)
+    
     if max_length is not None:
         inputs['input_ids'] = inputs['input_ids'][:, :max_length]
         inputs['attention_mask'] = inputs['attention_mask'][:, :max_length]
-        inputs['labels'] = inputs['labels'][:, :max_length]
-        inputs['action_mask'] = inputs['action_mask'][:, :max_length]
+        if 'labels' in inputs:
+            inputs['labels'] = inputs['labels'][:, :max_length]
+        if 'action_mask' in inputs:
+            inputs['action_mask'] = inputs['action_mask'][:, :max_length]
 
     return inputs
 
@@ -153,82 +154,85 @@ def convert_inputs_to_vision_inputs(template: str,
                                     processor,          # AutoProcessor (not bare tokenizer)
                                     messages: list):
     """
-    Expand `inputs` (built from a chat template that contains ONE
-    <|image_pad|> / <|video_pad|> placeholder per asset) into the real
-    processor outputs and stretch `action_mask` / `labels` so they stay
-    aligned after the pad tokens are repeated.
-
-    Returns
-    -------
-    dict   -- processor(...) result + expanded masks
-    """
-    assert template == "qwen2.5-vl", "Only qwen2.5-vl is supported"
-
-
-    # ------------------------------------------------------------------
-    # 1. special-token ids
-    # ------------------------------------------------------------------
-    tk = processor.tokenizer
-    conv = get_conv_template(template)
-    image_pad_id  = tk.encode(conv.image_token,  add_special_tokens=False)[0]
-    video_pad_id  = tk.encode(conv.video_token,  add_special_tokens=False)[0]
-    vis_start_id  = tk.encode(conv.vision_start, add_special_tokens=False)[0]
-    vis_end_id    = tk.encode(conv.vision_end,   add_special_tokens=False)[0]
-
-    repeat_ids = torch.tensor([image_pad_id, video_pad_id], dtype=torch.long)
-    vision_ids = torch.tensor([image_pad_id, video_pad_id,
-                               vis_start_id, vis_end_id], dtype=torch.long)
-
-    # ------------------------------------------------------------------
-    # 2. run the processor (adds patch-level vision tokens)
-    # ------------------------------------------------------------------
-    LOGGER.debug(f"[Template::convert_inputs_to_vision_inputs] messages: {messages}")
-    imgs, vids = process_vision_info(messages)
-    text = format_conversation(messages, template).get_prompt()
-    proc_out = processor(
-        text=text,
-        images=imgs,
-        videos=vids,
-        return_tensors="pt",
-        padding=False,
-        truncation=False,
-    )
-    new_ids = proc_out["input_ids"][0]            # (new_len,)
-    new_attention_mask = proc_out["attention_mask"][0]
-    device  = new_ids.device
-
-    # ------------------------------------------------------------------
-    # 3. original (pre-processor) tensors
-    # ------------------------------------------------------------------
-    old_ids    = inputs["input_ids"][0].to(device)
-    old_action = inputs.get("action_mask", None)
-    old_labels = inputs.get("labels", None)
-    old_attention_mask = inputs.get("attention_mask", None)
-
-    # ------------------------------------------------------------------
-    # 4. build boolean masks that mark NON-repeated positions
-    # ------------------------------------------------------------------
+    NEW PIPELINE: Template processes messages → Human-readable prompt → Vision processor → LLM-ready inputs
     
-    new_keep = ~torch.isin(new_ids, repeat_ids)   # True where we copy from old
-    old_keep = ~torch.isin(old_ids, repeat_ids)
+    The correct pipeline is:
+    1. Template processes messages to get human-readable prompt with single multi-modal tokens
+    2. Vision processor handles image/video processing and token expansion
+    3. Final result is directly usable by LLMs with model(**inputs)
+    """
+    # Get the vision processor for this template
+    vision_processor = get_processor(template)
+    if vision_processor is None:
+        raise ValueError(f"No vision processor registered for template: {template}")
+    
+    # Step 1: Template processes messages to get human-readable prompt
+    from .templates import Chat
+    chat = Chat(template=template, messages=messages, tokenizer=processor.tokenizer)
+    prompt = chat.prompt()  # This gives us human-readable prompt with single multi-modal tokens
+    
+    # Step 2: Extract vision inputs from messages
+    images, videos = extract_vision_inputs_from_messages(messages)
+    
+    # Step 3: Vision processor handles the complete pipeline
+    # This expands tokens and generates LLM-ready inputs
+    final_inputs = vision_processor.process_for_llm(
+        prompt=prompt,
+        images=images,
+        videos=videos,
+        processor=processor,
+        tokenizer=processor.tokenizer
+    )
+    
+    return final_inputs
 
-    # sanity check
-    assert new_keep.sum() == old_keep.sum(), f"Mismatch after dropping repeated vision tokens: {new_ids} {old_ids}"
+def extract_vision_inputs_from_messages(messages: list) -> tuple[list, list]:
+    """Extract images and videos from messages"""
+    images, videos = [], []
+    
+    for message in messages:
+        if isinstance(message.get('content'), list):
+            for item in message['content']:
+                if item.get('type') in ['image', 'image_url']:
+                    if 'image' in item:
+                        images.append(item['image'])
+                    elif 'image_url' in item:
+                        images.append(item['image_url']['url'])
+                elif item.get('type') in ['video', 'video_url']:
+                    if 'video' in item:
+                        videos.append(item['video'])
+                    elif 'video_url' in item:
+                        videos.append(item['video_url']['url'])
+    
+    return images, videos
 
-    # ------------------------------------------------------------------
-    # 5. allocate expanded tensors and copy en masse
-    # ------------------------------------------------------------------
-    if old_action is not None:
-        exp_action = torch.zeros_like(new_ids, dtype=old_action.dtype)
-        exp_action[new_keep] = old_action[0][old_keep].to(device)
-        proc_out["action_mask"] = exp_action.unsqueeze(0)
-
-    if old_labels is not None:
-        exp_labels = torch.full_like(new_ids, -100, dtype=old_labels.dtype)
-        exp_labels[new_keep] = old_labels[0][old_keep].to(device)
-        proc_out["labels"] = exp_labels.unsqueeze(0)
-
-    return proc_out
+def process_prompt_with_vision(
+    prompt: str,
+    template: str,
+    processor: Any,
+    images: list = None,
+    videos: list = None,
+) -> dict:
+    """Process a prompt with vision support"""
+    vision_processor = get_processor(template)
+    if vision_processor is None:
+        # If no vision processor, just return tokenized prompt
+        return processor.tokenizer(
+            prompt,
+            return_tensors="pt",
+            add_special_tokens=True,
+            padding=True,
+            truncation=True
+        )
+    
+    # Use vision processor to handle the complete pipeline
+    return vision_processor.process_for_llm(
+        prompt=prompt,
+        images=images or [],
+        videos=videos or [],
+        processor=processor,
+        tokenizer=processor.tokenizer
+    )
 
 
 def tokenize_conversations(messages_list, tokenizer, conv_template, max_length, processor=None, return_tensors="pt", return_reward_mask=False):
@@ -245,7 +249,9 @@ def tokenize_conversations(messages_list, tokenizer, conv_template, max_length, 
         batch_action_masks.append(inputs['action_mask'].squeeze(0))
     
     if return_tensors == "pt":
-        batch_input_ids = torch.nn.utils.rnn.pad_sequence(batch_input_ids, batch_first=True, padding_value=tokenizer.pad_token_id)
+        # Use pad_token_id from the tokenizer interface
+        pad_token_id = getattr(tokenizer, 'pad_token_id', 0)
+        batch_input_ids = torch.nn.utils.rnn.pad_sequence(batch_input_ids, batch_first=True, padding_value=pad_token_id)
         batch_attention_masks = torch.nn.utils.rnn.pad_sequence(batch_attention_masks, batch_first=True, padding_value=0)
         batch_labels = torch.nn.utils.rnn.pad_sequence(batch_labels, batch_first=True, padding_value=-100)
         batch_action_masks = torch.nn.utils.rnn.pad_sequence(batch_action_masks, batch_first=True, padding_value=0)
@@ -299,6 +305,9 @@ def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add
     plain_highlighted_prompt = strip_ansi(highlighted_prompt)
     is_equal_between_implemented_prompts = implemented_prompt == plain_highlighted_prompt
     jinja_template = chat.template.jinja_template()
+    # Save jinja template to file
+    with open("jinja_template.jinja", "w") as f:
+        f.write(jinja_template)
     tokenizer.chat_template = jinja_template
     implemented_jinja_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt)
     is_equal_between_jinja_prompts = implemented_jinja_prompt == implemented_prompt
@@ -312,7 +321,9 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp):
         os.makedirs(f"{AGENT_DATA_DIR}/cache")
     with open(f"{AGENT_DATA_DIR}/cache/jinja_template.jinja", "w") as f:
         f.write(jinja_template)
-    command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+    # command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+    command = f"vllm serve {model_name_or_path} --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+
     print(command)
     os.system(command)
 
@@ -321,5 +332,6 @@ if __name__=="__main__":
     "python -m agents.agents.templates.utils"
     # model = "/mnt/sharefs/users/haonan.li/models/Qwen2.5-7B-instruct-am_think_v1_distilled"
     model = "Qwen/Qwen2.5-7B-Instruct"
-    vllm_serve(model, "qwen2.5-think", 2, 1, 4)
+    # vllm_serve(model, "qwen2.5-think", 2, 1, 4)
+    vllm_serve(model, "qwen2.5", 1, 1, 1)
 

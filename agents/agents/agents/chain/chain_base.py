@@ -316,14 +316,40 @@ class ChainGeneration:
             # Handle tool calls
             if current_node.messages[-1].get("tool_calls"):
                 for tool_call in current_node.messages[-1]["tool_calls"]:
-                    current_node = await self._execute_tool_call(
+                    result = await self._execute_tool_call(
                         tool_call, newest_messages, chain, chain_id, depth, 
                         have_set_tools, enable_streaming
                     )
                     have_set_tools = True
+
+                    # Create action input node
+                    action_input_node = chain.add_node(
+                        type="Action Input",
+                        messages=deepcopy(newest_messages),
+                        description=result.get("arguments", "")
+                    )
+                    
+                    # Process observation
+                    observation = result["observation"]
+                    observation_json = json.dumps({
+                        "name": result["name"],
+                        "content": observation,
+                    }, indent=4)
+                    
+                    action_input_node.observation = observation_json
+                    action_input_node.observation_code = result["status"]
+                    newest_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": [{"type": "text", "text": observation_json}],
+                    })
+                    action_input_node.messages = deepcopy(newest_messages)
+                    action_input_node.is_terminal = result["status"] in self.terminal_status
             else:
                 # No tool calls, chain is finished
                 break
+            
+            current_node = action_input_node
 
             depth += 1
 
@@ -463,33 +489,9 @@ class ChainGeneration:
                 step=depth,
                 depth=depth
             ))
+
+        return result
             
-        
-        # Create action input node
-        action_input_node = chain.add_node(
-            type="Action Input",
-            messages=deepcopy(newest_messages),
-            description=result.get("arguments", "")
-        )
-        
-        # Process observation
-        observation = result["observation"]
-        observation_json = json.dumps({
-            "name": result["name"],
-            "content": observation,
-        }, indent=4)
-        
-        action_input_node.observation = observation_json
-        action_input_node.observation_code = result["status"]
-        newest_messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call["id"],
-            "content": [{"type": "text", "text": observation_json}],
-        })
-        action_input_node.messages = deepcopy(newest_messages)
-        action_input_node.is_terminal = result["status"] in self.terminal_status
-        
-        return action_input_node
 
     async def _finalize_chain(self, chain_id, chain, current_node, depth):
         """Finalize the chain with reward calculation and cleanup."""
