@@ -1,4 +1,4 @@
-from agents.envs.scienceworld_env import ScienceWorldEnv
+from ..envs.scienceworld_env import ScienceWorldEnv
 from .reward_base import reward
 
 @reward(name="scienceworld_reward", env_cls=ScienceWorldEnv, pool_size=8)

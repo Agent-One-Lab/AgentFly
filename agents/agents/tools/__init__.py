@@ -14,6 +14,7 @@ from .src.webshop.tools import webshop_browser
 from .src.react.tools import answer_qa, answer_math
 from .src.search.async_dense_retriever import asyncdense_retrieve
 from .src.scienceworld.tools import scienceworld_explorer
+from .src.ui.tools import pyautogui_code_generator
 
 # Export the tools
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "alfworld_get_task_objective"
     "alfworld_reset"
     "asyncdense_retrieve"
+    "pyautogui_code_generator"
     # "current_env"
 ]
 
@@ -54,7 +56,8 @@ EXPLICIT_TOOLS = {
     "answer_math": answer_math,
     "hallucination_tool": hallucination_tool,
     "invalid_input_tool": invalid_input_tool,
-    "dense_retrieve": dense_retrieve
+    "dense_retrieve": dense_retrieve,
+    "pyautogui_code_generator": pyautogui_code_generator
 }
 
 # Update the registry with explicit tools

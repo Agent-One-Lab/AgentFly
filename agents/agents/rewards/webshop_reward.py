@@ -1,4 +1,4 @@
-from agents.envs.webshop_text_env import WebAgentTextEnv
+from ..envs.webshop_text_env import WebAgentTextEnv
 from .reward_base import reward
 
 @reward(name="webshop_reward", env_cls=WebAgentTextEnv, pool_size=8)
