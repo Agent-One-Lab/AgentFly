@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from .specialized.think_agent import ThinkAgent
 from agents.agents.specialized.openai_agent import OpenAIAgent
@@ -8,8 +8,7 @@ from .react.react_agent import ReactAgent
 from .specialized.code_agent import CodeAgent
 from ..rewards.reward_base import get_reward_from_name
 
-# Registry for agent types - will be populated dynamically
-AGENT_MAPPING = {}
+
 
 class AutoAgent:
     """
@@ -22,7 +21,7 @@ class AutoAgent:
     These agents are registered automatically. Additional custom agents can be
     registered using the register_agent method.
     """
-    
+    AGENT_MAPPING = {}
     @classmethod
     def register_agent(cls, agent_type: str, agent_class: Type[BaseAgent]) -> None:
         """
@@ -32,7 +31,7 @@ class AutoAgent:
             agent_type: The name identifier for the agent type (e.g., 'react', 'code')
             agent_class: The agent class to instantiate for this type
         """
-        AGENT_MAPPING[agent_type.lower()] = agent_class
+        cls.AGENT_MAPPING[agent_type.lower()] = agent_class
     
     @classmethod
     def _get_agent_class(cls, agent_type: str) -> Type[BaseAgent]:
@@ -50,11 +49,11 @@ class AutoAgent:
         """
         agent_type = agent_type.lower()
         
-        if agent_type not in AGENT_MAPPING:
-            available_types = list(AGENT_MAPPING.keys())
+        if agent_type not in cls.AGENT_MAPPING:
+            available_types = list(cls.AGENT_MAPPING.keys())
             raise ValueError(f"Unknown agent type: '{agent_type}'. Available types: {available_types}")
             
-        return AGENT_MAPPING[agent_type]
+        return cls.AGENT_MAPPING[agent_type]
     
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> BaseAgent:
@@ -81,6 +80,14 @@ class AutoAgent:
             An initialized agent instance.
         """
         # Extract and validate required parameters
+        if config is None:
+            raise ValueError("Config could not be None")
+
+        # construct a copy for agent_kwargs
+        agent_kwargs = {}
+        for k, v in config.items():
+            agent_kwargs[k] = v
+        
         required_params = ["agent_type", "template", "tools", "backend"]
         missing_params = [param for param in required_params if not config.get(param)]
         
@@ -88,20 +95,21 @@ class AutoAgent:
             raise ValueError(f"Missing required parameters: {', '.join(missing_params)}")
         
         agent_type = config["agent_type"]
+        agent_kwargs.pop("agent_type")
         tools = get_tools_from_names(config["tools"])
         agent_class = cls._get_agent_class(agent_type)
-        
-        # construct a copy for agent_kwargs
-        agent_kwargs = {}
-        for k, v in config.items():
-            agent_kwargs[k] = v
-        
-        agent_kwargs.pop("agent_type")
-        agent_kwargs['tools'] = tools
-        if "reward_name" in config and config["reward_name"] is not None:
+        reward_name = config.get("reward_name")
+        if reward_name is not None:
+            reward_fn = get_reward_from_name(reward_name)
             agent_kwargs.pop("reward_name")
-            reward_fn = get_reward_from_name(config["reward_name"])
-            agent_kwargs["reward_fn"] = reward_fn
+        else:
+            reward_fn = None
+        
+        agent_kwargs['tools'] = tools
+        agent_kwargs['reward_fn'] = reward_fn
+
+        if "use_agent" in agent_kwargs:
+            agent_kwargs.pop("use_agent")
         
         agent = agent_class(**agent_kwargs)
 
@@ -114,11 +122,9 @@ class AutoAgent:
         agent_type: str,
         template: str,
         tools: Optional[List] = None,
-        vllm: bool = False,
         debug: bool = False,
         log_file: str = "agent",
-        wrapper: bool = False,
-        reward_name: Optional[str] = None,
+        reward_fn: Optional[Callable] = None,
         **kwargs
     ) -> BaseAgent:
         """
@@ -147,11 +153,9 @@ class AutoAgent:
             "model_name_or_path": model_name_or_path,
             "template": template,
             "tools": tools or [],
-            "vllm": vllm,
             "debug": debug,
             "log_file": log_file,
-            "wrapper": wrapper,
-            "reward_name": reward_name,
+            "reward_fn": reward_fn,
             **kwargs
         }
             
