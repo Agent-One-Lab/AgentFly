@@ -5,11 +5,11 @@ This module provides a unified interface to different LLM implementations.
 import asyncio
 from asyncore import loop
 from collections import deque
+import copy
 from functools import partial
 import time
 from typing import Dict, Any, List, Optional, Callable, AsyncGenerator
 import uuid
-from .templates.utils import convert_messages_to_openai_format
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 import torch
@@ -24,8 +24,8 @@ from .templates.vision_processor import get_processor
 import logging
 import PIL
 
+
 LOGGER = logging.getLogger(__name__)
-LOGGER.setLevel(logging.DEBUG)
 
 try:
     from verl.protocol import DataProto
@@ -353,6 +353,21 @@ class AsyncVerlBackend(LLMBackend):
     
     def generate(self, messages_list: str, **kwargs) -> str:
         raise NotImplementedError("Async Verl backend does not support sync generation")
+
+    def _convert_to_openai_chat_without_tool_call_processing(self, messages: list) -> list:
+        """
+        We use the pure generated content as the history. So we don't want any tool call to be part of the history.
+        This is used when models are not openai's official models like GPT-4o.
+        """
+        messages = copy.deepcopy(messages)
+        for message in messages:
+            if "tool_calls" in message:
+                del message["tool_calls"]
+            if "tool_call_id" in message:
+                del message["tool_call_id"]
+            if "tool_choice" in message:
+                del message["tool_choice"]
+        return messages
     
     async def generate_async(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt using Verl"""
@@ -360,7 +375,7 @@ class AsyncVerlBackend(LLMBackend):
 
         generation_config = {}
         tensors = torch.ones(len(messages_list), dtype=torch.int64)
-        messages_list = [convert_messages_to_openai_format(messages) for messages in messages_list]
+        messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
         tools = kwargs.get("tools", None)
         tools_list = np.array([tools] * len(messages_list))
         data = {"input_ids": tensors, "raw_prompt": np.array(messages_list), "tools": tools_list}
@@ -457,6 +472,21 @@ class ClientBackend(LLMBackend):
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, partial(self._blocking_call, messages, **kw))
 
+    def _convert_to_openai_chat_without_tool_call_processing(self, messages: list) -> list:
+        """
+        We use the pure generated content as the history. So we don't want any tool call to be part of the history.
+        This is used when models are not openai's official models like GPT-4o.
+        TODO: we need to add support for openai models
+        """
+        messages = copy.deepcopy(messages)
+        for message in messages:
+            if "tool_calls" in message:
+                del message["tool_calls"]
+            if "tool_call_id" in message:
+                del message["tool_call_id"]
+            if "tool_choice" in message:
+                del message["tool_choice"]
+        return messages
 
     # Public API ‑‑ sync or async depending on caller's context
     def async_generate(
@@ -478,7 +508,7 @@ class ClientBackend(LLMBackend):
         else:
             messages_list = messages     # batch
         print(f"[ClientBackend] messages_list: {messages_list}")
-        messages_list = [convert_messages_to_openai_format(messages) for messages in messages_list]
+        messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
 
         async def _runner():
             tasks = [asyncio.create_task(self._call(_input, **kwargs)) for _input in messages_list]

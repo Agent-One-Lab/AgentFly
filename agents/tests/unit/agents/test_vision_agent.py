@@ -1,21 +1,19 @@
 from agents.agents.react.react_agent import ReactAgent
-from agents.tools import google_search_serper, answer
-
+from agents.tools import answer_qa
 import pytest
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_vision_agent():
-    tools = [google_search_serper, answer]
+    tools = [answer_qa]
 
-    task_info = "Use web search to get answers."
+    task_info = "Answer the question based on the image."
 
     react_agent = ReactAgent(
         "Qwen/Qwen2.5-VL-3B-Instruct",
         tools=tools,
         template="qwen2.5-vl",
         task_info=task_info,
-        backend="async_vllm",
-        debug=True
+        backend="async_vllm"
     )
 
     messages = [
@@ -41,6 +39,9 @@ async def test_vision_agent():
         start_messages=messages,
         num_chains=10
     )
-
-    inputs = react_agent.tokenize_trajectories(return_action_mask=True)
+    messages_list = react_agent.get_messages()
+    messages = messages_list[0]['messages']
+    for message in messages:
+        print(f"{message['role']}: {message['content']}")
+    inputs = react_agent.tokenize_trajectories()
     print(inputs)

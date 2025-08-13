@@ -22,22 +22,6 @@ def strip_ansi(s: str) -> str:
     return ANSI_RE.sub('', s)
 
 
-def convert_messages_to_openai_format(messages: list) -> list:
-    """
-    Convert messages to OpenAI format.
-    TODO: add more processing for other types of content
-    """
-    messages = copy.deepcopy(messages)
-    for message in messages:
-        # if "tool_calls" in message:
-        #     del message["tool_calls"]
-        # if "tool_call_id" in message:
-        #     del message["tool_call_id"]
-        if "tool_choice" in message:
-            del message["tool_choice"]
-    return messages
-
-
 def convert_messages_to_hf_format(messages: list) -> list:
     """
     Convert messages to Hugging Face format.
@@ -305,9 +289,7 @@ def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add
     plain_highlighted_prompt = strip_ansi(highlighted_prompt)
     is_equal_between_implemented_prompts = implemented_prompt == plain_highlighted_prompt
     jinja_template = chat.template.jinja_template()
-    # Save jinja template to file
-    with open("jinja_template.jinja", "w") as f:
-        f.write(jinja_template)
+    
     tokenizer.chat_template = jinja_template
     implemented_jinja_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt)
     is_equal_between_jinja_prompts = implemented_jinja_prompt == implemented_prompt
