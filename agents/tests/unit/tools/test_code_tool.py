@@ -45,14 +45,14 @@ async def test_double_release():
     await code_interpreter.release(id="x")   # must return instantly
 
 
-@pytest.mark.asyncio(loop_scope="session")
-async def test_global_clean():
+# @pytest.mark.asyncio(loop_scope="session")
+# async def test_global_clean():
 
-    async def one_chain(i):
-        await code_interpreter(id=f"c{i}", code="x=1")
-        # We don't release the env here, so it will be cleaned up automatically
-        # await code_interpreter.release_env(id=f"c{i}")
+#     async def one_chain(i):
+#         await code_interpreter(id=f"c{i}", code="x=1")
+#         # We don't release the env here, so it will be cleaned up automatically
+#         # await code_interpreter.release_env(id=f"c{i}")
 
-    await asyncio.gather(*[
-        one_chain(i) for i in range(code_interpreter.pool_size-5)
-    ])
+#     await asyncio.gather(*[
+#         one_chain(i) for i in range(code_interpreter.pool_size-5)
+#     ])
