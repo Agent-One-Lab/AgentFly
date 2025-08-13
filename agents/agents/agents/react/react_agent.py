@@ -123,7 +123,6 @@ class ReactAgent(BaseAgent):
             model_name_or_path=model_name_or_path,
             tools=tools,
             system_prompt=system_prompt,
-            max_length=8192,
             **kwargs
         )
         
