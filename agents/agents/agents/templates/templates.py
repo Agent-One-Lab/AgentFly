@@ -1,17 +1,30 @@
 
 from collections import defaultdict
-from copy import copy
+from copy import copy, deepcopy
 import dataclasses
-from enum import Enum, auto, IntEnum
 import json
-from typing import List, Any, Dict, Union, Tuple
+from typing import Callable, List, Any, Dict, Union, Tuple
 import warnings
 import logging
 import torch
-from .preprocess import open_image_from_any
 from transformers import PreTrainedTokenizer
+from .preprocess import open_image_from_any
 from .vision_processor import is_vision_template
 import re
+from typing import Protocol
+from .tool_policy import (
+    ToolFormatter,
+    JsonMinifiedFormatter,
+    JsonCompactFormatter,
+    JsonIndentedFormatter,
+    ToolMainContentProcessor,
+    JsonQwenFormatter,
+)
+from datetime import datetime
+from .constants import Role
+from .system_policy import Llama32DateProcessor, SystemPolicy
+from .tool_policy import ToolPolicy
+from .constants import ToolPlacement, Role
 
 Logger = logging.getLogger(__name__)
 
@@ -23,12 +36,9 @@ if not Logger.handlers:
     console_handler.setFormatter(formatter)
     Logger.addHandler(console_handler)
 
-class Role(Enum):
-    SYSTEM = "system"
-    USER = "user"
-    ASSISTANT = "assistant"
-    TOOL = "tool"
-    ASSISTANT_PREFIX = "assistant_prefix"
+@dataclasses.dataclass
+class GlobalPolicy:
+    prefix: str = None
 
 
 @dataclasses.dataclass
@@ -50,8 +60,15 @@ class Template:
     tool_template: str = None
     # The user template
     user_template: str = None
+    user_template_with_tools: str = None
     # The assistant template
     assistant_template: str = None
+    # Global policy
+    global_policy: "GlobalPolicy" = None
+    # System message policy
+    system_policy: "SystemPolicy" = None
+    # Tool policy for this template
+    tool_policy: "ToolPolicy" = None
 
     ## vision part
     vision_start: str = None
@@ -59,10 +76,17 @@ class Template:
     image_token: str = None
     video_token: str = None
 
+    chat_template: str = None
+
     def __post_init__(self):
         """Post-initialization to automatically register vision processor if vision tokens are defined"""
         if self.image_token or self.video_token:
             self._register_vision_processor()
+        # Initialise default tool policy if none was provided
+        if self.tool_policy is None:
+            self.tool_policy = ToolPolicy()
+        if self.system_policy is None:
+            self.system_policy = SystemPolicy()
     
     def _register_vision_processor(self):
         """Automatically register a vision processor for this template"""
@@ -111,63 +135,140 @@ class Template:
             # Default to patch-based for unknown models
             return "patch_based"
 
+    def _supports_tool_call(self) -> bool:
+        if (self.system_template_with_tools or self.user_template_with_tools) and self.tool_template:
+            return True
+        else:
+            return False
+
     def render(self, messages: List[Dict], tools=None, add_generation_prompt: bool = False) -> str:
-        """Render the template with the given messages and kwargs.
-        messages: [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Hello, how are you?"
-                    }
-                ]
-            },
-            {
-                "role": "assistant",
-        ]
+        """Render the template and return
+        1. the final prompt string,
+        2. the list of string *elements* that compose the prompt, and
+        3. the corresponding list of *roles* (used by downstream post-processing).
+
+        The heavy lifting is delegated to small, single-purpose helpers so the
+        high-level flow is immediately apparent:
+
+            1. _insert_tools              – decide where the tool catalogue lives
+            2. _encode_turns              – encode every conversation turn
+            3. _maybe_add_generation_prompt – append the generation prefix if requested
         """
-        elements = []
-        roles = []
+
+        # Step 1 – decide tool placement & clone messages
+        work_messages, tools_str, insert_tools_idx = self._insert_tools(messages, tools)
+
+        # Step 2 – encode each conversation turn to text tokens
+        elements, roles = self._encode_turns(work_messages, tools_str, insert_tools_idx)
+
+        # Step 3 – append generation prefix if needed
+        if add_generation_prompt:
+            self._maybe_add_generation_prompt(elements, roles)
+
+        # Concatenate the prompt
+        prompt = "".join(elements)
+        return prompt, elements, roles
+
+    def _insert_tools(self, messages: List[Dict], tools):
+        """Clone *messages* and compute where (and how) the tool catalogue
+        should be injected.
+
+        Returns
+        -------
+        work_messages : List[Dict]
+            A deepcopy of the original *messages* so we never mutate caller data.
+        tools_str : Optional[str]
+            The formatted tool catalogue or *None* if `tools` is falsy.
+        insert_tools_idx : int
+            Index of the *user* message that receives the catalogue, or -1 when
+            no injection is required.
+        """
+
+        work_messages = deepcopy(messages)
         if tools:
-            tools = self._encode_system_tools(tools)
+            tools_str = self.tool_policy.format_tools(tools)
+            placement = self.tool_policy.placement
+            insert_tools_idx = self._find_insert_tools_index(work_messages, placement)
+        else:
+            tools_str = None
+            insert_tools_idx = -1
+        return work_messages, tools_str, insert_tools_idx
 
-        for i, message in enumerate(messages):
+    def _encode_turns(
+        self,
+        work_messages: List[Dict],
+        tools_str: str,
+        insert_tools_idx: int,
+    ) -> Tuple[List[str], List[Role]]:
+        """Convert every message dict into its textual representation while
+        tracking roles for later masking logic."""
 
-            if i == 0 and self._detect_role(message["role"]) == Role.SYSTEM:
-                system_message = self._encode_system_message(message["content"], tools=tools)
-                elements.append(system_message)
-                roles.append(Role.SYSTEM)
-                # This message is done
+        elements: List[str] = []
+        roles: List[Role] = []
+
+        # Global prefix comes first (rarely used but must respect ordering)
+        if self.global_policy and self.global_policy.prefix:
+            elements.append(self.global_policy.prefix)
+            roles.append(Role.SYSTEM)
+
+        for i, message in enumerate(work_messages):
+            current_role = self._detect_role(message["role"])
+
+            # --------------------------------------------------------------
+            # Handle system message insertion on the very first turn
+            # --------------------------------------------------------------
+            if i == 0 and current_role == Role.SYSTEM:
+                if self.system_policy.use_system:
+                    system_message = self._encode_system_message(
+                        message["content"], tools=tools_str
+                    )
+                    elements.append(system_message)
+                    roles.append(Role.SYSTEM)
+                # Whether inserted or not, we skip further handling of this
+                # message because it's the (optional) system turn itself.
                 continue
-            elif i == 0 and self._detect_role(message["role"]) != Role.SYSTEM:
-                system_message = self._encode_system_message_default(tools=tools)
-                elements.append(system_message)
-                roles.append(Role.SYSTEM)
-                # This message is not done, we need to handle other roles
+            elif i == 0 and current_role != Role.SYSTEM:
+                if self.system_policy.use_system:
+                    system_message = self._encode_system_message_default(tools=tools_str)
+                    elements.append(system_message)
+                    roles.append(Role.SYSTEM)
+                # Do *not* `continue` – we still need to encode this first message.
 
-            if self._detect_role(message["role"]) == Role.USER:
-                user_message = self._encode_user_message(message["content"])
+            # --------------------------------------------------------------
+            # Encode regular conversation turns
+            # --------------------------------------------------------------
+            if current_role == Role.USER:
+                if i == insert_tools_idx:
+                    user_message = self._encode_user_message_with_tools(
+                        message["content"], tools=tools_str
+                    )
+                else:
+                    user_message = self._encode_user_message(message["content"])
                 elements.append(user_message)
                 roles.append(Role.USER)
-            elif self._detect_role(message["role"]) == Role.ASSISTANT:
+
+            elif current_role == Role.ASSISTANT:
                 assistant_message = self._encode_assistant_message(message["content"])
                 elements.append(assistant_message)
                 roles.append(Role.ASSISTANT)
-            elif self._detect_role(message["role"]) == Role.TOOL:
+
+            elif current_role == Role.TOOL:
                 tool_message = self._encode_tool_message(message["content"])
                 elements.append(tool_message)
                 roles.append(Role.TOOL)
+
             else:
                 raise ValueError(f"Invalid role: {message['role']}")
-        
-        if add_generation_prompt:
-            generation_prefix = self._encode_generation_prompt()
-            elements.append(generation_prefix)
-            roles.append(Role.ASSISTANT_PREFIX)
-        
-        prompt = "".join(elements)
-        return prompt, elements, roles
+
+        return elements, roles
+
+    def _maybe_add_generation_prompt(self, elements: List[str], roles: List[Role]):
+        """Append the generation prefix so the model knows to continue
+        generating an assistant response."""
+
+        generation_prefix = self._encode_generation_prompt()
+        elements.append(generation_prefix)
+        roles.append(Role.ASSISTANT_PREFIX)
 
     def _detect_role(self, role: str) -> Role:
         if role == "system":
@@ -180,53 +281,114 @@ class Template:
             return Role.TOOL
         else:
             raise ValueError(f"Invalid role: {role}")
+
+    def _find_insert_tools_index(self, work_messages: List[Dict], placement: ToolPlacement) -> int:
+        insert_tools_idx = 0 # Default to insert tools at system message
+        for i, message in enumerate(work_messages):
+            if placement == ToolPlacement.SYSTEM:
+                insert_tools_idx = 0
+            elif placement == ToolPlacement.FIRST_USER:
+                if message.get("role") == "user":
+                    insert_tools_idx = i
+                    break
+            elif placement == ToolPlacement.LAST_USER:
+                if message.get("role") == "user":
+                    insert_tools_idx = i
+            else:
+                raise ValueError(f"Unhandled ToolPlacement: {placement}")
+        return insert_tools_idx
         
     def _encode_system_tools(self, tools: List[Dict]) -> str:
         return "\n".join([json.dumps(tool) for tool in tools])
 
     def _encode_system_message_default(self, tools=None) -> str:
-        if tools is None:
-            return self.system_template.format(system_message=self.system_message)
+        if not self.system_policy.use_system_without_system_message:
+            return ""
+        
+        if self.system_policy.content_processor is not None:
+            system_message = self.system_policy.content_processor(self.system_message)
         else:
-            if self.system_template_with_tools:
-                return self.system_template_with_tools.format(system_message=self.system_message, tools=tools)
-            else:
-                return self.system_template.format(system_message=self.system_message)
+            system_message = self.system_message
 
-    def _encode_system_message(self, content, tools=None) -> str:
         if tools is None:
-            system_message = content[0]['text']
             return self.system_template.format(system_message=system_message)
         else:
+            if self.system_template_with_tools:
+                return self.system_template_with_tools.format(system_message=system_message, tools=tools)
+            else:
+                return self.system_template.format(system_message=system_message)
+
+    def _encode_system_message(self, content, tools=None) -> str:
+        # Handle both string content and list content formats
+        if isinstance(content, str):
+            system_message = content
+        else:
             system_message = content[0]['text']
+            
+        if self.system_policy.content_processor is not None:
+            system_message = self.system_policy.content_processor(system_message)
+
+        if tools is None:
+            return self.system_template.format(system_message=system_message)
+        else:
             if self.system_template_with_tools is None:
                 return self.system_template.format(system_message=system_message)
             else:
                 return self.system_template_with_tools.format(system_message=system_message, tools=tools)
-    
-    def _encode_user_message(self, content: List[Dict]) -> str:
-        text = ""
-        for item in content:
-            if item["type"] == "text":
-                text += item["text"]
-            elif item["type"] in ["image", "image_url"]:
-                text += self.vision_start + self.image_token + self.vision_end
-            elif item["type"] == "video":
-                text += self.vision_start + self.video_token + self.vision_end
-            else:
-                raise ValueError(f"Invalid message type: {item['type']}")
+        
+    def _encode_user_message_with_tools(self, content, tools: str) -> str:
+        # Handle both string content and list content formats
+        if isinstance(content, str):
+            text = content
+        else:
+            text = ""
+            for item in content:
+                if item["type"] == "text":
+                    text += item["text"]
+                else:
+                    raise ValueError(f"Invalid message type: {item['type']}")
+        
+        if self.user_template_with_tools:
+            user_message = self.user_template_with_tools.format(content=text, tools=tools)
+        else:
+            user_message = self.user_template.format(content=text)
+        return user_message
+
+    def _encode_user_message(self, content) -> str:
+        # Handle both string content and list content formats
+        if isinstance(content, str):
+            text = content
+        else:
+            text = ""
+            for item in content:
+                if item["type"] == "text":
+                    text += item["text"]
+                elif item["type"] in ["image", "image_url"]:
+                    text += self.vision_start + self.image_token + self.vision_end
+                elif item["type"] == "video":
+                    text += self.vision_start + self.video_token + self.vision_end
+                else:
+                    raise ValueError(f"Invalid message type: {item['type']}")
         user_message = self.user_template.format(content=text)
         return user_message
     
-    def _encode_assistant_message(self, content: List[Dict]) -> str:
-        assert len(content) == 1, "Assistant message must be a single message"
-        text = content[0]["text"]
+    def _encode_assistant_message(self, content) -> str:
+        # Handle both string content and list content formats
+        if isinstance(content, str):
+            text = content
+        else:
+            assert len(content) == 1, "Assistant message must be a single message"
+            text = content[0]["text"]
         assistant_message = self.assistant_template.format(content=text)
         return assistant_message
     
-    def _encode_tool_message(self, content: List[Dict]) -> str:
-        assert len(content) == 1, "Tool message must be a single message"
-        text = content[0]["text"]
+    def _encode_tool_message(self, content) -> str:
+        # Handle both string content and list content formats
+        if isinstance(content, str):
+            text = content
+        else:
+            assert len(content) == 1, "Tool message must be a single message"
+            text = content[0]["text"]
         tool_message = self.tool_template.format(observation=text)
         return tool_message
     
@@ -272,11 +434,15 @@ class Template:
         labels = []
         action_mask = []
 
-        if tokenizer.bos_token and tokenizer.add_bos_token:
-            input_ids.append(tokenizer.bos_token_id)
-            attention_mask.append(1)
-            labels.append(-100)
-            action_mask.append(0)
+
+        if tokenizer.bos_token:
+            # If add_bos_token is not set, we assume to add bos token
+            # There is potential issue if the tokenizer has bos_token but do not add it by default
+            if getattr(tokenizer, "add_bos_token", True):
+                input_ids.append(tokenizer.bos_token_id)
+                attention_mask.append(1)
+                labels.append(-100)
+                action_mask.append(0)
         
         for element, mask_flag in zip(elements, mask_flags):
             cur_input_ids = tokenizer.encode(element, add_special_tokens=False)
@@ -417,47 +583,88 @@ class Template:
         return vision_inputs
 
     def jinja_template(self) -> str:
-        """
-        Build a Hugging-Face-style chat-template (Jinja-mini dialect) that mimics
-        `self.render`.  The template expects three variables in its context:
+        if self.chat_template:
+            return self.chat_template
+        else:
+            return self.render_jinja_template()
 
-            • messages               – list[dict]  (same format you pass to .render)
-            • add_generation_prompt  – bool        (default False)
-            • tools                  – list[dict]  (optional, for tool-enabled templates)
+    def render_jinja_template(self) -> str:
+        """Return a Hugging-Face style chat-template (Jinja-mini dialect).
 
-        No other Python state is referenced, so the string can be cached in the
-        tokenizer and shipped to a different process.
+        The implementation now mirrors the three-step structure of
+        `render()` for easier maintenance:
+
+            1.  _jinja_header_constants      – immutable `set` statements
+            2.  _jinja_system_block          – first turn / system handling
+            3.  _jinja_loop_messages         – remaining turns & per-role logic
+            4.  _jinja_generation_block      – optional generation prefix
         """
-        # ------------------------------------------------------------------
-        # 1.  Pre-compute constant strings so the inner template stays tiny
-        # ------------------------------------------------------------------
-        default_system = self.system_template.format(system_message=self.system_message)
+
+        parts: List[str] = []
+
+        # 1.  Constant header (always first)
+        parts.extend(self._jinja_header_constants())
+
+        # 2.  System-message handling (depends on presence of tools etc.)
+        parts.extend(self._jinja_system_block())
+
+        # 2.5 Pre-compute insert index for user placement
+        parts.extend(self._jinja_compute_insert_idx())
+
+        # 3.  Loop over remaining messages
+        parts.extend(self._jinja_loop_messages())
+
+        # 4.  Generation prefix block
+        parts.extend(self._jinja_generation_block())
+
+        template_str = "".join(parts)
         
-        # Don't pre-format system_template_with_tools - handle it in Jinja
-        system_template_with_tools_raw = self.system_template_with_tools if self.system_template_with_tools else None
+        # Post-process: Replace __CURRENT_DATE__ placeholder with actual date
+        if "__CURRENT_DATE__" in template_str:
+            from datetime import datetime
+            current_date = datetime.now().strftime('%d %b %Y')
+            template_str = template_str.replace("__CURRENT_DATE__", current_date)
+        
+        return template_str
 
+    # ------------------------------------------------------------------
+    # Private helpers – keep them together for readability
+    # ------------------------------------------------------------------
+
+    def _jinja_header_constants(self) -> List[str]:
+        """Return Jinja `set` statements for all constant strings."""
+
+        # Compute default system message considering content processor
+        if self.system_policy.content_processor is not None:
+            # Apply content processor to system message
+            processed_system_message = self.system_policy.content_processor(self.system_message)
+            default_system = self.system_template.format(system_message=processed_system_message)
+        else:
+            default_system = self.system_template.format(system_message=self.system_message)
+
+        system_template_with_tools_raw = (
+            self.system_template_with_tools if self.system_template_with_tools else None
+        )
+
+        # Split templates
         try:
             u_pref, u_suff = self.user_template.split("{content}")
             a_pref, a_suff = self.assistant_template.split("{content}")
-        except ValueError as e:   # missing {content}
-            raise ValueError("`user_template` / `assistant_template` must contain "
-                            "`{content}` placeholder") from e
+        except ValueError as exc:
+            raise ValueError(
+                "`user_template` / `assistant_template` must contain `{content}` placeholder"
+            ) from exc
 
         if self.tool_template:
             t_pref, t_suff = self.tool_template.split("{observation}")
-        else:                     # tools optional
+        else:
             t_pref, t_suff = "", ""
 
-        # tokens for images / videos
+        # Tokens for images / videos
         img_tok = (self.vision_start or "") + (self.image_token or "") + (self.vision_end or "")
         vid_tok = (self.vision_start or "") + (self.video_token or "") + (self.vision_end or "")
 
-        # ------------------------------------------------------------------
-        # 2.  Assemble the Jinja text; everything in triple-quotes is copied
-        #     verbatim into the tokenizer.  We splice in the constants that
-        #     never change for this Template instance.
-        # ------------------------------------------------------------------
-        template_parts = [
+        header = [
             f"{{% set _u_pref  = {u_pref!r} %}}",
             f"{{% set _u_suff  = {u_suff!r} %}}",
             f"{{% set _a_pref  = {a_pref!r} %}}",
@@ -469,39 +676,146 @@ class Template:
             f"{{% set _default_system = {default_system!r} %}}",
             f"{{% set _system_message = {self.system_message!r} %}}",
             f"{{% set _system_template = {self.system_template!r} %}}",
+            f"{{% set _tool_placement = {self.tool_policy.placement.name!r} %}}",
         ]
-        
-        # Add system template with tools if available
+
         if system_template_with_tools_raw:
-            template_parts.append(f"{{% set _system_template_with_tools = {system_template_with_tools_raw!r} %}}")
-        
-        template_parts.extend([
+            header.append(
+                f"{{% set _system_template_with_tools = {system_template_with_tools_raw!r} %}}"
+            )
+
+        # Add user template with tools if it exists
+        if self.user_template_with_tools:
+            # Convert double braces to single braces for Jinja compatibility
+            processed_template = self.user_template_with_tools.replace('{{', '{').replace('}}', '}')
+            header.append(
+                f"{{% set _u_template_with_tools = {processed_template!r} %}}"
+            )
+
+        # ------------------------------------------------------------------
+        #  Formatter macro for tools (only if the template supports tool calls)
+        # ------------------------------------------------------------------
+
+        if self._supports_tool_call():
+            # Build a Jinja macro that reproduces ToolPolicy.format_tools behaviour
+            formatter_snippet = self.tool_policy.formatter.jinja()
+
+            # The snippet usually comes wrapped in "{{ ... }}".  We drop the
+            # outer braces because macro bodies are already an output context.
+            formatter_body = formatter_snippet.strip()
+
+            header.extend(
+                [
+                    "{% macro _fmt_tools(tools) %}",
+                    f"{formatter_body}",
+                    "{% endmacro %}",
+                ]
+            )
+
+        # ------------------------------------------------------------------
+        #  System processor macro (if system policy has a content processor)
+        # ------------------------------------------------------------------
+
+        if self.system_policy.content_processor is not None:
+            # Build a Jinja macro that reproduces the system content processor behaviour
+            processor_snippet = self.system_policy.content_processor.jinja()
+            
+            # The snippet should be a template that expects 'system_message' variable
+            # We create a macro that can be called with the system message
+            header.extend(
+                [
+                    "{% macro _process_system_message(system_message) %}",
+                    f"{processor_snippet}",
+                    "{% endmacro %}",
+                ]
+            )
+
+        return header
+
+    def _jinja_compute_insert_idx(self) -> List[str]:
+        """Return Jinja code that pre-computes the index where tools should
+        be injected for FIRST_USER and LAST_USER placements."""
+
+        return [
+            "{% set _insert_ns = namespace(idx=-1) %}",
+            "{% if _tool_placement in ['FIRST_USER', 'LAST_USER'] %}",
+            "{%- for _m in messages -%}",
+            "{%- if _m['role'] == 'user' -%}",
+            "{%- if _tool_placement == 'FIRST_USER' and _insert_ns.idx == -1 -%}",
+            "{% set _insert_ns.idx = loop.index0 %}",
+            "{%- elif _tool_placement == 'LAST_USER' -%}",
+            "{% set _insert_ns.idx = loop.index0 %}",
+            "{%- endif -%}",
+            "{%- endif -%}",
+            "{%- endfor -%}",
+            "{% endif %}",
+        ]
+
+    def _jinja_system_block(self) -> List[str]:
+        """Return Jinja code that handles the system message logic."""
+
+        return [
             # Handle system message first (matching render logic)
             "{% if messages and messages[0]['role'] == 'system' %}",
             "{% if tools and _system_template_with_tools %}",
             "{% if messages[0]['content'] is string %}",
-            "{{ _system_template_with_tools.format(system_message=messages[0]['content'], tools=tools | map('tojson') | join('\\n')) }}",
+            "{% if _process_system_message is defined %}",
+            "{{ _system_template_with_tools.format(system_message=_process_system_message(messages[0]['content']), tools=_fmt_tools(tools)) }}",
             "{% else %}",
-            "{{ _system_template_with_tools.format(system_message=messages[0]['content'][0]['text'], tools=tools | map('tojson') | join('\\n')) }}",
+            "{{ _system_template_with_tools.format(system_message=messages[0]['content'], tools=_fmt_tools(tools)) }}",
+            "{% endif %}",
+            "{% else %}",
+            "{% if _process_system_message is defined %}",
+            "{{ _system_template_with_tools.format(system_message=_process_system_message(messages[0]['content'][0]['text']), tools=_fmt_tools(tools)) }}",
+            "{% else %}",
+            "{{ _system_template_with_tools.format(system_message=messages[0]['content'][0]['text'], tools=_fmt_tools(tools)) }}",
+            "{% endif %}",
             "{% endif %}",
             "{% else %}",
             "{% if messages[0]['content'] is string %}",
+            "{% if _process_system_message is defined %}",
+            "{% set processed_message = _process_system_message(messages[0]['content']) %}",
+            "{% set formatted_system = _system_template | replace('{system_message}', processed_message) %}{{ formatted_system }}",
+            "{% else %}",
             "{% set formatted_system = _system_template | replace('{system_message}', messages[0]['content']) %}{{ formatted_system }}",
+            "{% endif %}",
+            "{% else %}",
+            "{% if _process_system_message is defined %}",
+            "{% set processed_message = _process_system_message(messages[0]['content'][0]['text']) %}",
+            "{% set formatted_system = _system_template | replace('{system_message}', processed_message) %}{{ formatted_system }}",
             "{% else %}",
             "{% set formatted_system = _system_template | replace('{system_message}', messages[0]['content'][0]['text']) %}{{ formatted_system }}",
             "{% endif %}",
             "{% endif %}",
+            "{% endif %}",
             "{% else %}",
             "{% if tools and _system_template_with_tools %}",
-            "{{ _system_template_with_tools.format(system_message=_system_message, tools=tools | map('tojson') | join('\\n')) }}",
+            "{% if _process_system_message is defined %}",
+            "{{ _system_template_with_tools.format(system_message=_process_system_message(_system_message), tools=_fmt_tools(tools)) }}",
+            "{% else %}",
+            "{{ _system_template_with_tools.format(system_message=_system_message, tools=_fmt_tools(tools)) }}",
+            "{% endif %}",
+            "{% else %}",
+            "{% if _process_system_message is defined %}",
+            "{% set processed_message = _process_system_message(_system_message) %}",
+            "{% set formatted_system = _system_template | replace('{system_message}', processed_message) %}{{ formatted_system }}",
             "{% else %}",
             "{{ _default_system }}",
             "{% endif %}",
             "{% endif %}",
+            "{% endif %}",
+        ]
+
+    def _jinja_loop_messages(self) -> List[str]:
+        """Return Jinja loop that encodes all messages except the first system."""
+
+        return [
+            "{% set _tool_ns = namespace(inserted=False, user_count=0) %}",
             # Process remaining messages (skip first if it was system)
             "{% for m in messages %}",
             "{% if not (loop.first and m['role'] == 'system') %}",
             "{% if m['role'] == 'user' %}",
+            "{% set _tool_ns.user_count = _tool_ns.user_count + 1 %}",
             "{% set ns = namespace(txt='') %}",
             "{% if m['content'] is string %}",
             "{% set ns.txt = m['content'] %}",
@@ -516,7 +830,17 @@ class Template:
             "{% endif %}",
             "{% endfor %}",
             "{% endif %}",
+            "{% if tools and ((_tool_placement == 'FIRST_USER' and _tool_ns.user_count == 1) or (_tool_placement == 'LAST_USER' and loop.index0 == _insert_ns.idx)) and not _tool_ns.inserted %}",
+            "{% if _u_template_with_tools is defined %}",
+            "{% set formatted_tools = _fmt_tools(tools) %}",
+            "{{ _u_template_with_tools | replace('{content}', ns.txt) | replace('{tools}', formatted_tools) }}",
+            "{% else %}",
+            "{{ _u_pref }}{{ ns.txt }}{{ _u_suff }}\\n{{ _fmt_tools(tools) }}",
+            "{% endif %}",
+            "{% set _tool_ns.inserted = True %}",
+            "{% else %}",
             "{{ _u_pref }}{{ ns.txt }}{{ _u_suff }}",
+            "{% endif %}",
             "{% elif m['role'] == 'assistant' %}",
             "{% if m['content'] is string %}",
             "{{ _a_pref }}{{ m['content'] }}{{ _a_suff }}",
@@ -532,12 +856,16 @@ class Template:
             "{% endif %}",
             "{% endif %}",
             "{% endfor %}",
+        ]
+
+    def _jinja_generation_block(self) -> List[str]:
+        """Return Jinja code that appends the generation prefix when requested."""
+
+        return [
             "{% if add_generation_prompt %}",
             "{{ _a_pref }}",
-            "{% endif %}"
-        ])
-        
-        return "".join(template_parts)
+            "{% endif %}",
+        ]
 
 
     def render_with_mask(self, messages: List[Dict], add_generation_prompt: bool = False, tools=None):
@@ -558,14 +886,6 @@ class Template:
         """Set the system message."""
         self.system_message = system_message
 
-    def set_tools(self, tools: List[Dict]):
-        """Set the tools."""
-        if self.tool_aggregator == "DEFAULT":
-            self.tools = json.dumps(tools)
-        elif self.tool_aggregator == "STACKED":
-            self.tools = "\n".join([json.dumps(tool) for tool in tools])
-        else:
-            raise ValueError(f"Invalid tool aggregator: {self.tool_aggregator}")
 
     def copy(self):
         return Template(
@@ -574,6 +894,7 @@ class Template:
             system_template_with_tools=self.system_template_with_tools,
             system_message=self.system_message,
             user_template=self.user_template,
+            user_template_with_tools=self.user_template_with_tools,
             assistant_template=self.assistant_template,
             tool_template=self.tool_template,
             stop_words=self.stop_words,
@@ -581,6 +902,10 @@ class Template:
             vision_end=self.vision_end,
             image_token=self.image_token,
             video_token=self.video_token,
+            global_policy=deepcopy(self.global_policy),
+            system_policy=deepcopy(self.system_policy),
+            tool_policy=deepcopy(self.tool_policy),
+            chat_template=self.chat_template,
         )
 
     def dict(self):
@@ -692,10 +1017,6 @@ register_template(
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
-        vision_start="<|vision_start|>",
-        vision_end="<|vision_end|>",
-        image_token="<|image_pad|>",
-        video_token="<|video_pad|>",
     )
 )
 
@@ -726,10 +1047,6 @@ register_template(
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
-        vision_start="<|vision_start|>",
-        vision_end="<|vision_end|>",
-        image_token="<|image_pad|>",
-        video_token="<|video_pad|>",
     )
 )
 
@@ -763,16 +1080,98 @@ register_template(
     )
 )
 
+
+
+# TODO: mistral template has many cornor cases, leave it for now
+# register_template(
+#     Template(
+#         name="mistral",
+#         system_template="{system_message}",
+#         user_template="[INST] {content}[/INST] ",
+#         user_template_with_tools="[AVAILABLE TOOLS] {tools} [/AVAILABLE TOOLS] [INST] {content}[/INST] ",
+#         assistant_template="{content}</s>",
+#         tool_template="{observation}",
+#         stop_words=["</s>"],
+#         system_policy=SystemPolicy(
+#             use_system=False,
+#         ),
+#         tool_policy=ToolPolicy(
+#             placement=ToolPlacement.LAST_USER,
+#             formatter=JsonCompactFormatter()
+#         )
+#     )
+# )
+
+# TODO: system template includes current date
 register_template(
     Template(
-        name="deepseek-prover-v2",
-        system_template="<｜begin▁of▁sentence｜>{system_message}",
-        user_template="<｜User｜>{content}",
-        assistant_template="<｜Assistant｜>{content}<｜end▁of▁sentence｜>",
-        stop_words=["<｜end▁of▁sentence｜>"],
+        name="llama-3.2",
+        system_template="<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{system_message}<|eot_id|>",
+        system_template_with_tools="<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nEnvironment: ipython\n{system_message}<|eot_id|>",
+        user_template="<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>",
+        user_template_with_tools="""<|start_header_id|>user<|end_header_id|>\n\nGiven the following functions, please respond with a JSON for a function call with its proper arguments that best answers the given prompt.\n\nRespond in the format {{"name": function name, "parameters": dictionary of argument name and its value}}.Do not use variables.\n\n{tools}\n\n{content}<|eot_id|>""",
+        assistant_template="<|start_header_id|>assistant<|end_header_id|>\n\n{content}<|eot_id|>",
+        tool_template="""<|start_header_id|>ipython<|end_header_id|>\n\n"{observation}"<|eot_id|>""",
+        stop_words=["<|eot_id|>"],
+        system_policy=SystemPolicy(
+            use_system=True,
+            content_processor=Llama32DateProcessor(),
+        ),
+        tool_policy=ToolPolicy(
+            placement=ToolPlacement.FIRST_USER,
+            formatter=JsonIndentedFormatter()
+        )
     )
 )
 
+register_template(
+    Template(
+        name="glm-4",
+        system_template="<|system|>\n{system_message}",
+        user_template="<|user|>\n{content}",
+        assistant_template="<|assistant|>\n{content}",
+        stop_words=[""],
+        global_policy=GlobalPolicy(
+            prefix="[gMASK]<sop>"
+        ),
+        system_policy=SystemPolicy(
+            use_system=True,
+            use_system_without_system_message=False,
+        ),
+    )
+)
+
+register_template(
+    Template(
+        name="phi-4",
+        system_template="<|im_start|>system<|im_sep|>{system_message}<|im_end|>",
+        user_template="<|im_start|>user<|im_sep|>{content}<|im_end|>",
+        assistant_template="<|im_start|>assistant<|im_sep|>{content}<|im_end|>",
+        stop_words=["<|im_end|>"],
+    )
+)
+
+# Note: Partial align, some minor new-line problems.
+register_template(
+    Template(
+        name="nemotron",
+        system_template="<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n{system_message}<|eot_id|>",
+        system_template_with_tools="""<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n{system_message}<AVAILABLE_TOOLS>{tools}</AVAILABLE_TOOLS><|eot_id|>""",
+        user_template="<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>",
+        assistant_template="<|start_header_id|>assistant<|end_header_id|>\n\n{content}<|eot_id|>",
+        tool_template="<|start_header_id|>user<|end_header_id|>\n\n<TOOL_RESPONSE>[{observation}]</TOOL_RESPONSE><|eot_id|>",
+        stop_words=["<|eot_id|>"],
+        system_policy=SystemPolicy(
+            use_system=True,
+            content_processor=lambda x: f"\n{x}",
+        ),
+        tool_policy=ToolPolicy(
+            placement=ToolPlacement.SYSTEM,
+            content_processor=ToolMainContentProcessor(),
+            formatter=JsonCompactFormatter(),
+        )
+    )
+)
 
 if __name__ == "__main__":
     pass

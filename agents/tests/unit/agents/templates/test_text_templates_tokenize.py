@@ -7,13 +7,13 @@
 Since the align for textual prompt is already tested in other files, we only need to test the tokenization of the templates.
 """
 
-from agents.agents.templates.utils import is_vlm_template, tokenize_conversation
+from agents.agents.templates.utils import tokenize_conversation
 import pytest
-from transformers import AutoTokenizer, AutoProcessor
+from transformers import AutoTokenizer
 import torch
 from agents.agents.templates.templates import Chat
 
-@pytest.mark.parametrize("template", ["qwen2.5"])
+@pytest.mark.parametrize("template", ["llama-3.2", "qwen2.5"])
 @pytest.mark.parametrize("messages", [
     [
         {"role": "user", "content": "Hello, how are you?"},
@@ -31,6 +31,9 @@ from agents.agents.templates.templates import Chat
         {"role": "user", "content": "Hello, how are you?"},
         {"role": "assistant", "content": "I am fine, thank you."},
         {"role": "user", "content": "What is 3 times 5?"},
+        {"role": "assistant", "content": "15"},
+        {"role": "user", "content": "OK, what is 3 times 6?"},
+        {"role": "assistant", "content": "18"},
     ],
 ])
 @pytest.mark.parametrize("tools", [
@@ -44,10 +47,9 @@ from agents.agents.templates.templates import Chat
 def test_template_tokenize(template, messages, tools, add_generation_prompt):
     template_tokenizer_mapping = {
         "qwen2.5": "Qwen/Qwen2.5-3B-Instruct",
-        "qwen2.5-vl": "Qwen/Qwen2.5-VL-3B-Instruct",
-        "qwen3": "Qwen/Qwen3-8B",
+        "llama-3.2": "meta-llama/Llama-3.2-3B-Instruct",
     }
-    tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template])
+    tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template], trust_remote_code=True)
 
     chat = Chat(template, messages, tools=tools)
     prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools)

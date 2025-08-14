@@ -4,7 +4,7 @@ import json
 
 from .templates.templates import get_template
 from ..__init__ import AGENT_DATA_DIR
-from .llm_backend import AsyncVLLMBackend, AsyncVerlBackend, ClientBackend, TransformersBackend, VLLMBackend, VerlBackend
+from .llm_backend import AsyncVLLMBackend, AsyncVerlBackend, ClientBackend, TransformersBackend, VLLMBackend
 from ..utils.logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -17,6 +17,8 @@ import transformers
 import warnings
 import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
+from .utils.tokenizer import create_tokenizer
+from .backend_config import BACKEND_CONFIGS
 try:
     from verl.protocol import DataProto
 except ImportError:
@@ -37,12 +39,13 @@ class BaseAgent(ChainGeneration, ABC):
     def __init__(
         self,
         model_name_or_path, 
-        template: str,
+        template: str=None,
         system_prompt: str = None,
         tools: List = None,
         max_length: int=8192,
         debug: bool = False,
         backend: str = "transformers",
+        backend_config: Any = None,
         reward_fn: Callable = None,
         log_file: str = "agent",
         project_name: str = None,
@@ -68,10 +71,30 @@ class BaseAgent(ChainGeneration, ABC):
         self.tools = tools
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
-        self.llm_engine, self.tokenizer, self.processor = self._init_llm_engine(model_name_or_path, backend)
-        Logger.debug(f"[BaseAgent] llm_engine: {self.llm_engine}")
+        
+        # Handle backend configuration
+        if backend_config is None:
+            # Use default configuration for the backend
+            config_class = BACKEND_CONFIGS.get(backend)
+            if config_class:
+                self.backend_config = config_class()
+            else:
+                self.backend_config = None
+        else:
+            self.backend_config = backend_config
+            
+        self.llm_engine = self._init_llm_engine(model_name_or_path, backend)
+        
+        # Create appropriate tokenizer for trajectory processing
+        self.tokenizer = create_tokenizer(model_name_or_path)
+        
         self._reward_fn = reward_fn
-        self.jinja_template = get_template(self.template).jinja_template()
+
+        if self.template is None:
+            self.jinja_template = None
+        else:
+            self.jinja_template = get_template(self.template).jinja_template()
+
         self.project_name = project_name
         self.run_name = run_name
         self.streaming_manager = StreamingManager()
@@ -82,33 +105,53 @@ class BaseAgent(ChainGeneration, ABC):
             raise ValueError(f"Streaming mode {streaming} is not supported.")
         super().__init__()
         if kwargs:
-            warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
+            # warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
+            raise ValueError(f"Unused arguments for agent initialization: {kwargs}")
     
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         if isinstance(model_name_or_path, str):
+            # Extract backend-specific configuration
+            config_kwargs = {}
+            if self.backend_config:
+                config_kwargs = {k: v for k, v in self.backend_config.__dict__.items() 
+                               if not k.startswith('_')}
+            
             if backend == "transformers":
-                llm_engine = TransformersBackend(model_name_or_path, self.template, max_length=self.max_length)
-            elif backend == "vllm":
-                llm_engine = VLLMBackend(model_name_or_path, self.template, max_length=self.max_length)
+                llm_engine = TransformersBackend(
+                    model_name_or_path, 
+                    self.template, 
+                    max_length=self.max_length,
+                    **config_kwargs
+                )
             elif backend == "async_vllm":
-                llm_engine = AsyncVLLMBackend(model_name_or_path, self.template, max_length=self.max_length)
-            elif backend == "verl":
-                llm_engine = VerlBackend(llm_engine=None, model_name_or_path=model_name_or_path, template=self.template, max_length=self.max_length)
+                llm_engine = AsyncVLLMBackend(
+                    model_name_or_path, 
+                    self.template, 
+                    max_length=self.max_length,
+                    **config_kwargs
+                )
             elif backend == "async_verl":
-                llm_engine = AsyncVerlBackend(llm_engine=None, model_name_or_path=model_name_or_path, template=self.template, max_length=self.max_length)
+                llm_engine = AsyncVerlBackend(
+                    llm_engine=None, 
+                    model_name_or_path=model_name_or_path, 
+                    template=self.template, 
+                    max_length=self.max_length,
+                    **config_kwargs
+                )
             elif backend == "client":
-                llm_engine = ClientBackend(model_name_or_path, self.template, max_length=self.max_length)
+                print(f"config_kwargs: {config_kwargs}")
+                llm_engine = ClientBackend(
+                    model_name_or_path, 
+                    self.template, 
+                    max_length=self.max_length,
+                    **config_kwargs
+                )
             else:
                 raise ValueError(f"Backend {backend} is not supported.")
         else:
             raise ValueError("model_name_or_path must be a string.")
 
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name_or_path)
-        if is_vision_template(self.template):
-            processor = transformers.AutoProcessor.from_pretrained(model_name_or_path)
-        else:
-            processor = None
-        return llm_engine, tokenizer, processor
+        return llm_engine
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"
@@ -157,17 +200,6 @@ class BaseAgent(ChainGeneration, ABC):
     @property
     def timing_data(self):
         return self.timer.timing_data
-    
-    def forward(self, messages_list_or_inputs: List[List[Dict]], **args):
-        if isinstance(messages_list_or_inputs, List):
-            inputs = tokenize_conversations(messages_list_or_inputs, tokenizer=self.tokenizer, conv_template=self.template, max_length=self.max_length, processor=self.processor)
-        else:
-            raise ValueError("messages_list_or_inputs must be a list of messages or a dictionary of padded inputs.")
-        
-        if isinstance(self.llm_engine, transformers.PreTrainedModel):
-            return self.llm_engine.forward(**inputs, **args) # Only support transformers models for now.
-        else:
-            raise ValueError("llm_engine must be a transformers.PretrainedModel.")
 
     @property
     def trajectories(self):
@@ -175,7 +207,10 @@ class BaseAgent(ChainGeneration, ABC):
 
         return trajectories
 
-    def tokenize_trajectories(self, return_action_mask: bool = False, return_reward_mask: bool = False):
+    def tokenize_trajectories(self, tokenizer, return_action_mask: bool = False, return_reward_mask: bool = False):
+        if tokenizer is None:
+            tokenizer = self.tokenizer
+            
         trajectories = self.trajectories
         self.logger.info("================ Trajectory ================")
         self.logger.info(trajectories[0])
@@ -202,7 +237,7 @@ class BaseAgent(ChainGeneration, ABC):
             info['last_response'] = last_response
             other_info_list.append(info)
 
-        inputs = tokenize_conversations(messages_list, tokenizer=self.tokenizer, conv_template=self.template, processor=self.processor, max_length=self.max_length, return_reward_mask=return_reward_mask)
+        inputs = tokenize_conversations(messages_list, tokenizer=tokenizer, conv_template=self.template, processor=self.processor, max_length=self.max_length, return_reward_mask=return_reward_mask)
         position_ids = torch.clip(torch.cumsum(inputs['attention_mask'], dim=-1) - 1, min=0, max=None)
         inputs['position_ids'] = position_ids
 
