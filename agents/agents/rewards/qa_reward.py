@@ -1,7 +1,7 @@
 import re
 import string
 from collections import Counter
-from typing import List
+from typing import List, Dict, Union
 from .reward_base import reward
 
 
@@ -117,5 +117,25 @@ def ok_vqa_reward(prediction: str, answers: List[str], trajectory: List[str]) ->
     for answer in answers:
         f1, precision, recall = f1_score(prediction, answer)
         f1_scores.append(f1)
+    # All answers are the correct answer, take the max f1 score
+    return max(f1_scores)
+
+
+@reward(name="infoseek_reward")
+def infoseek_reward(prediction: str, answer: Union[str, List[str]], answer_eval: List[str | Dict], trajectory: List[str]) -> float:
+    f1_scores = []
+    answers = []
+    if isinstance(answer, str):
+        answers.append(answer)
+    elif isinstance(answer, list):
+        answers.extend(answer)
+    
+    if isinstance(answer_eval[0], str):
+        answers.extend(answer_eval)
+
+    for _answer in answers:
+        f1, precision, recall = f1_score(prediction, _answer)
+        f1_scores.append(f1)
+
     # All answers are the correct answer, take the max f1 score
     return max(f1_scores)
