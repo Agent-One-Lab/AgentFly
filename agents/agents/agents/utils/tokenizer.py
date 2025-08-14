@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer
+from transformers import AutoProcessor, AutoTokenizer
 
 def create_tokenizer(model_name_or_path: str):
     try:
@@ -8,3 +8,12 @@ def create_tokenizer(model_name_or_path: str):
         tokenizer = None
     
     return tokenizer
+
+
+def create_processor(model_name_or_path: str):
+    try:
+        processor = AutoProcessor.from_pretrained(model_name_or_path)
+    except OSError:
+        processor = None
+    
+    return processor

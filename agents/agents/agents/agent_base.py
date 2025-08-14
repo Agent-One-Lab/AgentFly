@@ -17,7 +17,7 @@ import transformers
 import warnings
 import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
-from .utils.tokenizer import create_tokenizer
+from .utils.tokenizer import create_processor, create_tokenizer
 from .backend_config import BACKEND_CONFIGS
 try:
     from verl.protocol import DataProto
@@ -43,7 +43,6 @@ class BaseAgent(ChainGeneration, ABC):
         system_prompt: str = None,
         tools: List = None,
         max_length: int=8192,
-        debug: bool = False,
         backend: str = "transformers",
         backend_config: Any = None,
         reward_fn: Callable = None,
@@ -51,6 +50,7 @@ class BaseAgent(ChainGeneration, ABC):
         project_name: str = None,
         run_name: str = None,
         streaming: str = "console",
+        debug: bool = False,
         **kwargs # To pass other unused arguments
     ):
         """
@@ -65,6 +65,7 @@ class BaseAgent(ChainGeneration, ABC):
         """
         torch.set_printoptions(threshold=10_000)
         self.logger = get_logger(directory=os.path.join(AGENT_DATA_DIR, "debug"), filename=log_file, level="DEBUG" if debug else "INFO")
+        self.debug = debug
         self.backend = backend
         self.template = template
         self.max_length = max_length
@@ -87,6 +88,8 @@ class BaseAgent(ChainGeneration, ABC):
         
         # Create appropriate tokenizer for trajectory processing
         self.tokenizer = create_tokenizer(model_name_or_path)
+
+        self.processor = create_processor(model_name_or_path)
         
         self._reward_fn = reward_fn
 
@@ -105,8 +108,7 @@ class BaseAgent(ChainGeneration, ABC):
             raise ValueError(f"Streaming mode {streaming} is not supported.")
         super().__init__()
         if kwargs:
-            # warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
-            raise ValueError(f"Unused arguments for agent initialization: {kwargs}")
+            warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
     
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         if isinstance(model_name_or_path, str):
@@ -207,7 +209,7 @@ class BaseAgent(ChainGeneration, ABC):
 
         return trajectories
 
-    def tokenize_trajectories(self, tokenizer, return_action_mask: bool = False, return_reward_mask: bool = False):
+    def tokenize_trajectories(self, tokenizer = None, return_reward_mask: bool = False):
         if tokenizer is None:
             tokenizer = self.tokenizer
             
@@ -319,7 +321,7 @@ class BaseAgent(ChainGeneration, ABC):
     
 
     def get_verl_data_proto(self):
-        inputs, other_info_list = self.tokenize_trajectories(return_action_mask=True, return_reward_mask=True)
+        inputs, other_info_list = self.tokenize_trajectories(return_reward_mask=True)
         group_ids = np.array([info["group_id"] for info in other_info_list], dtype=object)
         # Do evaluation here
         reward_values, other_values = self.rewards
