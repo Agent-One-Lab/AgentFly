@@ -69,6 +69,7 @@ class BaseAgent(ChainGeneration, ABC):
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
         self.llm_engine, self.tokenizer, self.processor = self._init_llm_engine(model_name_or_path, backend)
+        Logger.debug(f"[BaseAgent] llm_engine: {self.llm_engine}")
         self._reward_fn = reward_fn
         self.jinja_template = get_template(self.template).jinja_template()
         self.project_name = project_name
@@ -111,6 +112,7 @@ class BaseAgent(ChainGeneration, ABC):
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"
+
         self.llm_engine.llm_engine = llm_engine
         self.tokenizer = tokenizer
         self.processor = processor
