@@ -21,15 +21,8 @@ Action: [Choose ONE action from the list below]
 ## Action Space
 
 click(start_box='<|box_start|>(x1,y1)<|box_end|>')
-left_double(start_box='<|box_start|>(x1,y1)<|box_end|>')
-right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
-drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
-hotkey(key='')
 type(content='xxx') # Use escape characters \\', \\", and \\n in content part
-scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left')
-wait() # Sleep for 5s and take a screenshot to check for any changes
-finished(content='xxx') # Task completed
-call_user() # Submit the task and call the user when the task is unsolvable
+scroll(direction='down or up or right or left')
 
 ## Examples
 Example 1:
@@ -119,18 +112,16 @@ class GUIAgent(BaseAgent):
                 print(f"[GUIAgent.parse] Response missing format, reformatting: {resp[:100]}")
                 
                 # Check if it contains action-like content
-                if any(action in resp_lower for action in ['click', 'type', 'scroll', 'drag', 'wait', 'finished']):
+                if any(action in resp_lower for action in ['click', 'type', 'scroll']):
                     formatted_resp = f"Thought: Executing action based on response.\nAction: {resp.strip()}"
                 else:
-                    formatted_resp = f"Thought: {resp.strip()}\nAction: wait()"
+                    # Default to click at center if no clear action
+                    formatted_resp = f"Thought: {resp.strip()}\nAction: click(start_box='<|box_start|>(960,540)<|box_end|>')"
                 processed_responses.append(formatted_resp)
             else:
-                # Handle empty responses with progressive default actions
+                # Handle empty responses with default click at center
                 self.action_counter += 1
-                if self.action_counter > 5:
-                    processed_responses.append("Thought: Multiple attempts made. Completing task.\nAction: finished(content='Task attempted')")
-                else:
-                    processed_responses.append(f"Thought: Processing the screen (attempt {self.action_counter}).\nAction: wait()")
+                processed_responses.append(f"Thought: Processing the screen (attempt {self.action_counter}).\nAction: click(start_box='<|box_start|>(960,540)<|box_end|>')")
         
         responses = processed_responses
         
@@ -171,12 +162,12 @@ class GUIAgent(BaseAgent):
                     }
                 }]
             else:
-                # If no action was parsed, create a default wait action
-                print(f"[GUIAgent.parse] No action parsed from response, creating default wait action")
+                # If no action was parsed, create a default click action at center
+                print(f"[GUIAgent.parse] No action parsed from response, creating default click action")
                 default_action = {
-                    "action_type": "wait",
-                    "action_inputs": {},
-                    "thought": "Waiting to analyze the screen",
+                    "action_type": "click",
+                    "action_inputs": {"start_box": "(960, 540)"},
+                    "thought": "Clicking at screen center",
                     "reflection": None
                 }
                 tool_calls = [{
@@ -188,13 +179,12 @@ class GUIAgent(BaseAgent):
                     }
                 }]
             
-            # Determine status - terminal if action is "finished" or "call_user"
-            status = "continue"  # Default to continue
+            # Always terminate after one turn since we only have 3 action types
+            # and no explicit termination action
+            status = "terminal"
             if actions and isinstance(actions[0], dict):
                 action_type = actions[0].get("action_type", "")
-                print(f"[GUIAgent.parse] Action type: {action_type}")
-                if action_type in ["finished", "call_user"]:
-                    status = "terminal"
+                print(f"[GUIAgent.parse] Action type: {action_type}, terminating after one turn")
             
             message = {
                 "role": "assistant",
