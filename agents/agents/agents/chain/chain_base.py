@@ -312,6 +312,10 @@ class ChainGeneration:
                 )
                 thought_node.is_terminal = new_msg.get("status", "continue") in self.terminal_status
                 current_node = thought_node
+                
+                # Check if the thought node is terminal - if so, break the loop
+                if current_node.is_terminal:
+                    break
 
             # Handle tool calls
             if current_node.messages[-1].get("tool_calls"):
