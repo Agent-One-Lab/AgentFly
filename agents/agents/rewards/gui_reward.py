@@ -101,7 +101,7 @@ def extract_input_text(content: str) -> str:
 
 
 def extract_coord(content: str) -> Tuple[list, bool]:
-    """Extract coordinates from action content."""
+    """Extract coordinates from action content and normalize them to 0-1 range."""
     try:
         parsed = parse_action_to_structure_output(content, IMAGE_FACTOR, TEST_IMAGE_HEIGHT, TEST_IMAGE_WIDTH, model_type="default")
         if parsed and len(parsed) > 0:
@@ -115,11 +115,23 @@ def extract_coord(content: str) -> Tuple[list, bool]:
                     # Ensure coords is a list
                     if isinstance(coords, (list, tuple)):
                         if len(coords) == 2:
-                            # Point format [x, y]
-                            return list(coords), True
+                            # Point format [x, y] in pixels - normalize to 0-1
+                            normalized_coords = [
+                                coords[0] / TEST_IMAGE_WIDTH,
+                                coords[1] / TEST_IMAGE_HEIGHT
+                            ]
+                            print(f"[extract_coord] Normalized point from {coords} to {normalized_coords}")
+                            return normalized_coords, True
                         elif len(coords) == 4:
-                            # Box format [x1, y1, x2, y2]
-                            return list(coords), True
+                            # Box format [x1, y1, x2, y2] in pixels - normalize to 0-1
+                            normalized_coords = [
+                                coords[0] / TEST_IMAGE_WIDTH,
+                                coords[1] / TEST_IMAGE_HEIGHT,
+                                coords[2] / TEST_IMAGE_WIDTH,
+                                coords[3] / TEST_IMAGE_HEIGHT
+                            ]
+                            print(f"[extract_coord] Normalized box from {coords} to {normalized_coords}")
+                            return normalized_coords, True
                     else:
                         print(f"[extract_coord] Unexpected coord format: {coords}")
                 except Exception as e:
@@ -140,7 +152,7 @@ def gui_format_score(predict_str: str) -> float:
 
 
 def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input_text: str) -> float:
-    """Calculate accuracy score for GUI prediction."""
+    """Calculate accuracy score for GUI prediction (0.5 for action type, 0.5 for parameters)."""
     try:
         gt_action = gt_action.lower() if gt_action else ''
 
@@ -150,105 +162,107 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
         
         print(f"[gui_accuracy_score] gt_action: {gt_action}, pred_action: {pred_action}")
         print(f"[gui_accuracy_score] gt_bbox: {gt_bbox}, pred_coord: {pred_coord}, has_coord: {has_coord}")
+        print(f"[gui_accuracy_score] gt_input_text: {gt_input_text}, pred_input_text: {pred_input_text}")
         
-        # Normalize action types for comparison
+        # Map all click variants to 'click' for the 3-action space
         action_mapping = {
             'left_single': 'click',
-            'left_double': 'left_double',
-            'right_single': 'right_single',
-            'select': 'drag',
-            'press': 'hotkey',
-            'keydown': 'hotkey',
-            'release': 'hotkey',
-            'keyup': 'hotkey'
+            'left_double': 'click',  
+            'right_single': 'click',
+            'click': 'click',
+            'type': 'type',
+            'scroll': 'scroll'
         }
         
-        # Normalize predicted action
+        # Normalize actions
         pred_action_normalized = action_mapping.get(pred_action, pred_action)
         gt_action_normalized = action_mapping.get(gt_action, gt_action)
         
-        # For click-related actions, treat them as the same category
-        click_actions = ['click', 'left_single', 'left_double', 'right_single']
-        if pred_action in click_actions and gt_action in click_actions:
-            # Actions are in the same category, continue with coordinate check
-            pass
-        elif pred_action_normalized != gt_action_normalized:
-            return 0.0
-
-        # Check accuracy for different action types
-        if gt_action in ["click", "left_single", "left_double", "right_single"]:
-            if has_coord and gt_bbox:
-                # Handle different gt_bbox formats
-                if len(gt_bbox) == 2:
-                    # Point format
-                    gt_x, gt_y = gt_bbox
-                elif len(gt_bbox) == 4:
-                    # Box format - use center
-                    gt_x = (gt_bbox[0] + gt_bbox[2]) / 2
-                    gt_y = (gt_bbox[1] + gt_bbox[3]) / 2
-                else:
-                    return 0.0
-                
-                # Get predicted center based on format
-                if len(pred_coord) == 2:
-                    # Point format
-                    pred_x, pred_y = pred_coord
-                elif len(pred_coord) == 4:
-                    # Box format - use center
-                    pred_x = (pred_coord[0] + pred_coord[2]) / 2
-                    pred_y = (pred_coord[1] + pred_coord[3]) / 2
-                else:
-                    return 0.0
-                
-                # Calculate distance
-                distance = ((pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2) ** 0.5
-                
-                # Use a threshold based on screen size (e.g., 5% of screen diagonal)
-                screen_diagonal = (TEST_IMAGE_WIDTH ** 2 + TEST_IMAGE_HEIGHT ** 2) ** 0.5
-                threshold = 0.05 * screen_diagonal
-                
-                return 1.0 if distance < threshold else 0.0
-            return 0.0 if gt_bbox else 1.0  # If no bbox in gt, any click is correct
-
-        elif gt_action in ['type', 'scroll']:
-            f1, _, _ = f1_score(pred_input_text, gt_input_text)
-            return 1.0 if f1 >= 0.5 else 0.0
+        score = 0.0
         
-        elif gt_action == 'drag':
-            # For drag, check start position
-            if has_coord and gt_bbox:
-                if len(gt_bbox) >= 4:
-                    # Compare start position
+        # Score calculation: 0.5 for action type, 0.5 for parameters (bbox/text)
+        
+        # 1. Action type matching (0.5 points)
+        if pred_action_normalized == gt_action_normalized:
+            score += 0.5
+            print(f"[gui_accuracy_score] Action matched: +0.5 points")
+        else:
+            print(f"[gui_accuracy_score] Action mismatch: {pred_action_normalized} vs {gt_action_normalized}")
+        
+        # 2. Parameter matching (0.5 points) - depends on action type
+        if gt_action_normalized == 'click':
+            # For click: check bbox coordinates
+            if gt_bbox and len(gt_bbox) > 0:
+                if has_coord:
+                    # Both have coordinates, calculate distance
+                    # Handle different gt_bbox formats (already normalized 0-1)
+                    if len(gt_bbox) == 2:
+                        gt_x, gt_y = gt_bbox
+                    elif len(gt_bbox) == 4:
+                        gt_x = (gt_bbox[0] + gt_bbox[2]) / 2
+                        gt_y = (gt_bbox[1] + gt_bbox[3]) / 2
+                    else:
+                        print(f"[gui_accuracy_score] Invalid gt_bbox format: {gt_bbox}")
+                        return score
+                    
+                    # Get predicted center (already normalized 0-1)
                     if len(pred_coord) == 2:
                         pred_x, pred_y = pred_coord
-                    elif len(pred_coord) >= 4:
+                    elif len(pred_coord) == 4:
                         pred_x = (pred_coord[0] + pred_coord[2]) / 2
                         pred_y = (pred_coord[1] + pred_coord[3]) / 2
                     else:
-                        return 0.0
+                        print(f"[gui_accuracy_score] Invalid pred_coord format: {pred_coord}")
+                        return score
                     
-                    if len(gt_bbox) == 4:
-                        gt_start_x, gt_start_y = gt_bbox[0], gt_bbox[1]
+                    # Calculate distance in normalized space
+                    distance = ((pred_x - gt_x) ** 2 + (pred_y - gt_y) ** 2) ** 0.5
+                    
+                    # Threshold in normalized space (5% of diagonal)
+                    threshold = 0.05 * (2 ** 0.5)  # sqrt(1^2 + 1^2) ≈ 0.07
+                    
+                    if distance < threshold:
+                        score += 0.5
+                        print(f"[gui_accuracy_score] Bbox matched (distance={distance:.4f}): +0.5 points")
                     else:
-                        gt_start_x = (gt_bbox[0] + gt_bbox[2]) / 2
-                        gt_start_y = (gt_bbox[1] + gt_bbox[3]) / 2
-                    
-                    distance = ((pred_x - gt_start_x) ** 2 + (pred_y - gt_start_y) ** 2) ** 0.5
-                    screen_diagonal = (TEST_IMAGE_WIDTH ** 2 + TEST_IMAGE_HEIGHT ** 2) ** 0.5
-                    threshold = 0.05 * screen_diagonal
-                    
-                    return 1.0 if distance < threshold else 0.0
-            return 0.0
+                        print(f"[gui_accuracy_score] Bbox too far (distance={distance:.4f}, threshold={threshold:.4f})")
+                else:
+                    print(f"[gui_accuracy_score] No predicted coordinates for click action")
+            else:
+                # No gt_bbox required, any click gets parameter points
+                score += 0.5
+                print(f"[gui_accuracy_score] No gt_bbox required: +0.5 points")
+                
+        elif gt_action_normalized == 'type':
+            # For type: check text content
+            if gt_input_text and gt_input_text != "no input text":
+                f1, _, _ = f1_score(pred_input_text, gt_input_text)
+                if f1 >= 0.5:
+                    score += 0.5
+                    print(f"[gui_accuracy_score] Type text matched (f1={f1:.2f}): +0.5 points")
+                else:
+                    print(f"[gui_accuracy_score] Type text mismatch (f1={f1:.2f})")
+            else:
+                # No text required, any type action gets parameter points
+                score += 0.5
+                print(f"[gui_accuracy_score] No text required: +0.5 points")
+                
+        elif gt_action_normalized == 'scroll':
+            # For scroll: only check direction (no bbox needed)
+            if gt_input_text and gt_input_text != "no input text":
+                if pred_input_text.lower() == gt_input_text.lower():
+                    score += 0.5
+                    print(f"[gui_accuracy_score] Scroll direction matched: +0.5 points")
+                else:
+                    print(f"[gui_accuracy_score] Scroll direction mismatch: {pred_input_text} vs {gt_input_text}")
+            else:
+                # No direction specified, any scroll gets parameter points
+                score += 0.5
+                print(f"[gui_accuracy_score] No scroll direction required: +0.5 points")
         
-        elif gt_action == 'hotkey':
-            # For hotkey, compare the key combinations
-            return 1.0 if pred_input_text.lower() == gt_input_text.lower() else 0.0
+        print(f"[gui_accuracy_score] Final score: {score}")
+        return score
         
-        elif gt_action in ['wait', 'finished', 'call_user']:
-            # These actions don't require parameters
-            return 1.0
-        
-        return 0.0
     except Exception as e:
         print(f"Error in gui_accuracy_score: {e}")
         print(f"predict_str: {predict_str}")
@@ -301,19 +315,8 @@ def gui_reward(prediction: str, trajectory: List[Dict] = None, gt_action: str = 
     if gt_input_text == "no input text":
         gt_input_text = ""
         
-    # Convert normalized bbox to pixel coordinates if needed
-    if gt_bbox and len(gt_bbox) > 0 and all(0 <= v <= 1 for v in gt_bbox):
-        print(f"[gui_reward] Converting normalized bbox to pixel coordinates")
-        if len(gt_bbox) == 2:
-            gt_bbox = [gt_bbox[0] * TEST_IMAGE_WIDTH, gt_bbox[1] * TEST_IMAGE_HEIGHT]
-        elif len(gt_bbox) == 4:
-            gt_bbox = [
-                gt_bbox[0] * TEST_IMAGE_WIDTH,
-                gt_bbox[1] * TEST_IMAGE_HEIGHT,
-                gt_bbox[2] * TEST_IMAGE_WIDTH,
-                gt_bbox[3] * TEST_IMAGE_HEIGHT
-            ]
-        print(f"[gui_reward] Converted bbox: {gt_bbox}")
+    # Keep bbox in normalized coordinates (0-1 range)
+    # Both prediction and ground truth use normalized coordinates
     
     if not gt_action and not gt_bbox and not gt_input_text:
         print(f"[gui_reward] Warning: No ground truth data provided - returning 0 reward")
