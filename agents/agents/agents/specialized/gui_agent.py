@@ -84,10 +84,10 @@ class GUIAgent(BaseAgent):
         we need special handling since they're not standard causal LM models.
         """
         # For unit tests or when model loading should be skipped
-        if model_name_or_path == "ByteDance-Seed/UI-TARS-1.5-7B":
-            # Return mock objects for testing
-            print(f"[GUIAgent] Skipping actual model load for testing: {model_name_or_path}")
-            return None, None, None
+        # if model_name_or_path == "ByteDance-Seed/UI-TARS-1.5-7B":
+        #     # Return mock objects for testing
+        #     print(f"[GUIAgent] Skipping actual model load for testing: {model_name_or_path}")
+        #     return None, None, None
             
         # Otherwise use parent's initialization
         return super()._init_llm_engine(model_name_or_path, backend)

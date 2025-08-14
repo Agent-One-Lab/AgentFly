@@ -46,7 +46,7 @@ class TestGUIAgent:
         
         assert len(messages) == 1
         assert messages[0]["role"] == "assistant"
-        assert messages[0]["content"] == responses[0]
+        assert messages[0]["content"][0]["text"] == responses[0]
         assert len(messages[0]["tool_calls"]) == 1
         assert messages[0]["status"] == "continue"
     
@@ -82,7 +82,7 @@ class TestGUIAgent:
         messages = agent.parse(responses, tools=[])
         
         assert len(messages) == 1
-        assert "wait" in messages[0]["content"].lower()
+        assert "wait" in messages[0]["content"][0]["text"].lower()
         assert messages[0]["status"] == "continue"
 
 
