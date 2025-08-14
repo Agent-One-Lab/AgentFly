@@ -29,10 +29,10 @@ def convert_messages_to_openai_format(messages: list) -> list:
     """
     messages = copy.deepcopy(messages)
     for message in messages:
-        if "tool_calls" in message:
-            del message["tool_calls"]
-        if "tool_call_id" in message:
-            del message["tool_call_id"]
+        # if "tool_calls" in message:
+        #     del message["tool_calls"]
+        # if "tool_call_id" in message:
+        #     del message["tool_call_id"]
         if "tool_choice" in message:
             del message["tool_choice"]
     return messages
@@ -249,7 +249,9 @@ def tokenize_conversations(messages_list, tokenizer, conv_template, max_length, 
         batch_action_masks.append(inputs['action_mask'].squeeze(0))
     
     if return_tensors == "pt":
-        batch_input_ids = torch.nn.utils.rnn.pad_sequence(batch_input_ids, batch_first=True, padding_value=tokenizer.pad_token_id)
+        # Use pad_token_id from the tokenizer interface
+        pad_token_id = getattr(tokenizer, 'pad_token_id', 0)
+        batch_input_ids = torch.nn.utils.rnn.pad_sequence(batch_input_ids, batch_first=True, padding_value=pad_token_id)
         batch_attention_masks = torch.nn.utils.rnn.pad_sequence(batch_attention_masks, batch_first=True, padding_value=0)
         batch_labels = torch.nn.utils.rnn.pad_sequence(batch_labels, batch_first=True, padding_value=-100)
         batch_action_masks = torch.nn.utils.rnn.pad_sequence(batch_action_masks, batch_first=True, padding_value=0)
@@ -303,6 +305,9 @@ def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add
     plain_highlighted_prompt = strip_ansi(highlighted_prompt)
     is_equal_between_implemented_prompts = implemented_prompt == plain_highlighted_prompt
     jinja_template = chat.template.jinja_template()
+    # Save jinja template to file
+    with open("jinja_template.jinja", "w") as f:
+        f.write(jinja_template)
     tokenizer.chat_template = jinja_template
     implemented_jinja_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt)
     is_equal_between_jinja_prompts = implemented_jinja_prompt == implemented_prompt
@@ -316,7 +321,9 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp):
         os.makedirs(f"{AGENT_DATA_DIR}/cache")
     with open(f"{AGENT_DATA_DIR}/cache/jinja_template.jinja", "w") as f:
         f.write(jinja_template)
-    command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+    # command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+    command = f"vllm serve {model_name_or_path} --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+
     print(command)
     os.system(command)
 
@@ -325,5 +332,6 @@ if __name__=="__main__":
     "python -m agents.agents.templates.utils"
     # model = "/mnt/sharefs/users/haonan.li/models/Qwen2.5-7B-instruct-am_think_v1_distilled"
     model = "Qwen/Qwen2.5-7B-Instruct"
-    vllm_serve(model, "qwen2.5-think", 2, 1, 4)
+    # vllm_serve(model, "qwen2.5-think", 2, 1, 4)
+    vllm_serve(model, "qwen2.5", 1, 1, 1)
 
