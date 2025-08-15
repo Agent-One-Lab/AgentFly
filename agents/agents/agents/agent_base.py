@@ -157,6 +157,7 @@ class BaseAgent(ChainGeneration, ABC):
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"
+
         self.llm_engine.llm_engine = llm_engine
         self.tokenizer = tokenizer
         self.processor = processor
