@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import re
 import json
 import ast
@@ -8,6 +9,8 @@ from typing import Dict, Any, List, Tuple, Optional
 
 from .reward_base import reward
 from agents.utils.ui_action_parser import parse_action_to_structure_output, IMAGE_FACTOR
+
+logger = logging.getLogger(__name__)
 
 # Image dimensions for testing
 TEST_IMAGE_HEIGHT = 1080
@@ -71,7 +74,7 @@ def extract_action(content: str) -> str:
             
             return action_type
     except Exception as e:
-        print(f"[extract_action] Error: {e}")
+        logger.debug(f"[extract_action] Error: {e}")
     return "no action"
 
 
@@ -96,7 +99,7 @@ def extract_input_text(content: str) -> str:
             
             return ""
     except Exception as e:
-        print(f"[extract_input_text] Error: {e}")
+        logger.debug(f"[extract_input_text] Error: {e}")
     return ""
 
 
@@ -120,7 +123,7 @@ def extract_coord(content: str) -> Tuple[list, bool]:
                                 coords[0] / TEST_IMAGE_WIDTH,
                                 coords[1] / TEST_IMAGE_HEIGHT
                             ]
-                            print(f"[extract_coord] Normalized point from {coords} to {normalized_coords}")
+                            logger.debug(f"[extract_coord] Normalized point from {coords} to {normalized_coords}")
                             return normalized_coords, True
                         elif len(coords) == 4:
                             # Box format [x1, y1, x2, y2] in pixels - normalize to 0-1
@@ -130,15 +133,15 @@ def extract_coord(content: str) -> Tuple[list, bool]:
                                 coords[2] / TEST_IMAGE_WIDTH,
                                 coords[3] / TEST_IMAGE_HEIGHT
                             ]
-                            print(f"[extract_coord] Normalized box from {coords} to {normalized_coords}")
+                            logger.debug(f"[extract_coord] Normalized box from {coords} to {normalized_coords}")
                             return normalized_coords, True
                     else:
-                        print(f"[extract_coord] Unexpected coord format: {coords}")
+                        logger.debug(f"[extract_coord] Unexpected coord format: {coords}")
                 except Exception as e:
-                    print(f"[extract_coord] Error parsing coordinates: {e}")
+                    logger.debug(f"[extract_coord] Error parsing coordinates: {e}")
                 
     except Exception as e:
-        print(f"[extract_coord] Error: {e}")
+        logger.debug(f"[extract_coord] Error: {e}")
     return [], False
 
 
@@ -160,9 +163,9 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
         pred_coord, has_coord = extract_coord(predict_str)
         pred_input_text = extract_input_text(predict_str)
         
-        print(f"[gui_accuracy_score] gt_action: {gt_action}, pred_action: {pred_action}")
-        print(f"[gui_accuracy_score] gt_bbox: {gt_bbox}, pred_coord: {pred_coord}, has_coord: {has_coord}")
-        print(f"[gui_accuracy_score] gt_input_text: {gt_input_text}, pred_input_text: {pred_input_text}")
+        logger.debug(f"[gui_accuracy_score] gt_action: {gt_action}, pred_action: {pred_action}")
+        logger.debug(f"[gui_accuracy_score] gt_bbox: {gt_bbox}, pred_coord: {pred_coord}, has_coord: {has_coord}")
+        logger.debug(f"[gui_accuracy_score] gt_input_text: {gt_input_text}, pred_input_text: {pred_input_text}")
         
         # Map all click variants to 'click' for the 3-action space
         action_mapping = {
@@ -185,9 +188,9 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
         # 1. Action type matching (0.5 points)
         if pred_action_normalized == gt_action_normalized:
             score += 0.5
-            print(f"[gui_accuracy_score] Action matched: +0.5 points")
+            logger.debug(f"[gui_accuracy_score] Action matched: +0.5 points")
         else:
-            print(f"[gui_accuracy_score] Action mismatch: {pred_action_normalized} vs {gt_action_normalized}")
+            logger.debug(f"[gui_accuracy_score] Action mismatch: {pred_action_normalized} vs {gt_action_normalized}")
         
         # 2. Parameter matching (0.5 points) - depends on action type
         if gt_action_normalized == 'click':
@@ -202,7 +205,7 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
                         gt_x = (gt_bbox[0] + gt_bbox[2]) / 2
                         gt_y = (gt_bbox[1] + gt_bbox[3]) / 2
                     else:
-                        print(f"[gui_accuracy_score] Invalid gt_bbox format: {gt_bbox}")
+                        logger.debug(f"[gui_accuracy_score] Invalid gt_bbox format: {gt_bbox}")
                         return score
                     
                     # Get predicted center (already normalized 0-1)
@@ -212,7 +215,7 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
                         pred_x = (pred_coord[0] + pred_coord[2]) / 2
                         pred_y = (pred_coord[1] + pred_coord[3]) / 2
                     else:
-                        print(f"[gui_accuracy_score] Invalid pred_coord format: {pred_coord}")
+                        logger.debug(f"[gui_accuracy_score] Invalid pred_coord format: {pred_coord}")
                         return score
                     
                     # Calculate distance in normalized space
@@ -223,15 +226,15 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
                     
                     if distance < threshold:
                         score += 0.5
-                        print(f"[gui_accuracy_score] Bbox matched (distance={distance:.4f}): +0.5 points")
+                        logger.debug(f"[gui_accuracy_score] Bbox matched (distance={distance:.4f}): +0.5 points")
                     else:
-                        print(f"[gui_accuracy_score] Bbox too far (distance={distance:.4f}, threshold={threshold:.4f})")
+                        logger.debug(f"[gui_accuracy_score] Bbox too far (distance={distance:.4f}, threshold={threshold:.4f})")
                 else:
-                    print(f"[gui_accuracy_score] No predicted coordinates for click action")
+                    logger.debug(f"[gui_accuracy_score] No predicted coordinates for click action")
             else:
                 # No gt_bbox required, any click gets parameter points
                 score += 0.5
-                print(f"[gui_accuracy_score] No gt_bbox required: +0.5 points")
+                logger.debug(f"[gui_accuracy_score] No gt_bbox required: +0.5 points")
                 
         elif gt_action_normalized == 'type':
             # For type: check text content
@@ -239,34 +242,34 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
                 f1, _, _ = f1_score(pred_input_text, gt_input_text)
                 if f1 >= 0.5:
                     score += 0.5
-                    print(f"[gui_accuracy_score] Type text matched (f1={f1:.2f}): +0.5 points")
+                    logger.debug(f"[gui_accuracy_score] Type text matched (f1={f1:.2f}): +0.5 points")
                 else:
-                    print(f"[gui_accuracy_score] Type text mismatch (f1={f1:.2f})")
+                    logger.debug(f"[gui_accuracy_score] Type text mismatch (f1={f1:.2f})")
             else:
                 # No text required, any type action gets parameter points
                 score += 0.5
-                print(f"[gui_accuracy_score] No text required: +0.5 points")
+                logger.debug(f"[gui_accuracy_score] No text required: +0.5 points")
                 
         elif gt_action_normalized == 'scroll':
             # For scroll: only check direction (no bbox needed)
             if gt_input_text and gt_input_text != "no input text":
                 if pred_input_text.lower() == gt_input_text.lower():
                     score += 0.5
-                    print(f"[gui_accuracy_score] Scroll direction matched: +0.5 points")
+                    logger.debug(f"[gui_accuracy_score] Scroll direction matched: +0.5 points")
                 else:
-                    print(f"[gui_accuracy_score] Scroll direction mismatch: {pred_input_text} vs {gt_input_text}")
+                    logger.debug(f"[gui_accuracy_score] Scroll direction mismatch: {pred_input_text} vs {gt_input_text}")
             else:
                 # No direction specified, any scroll gets parameter points
                 score += 0.5
-                print(f"[gui_accuracy_score] No scroll direction required: +0.5 points")
+                logger.debug(f"[gui_accuracy_score] No scroll direction required: +0.5 points")
         
-        print(f"[gui_accuracy_score] Final score: {score}")
+        logger.debug(f"[gui_accuracy_score] Final score: {score}")
         return score
         
     except Exception as e:
-        print(f"Error in gui_accuracy_score: {e}")
-        print(f"predict_str: {predict_str}")
-        print(f"gt_action: {gt_action}, gt_bbox: {gt_bbox}, gt_input_text: {gt_input_text}")
+        logger.debug(f"Error in gui_accuracy_score: {e}")
+        logger.debug(f"predict_str: {predict_str}")
+        logger.debug(f"gt_action: {gt_action}, gt_bbox: {gt_bbox}, gt_input_text: {gt_input_text}")
         return 0.0
 
 
@@ -283,18 +286,18 @@ def gui_reward(prediction: str, trajectory: List[Dict] = None, gt_action: str = 
     Returns:
         Dictionary with reward scores
     """
-    print(f"[gui_reward] Called with prediction: {prediction[:200] if prediction else 'None'}")
-    print(f"[gui_reward] kwargs keys: {list(kwargs.keys())}")
+    logger.debug(f"[gui_reward] Called with prediction: {prediction[:200] if prediction else 'None'}")
+    logger.debug(f"[gui_reward] kwargs keys: {list(kwargs.keys())}")
     
     # Handle empty predictions
     if not prediction or prediction.strip() == "":
-        print(f"[gui_reward] Warning: Empty prediction received")
+        logger.debug(f"[gui_reward] Warning: Empty prediction received")
         # Check if there's a default action in trajectory
         if trajectory and len(trajectory) > 0:
             for msg in reversed(trajectory):
                 if msg.get('role') == 'assistant' and msg.get('content'):
                     prediction = msg['content']
-                    print(f"[gui_reward] Using trajectory content as prediction: {prediction[:100]}")
+                    logger.debug(f"[gui_reward] Using trajectory content as prediction: {prediction[:100]}")
                     break
         
         # if not prediction or prediction.strip() == "":
@@ -309,7 +312,7 @@ def gui_reward(prediction: str, trajectory: List[Dict] = None, gt_action: str = 
     if hasattr(gt_bbox, 'tolist'):
         gt_bbox = gt_bbox.tolist()
     
-    print(f"[gui_reward] gt_action: {gt_action}, gt_bbox: {gt_bbox}, gt_input_text: {gt_input_text}")
+    logger.debug(f"[gui_reward] gt_action: {gt_action}, gt_bbox: {gt_bbox}, gt_input_text: {gt_input_text}")
     
     # Handle "no input text" as empty
     if gt_input_text == "no input text":
@@ -319,7 +322,7 @@ def gui_reward(prediction: str, trajectory: List[Dict] = None, gt_action: str = 
     # Both prediction and ground truth use normalized coordinates
     
     if not gt_action and not gt_bbox and not gt_input_text:
-        print(f"[gui_reward] Warning: No ground truth data provided - returning 0 reward")
+        logger.debug(f"[gui_reward] Warning: No ground truth data provided - returning 0 reward")
         return {
             "reward": 0.0,
             "format": gui_format_score(prediction),
@@ -333,7 +336,7 @@ def gui_reward(prediction: str, trajectory: List[Dict] = None, gt_action: str = 
     format_score = gui_format_score(prediction)
     accuracy_score = gui_accuracy_score(prediction, gt_action, gt_bbox, gt_input_text)
     
-    print(f"[gui_reward] format_score: {format_score}, accuracy_score: {accuracy_score}")
+    logger.debug(f"[gui_reward] format_score: {format_score}, accuracy_score: {accuracy_score}")
     
     # For f1_score, create answer string for backward compatibility
     answer_dict = {
