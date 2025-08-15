@@ -345,7 +345,7 @@ class ChainGeneration:
                     newest_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": [{"type": "text", "text": observation_json}],
+                        "content": [{"type": "text", "text": observation}],
                     })
                     action_input_node.messages = deepcopy(newest_messages)
                     action_input_node.is_terminal = result["status"] in self.terminal_status
