@@ -254,12 +254,9 @@ class BaseAgent(ChainGeneration, ABC):
         if last_message_role == "assistant":
             return last_message_content
         elif last_message_role == "tool":
-            try:
-                response = json.loads(last_message_content)
-                if "content" in response:
-                    return response["content"]
-            except json.JSONDecodeError:
-                return last_message_content
+            return last_message_content
+        else:
+            raise ValueError(f"The last message role must be assistant or tool, but got {last_message_role}")
 
     @abstractmethod
     def parse(self, responses: List[str], tools: List[Any], **args) -> Tuple[dict, int, int]:

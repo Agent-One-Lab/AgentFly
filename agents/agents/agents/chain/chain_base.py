@@ -312,6 +312,10 @@ class ChainGeneration:
                 )
                 thought_node.is_terminal = new_msg.get("status", "continue") in self.terminal_status
                 current_node = thought_node
+                
+                # Check if the thought node is terminal - if so, break the loop
+                if current_node.is_terminal:
+                    break
 
             # Handle tool calls
             if current_node.messages[-1].get("tool_calls"):
@@ -331,16 +335,13 @@ class ChainGeneration:
                     
                     # Process observation
                     observation = result["observation"]
-                    observation_json = json.dumps({
-                        "name": result["name"],
-                        "content": observation,
-                    }, indent=4)
                     
-                    action_input_node.observation = observation_json
+                    action_input_node.observation = observation
                     action_input_node.observation_code = result["status"]
                     newest_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
+                        "tool_name": result["name"],
                         "content": [{"type": "text", "text": observation}],
                     })
                     action_input_node.messages = deepcopy(newest_messages)
@@ -535,7 +536,7 @@ class ChainGeneration:
                     avg_turns += 1
                 if msg['role'] == 'tool':
                     avg_tool_calls += 1
-                    tool_call_name = json.loads(msg['content'][0]['text'])['name']
+                    tool_call_name = msg['tool_name']
                     tool_calls_by_name[tool_call_name] += 1
 
         avg_turns /= len(messages)
