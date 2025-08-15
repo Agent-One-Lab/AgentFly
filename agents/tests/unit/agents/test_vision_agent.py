@@ -2,6 +2,8 @@ from agents.agents.react.react_agent import ReactAgent
 from agents.tools import answer_qa
 import pytest
 
+
+@pytest.mark.gpu
 @pytest.mark.asyncio(loop_scope="session")
 async def test_vision_agent():
     tools = [answer_qa]

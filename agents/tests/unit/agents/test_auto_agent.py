@@ -8,7 +8,7 @@ def test_auto_agent_from_config_react():
     config = {
         "agent_type": "react",
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
-        "template": "qwen-7b-chat",
+        "template": "qwen2.5",
         "tools": ["google_search", "answer"],
         "backend": "client"
     }
@@ -17,7 +17,7 @@ def test_auto_agent_from_config_react():
     
     assert isinstance(agent, ReactAgent)
     assert agent.model_name_or_path == "Qwen/Qwen2.5-3B-Instruct"
-    assert agent.template == "qwen-7b-chat"
+    assert agent.template == "qwen2.5"
     assert len(agent.tools) == 2
     assert agent.backend == "client"
 
@@ -26,7 +26,7 @@ def test_auto_agent_from_config_code():
     config = {
         "agent_type": "code",
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
-        "template": "qwen-7b-chat",
+        "template": "qwen2.5",
         "tools": ["code_interpreter"],
         "backend": "client"
     }
@@ -43,7 +43,7 @@ def test_auto_agent_from_pretrained():
     agent = AutoAgent.from_pretrained(
         model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
         agent_type="react",
-        template="qwen-7b-chat",
+        template="qwen2.5",
         tools=["google_search", "answer"],
         debug=True,
         backend="client"
@@ -55,7 +55,7 @@ def test_auto_agent_with_reward():
     config = {
         "agent_type": "react",
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
-        "template": "qwen-7b-chat",
+        "template": "qwen2.5",
         "tools": ["google_search", "answer"],
         "reward_name": "qa_f1_reward",
         "backend": "client"
@@ -71,7 +71,7 @@ def test_auto_agent_invalid_type():
     config = {
         "agent_type": "invalid_type",
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
-        "template": "qwen-7b-chat",
+        "template": "qwesn2.5",
         "tools": ["google_search", "answer"],
         "backend": "client"
     }
