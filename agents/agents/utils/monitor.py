@@ -24,6 +24,7 @@ import wandb
 from PIL import Image
 import io
 import base64
+import numpy as np
 
 @dataclass(slots=True)
 class MetricEvent:
@@ -74,7 +75,13 @@ class BaseSink(abc.ABC):
 
 
 def serialize_for_json(obj):
-    if isinstance(obj, Image.Image):
+    if isinstance(obj, np.ndarray):
+        # Convert numpy array to list
+        return obj.tolist()
+    elif isinstance(obj, (np.integer, np.floating)):
+        # Convert numpy scalars to Python types
+        return obj.item()
+    elif isinstance(obj, Image.Image):
         # Convert image to base64 string
         buffer = io.BytesIO()
         obj.save(buffer, format="PNG")
