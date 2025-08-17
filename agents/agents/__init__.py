@@ -28,3 +28,8 @@ AGENT_DATA_DIR = os.getenv("AGENT_DATA_DIR", AGENT_DATA_DIR)
 AGENT_CONFIG_DIR = os.getenv("AGENT_CONFIG_DIR", AGENT_CONFIG_DIR)
 
 ENROOT_HOME = os.getenv("ENROOT_HOME", ENROOT_HOME)
+
+if os.getenv("ENROOT_DEBUG", "0") == "1":
+    ENROOT_DEBUG = True
+else:
+    ENROOT_DEBUG = False

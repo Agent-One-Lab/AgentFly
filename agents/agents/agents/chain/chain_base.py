@@ -3,6 +3,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 import time
+
+from ...utils.vision import image_to_data_uri
 from ...utils.timing import Timer
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 import uuid
@@ -338,11 +340,18 @@ class ChainGeneration:
                     
                     action_input_node.observation = observation
                     action_input_node.observation_code = result["status"]
+
+                    new_content = [{"type": "text", "text": observation}]
+                    if "image" in result:
+                        image = result["image"]
+                        image_base64 = image_to_data_uri(image)
+                        new_content.append({"type": "image", "image": image_base64})
+
                     newest_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
                         "tool_name": result["name"],
-                        "content": [{"type": "text", "text": observation}],
+                        "content": new_content
                     })
                     action_input_node.messages = deepcopy(newest_messages)
                     action_input_node.is_terminal = result["status"] in self.terminal_status
@@ -412,12 +421,12 @@ class ChainGeneration:
                 ))
                 
                 # Parse response
-                new_msg = self.parse([full_response], self.tools)
+                new_msg = self.parse([full_response], tools=self.tools)
                 return new_msg[0]
             else:
                 # Fallback to non-streaming generation
                 responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
-                new_msg = self.parse(responses, self.tools)
+                new_msg = self.parse(responses, tools=self.tools)
                 
                 # Emit a single chunk event for the full response
                 full_response = new_msg[0].get("content", "")
@@ -453,7 +462,7 @@ class ChainGeneration:
         else:
             # Non-streaming generation
             responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
-            new_msg = self.parse(responses, self.tools)
+            new_msg = self.parse(responses, tools=self.tools)
             return new_msg[0]
 
     async def _execute_tool_call(self, tool_call, newest_messages, chain, chain_id, depth, have_set_tools, enable_streaming):

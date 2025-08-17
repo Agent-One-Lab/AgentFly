@@ -132,13 +132,11 @@ def validate_schema(name, description, signature, docs):
         # warnings.warn(f"Description mismatch: {description} != {docs_description}, use the specified description by default.")
         # TODO: currently we don't do anything here and prioritize the specified description by default.
         pass
-
-
     docs_params = docs['params']
     for param, param_info in docs_params.items():
         if param not in signature:
             raise ValueError(f"Parameter {param} in docstring not found in function signature.")
-        if ("type" in param_info and "type" in signature[param]) and (param_info['type'] != signature[param]['type']):
+        if ("type" in param_info and "type" in signature[param]) and param_info['type'] and signature[param]['type'] and (param_info['type'] != signature[param]['type']):
             raise ValueError(f"Parameter {param} type mismatch: \"{param_info['type']}\" != \"{signature[param]['type']}\"")
     
     required_params = [param for param in signature if "default" not in signature[param]]
@@ -172,6 +170,9 @@ def validate_schema(name, description, signature, docs):
     if "env" in properties:
         del properties["env"]
         required_params.remove("env")
+    if "self" in properties:
+        del properties["self"]
+        required_params.remove("self")
 
     schema = {
         "type": "function",

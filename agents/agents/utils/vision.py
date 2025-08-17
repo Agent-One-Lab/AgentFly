@@ -4,7 +4,7 @@ import base64
 import io
 from PIL import Image
 import requests
-
+from typing import Union
 
 def open_image_from_any(src: str, *, timeout: int = 10) -> Image.Image:
     """
@@ -60,3 +60,52 @@ def open_image_from_any(src: str, *, timeout: int = 10) -> Image.Image:
     if not path.is_file():
         raise FileNotFoundError(f"Image file not found: {path}")
     return Image.open(path)
+
+
+def image_to_data_uri(img: Union[Image.Image, str, dict], fmt=None) -> str:
+    if isinstance(img, dict):
+        if "bytes" in img:
+            img = img["bytes"]
+
+    if isinstance(img, Image.Image):
+        # Try to detect format from PIL Image first
+        detected_fmt = img.format or fmt or "PNG"
+        buf = io.BytesIO()
+        img.save(buf, format=detected_fmt)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        return f"data:image/{detected_fmt.lower()};base64,{b64}"
+    elif isinstance(img, str):
+        return img
+    elif isinstance(img, bytes):
+        # Try to detect format from magic bytes
+        detected_fmt = fmt or detect_image_format_from_bytes(img)
+        return f"data:image/{detected_fmt.lower()};base64,{base64.b64encode(img).decode('utf-8')}"
+    else:
+        raise ValueError(f"Invalid image type: {type(img)}")
+
+def detect_image_format_from_bytes(img_bytes: bytes) -> str:
+    """Detect image format from bytes using magic numbers"""
+    if len(img_bytes) < 4:
+        return "PNG"  # Default fallback
+    
+    # Check magic bytes for common formats
+    if img_bytes.startswith(b'\xff\xd8\xff'):
+        return "JPEG"
+    elif img_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+        return "PNG"
+    elif img_bytes.startswith(b'GIF87a') or img_bytes.startswith(b'GIF89a'):
+        return "GIF"
+    elif img_bytes.startswith(b'RIFF') and img_bytes[8:12] == b'WEBP':
+        return "WEBP"
+    elif img_bytes.startswith(b'BM'):
+        return "BMP"
+    else:
+        return "PNG"  # Default fallback
+
+def image_to_pil(img: Union[Image.Image, str, dict]) -> Image.Image:
+    if isinstance(img, str):
+        return open_image_from_any(img)
+    elif isinstance(img, dict):
+        return open_image_from_any(img["bytes"])
+    else:
+        return img

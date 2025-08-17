@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
+import inspect
 import json
-
+from ..tools.tool_base import Tool
 from .templates.templates import get_template
 from ..__init__ import AGENT_DATA_DIR
 from .llm_backend import AsyncVLLMBackend, AsyncVerlBackend, ClientBackend, TransformersBackend, VLLMBackend
@@ -19,6 +20,7 @@ import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 from .utils.tokenizer import create_processor, create_tokenizer
 from .backend_config import BACKEND_CONFIGS
+from termcolor import colored
 try:
     from verl.protocol import DataProto
 except ImportError:
@@ -70,6 +72,15 @@ class BaseAgent(ChainGeneration, ABC):
         self.template = template
         self.max_length = max_length
         self.tools = tools
+        
+        tool_methods = []
+        for name, method in inspect.getmembers(self):
+            if isinstance(method, Tool):
+                tool_methods.append(method)
+        for tool_method in tool_methods:
+            if hasattr(tool_method, 'is_method') and tool_method.is_method:
+                tool_method.instance = self
+        
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
         
@@ -315,8 +326,25 @@ class BaseAgent(ChainGeneration, ABC):
                 reward_values.append(reward_value_or_dict)
 
         return reward_values, other_values
-    
 
+    def print_messages(self, index: int = 0):
+        messages = self.get_messages()
+        for message in messages[index]["messages"]:
+            role = message["role"]
+            text = f"{role}: "
+            content = message["content"]
+            if isinstance(content, str):
+                text += content
+            elif isinstance(content, list):
+                for item in content: 
+                    if item["type"] == "text":
+                        text += item["text"]
+                    elif item["type"] == "image":
+                        text += colored("ImagePlaceholder", "red")
+            else:
+                raise ValueError(f"Invalid content type: {type(content)}")
+            print(text)
+    
     def get_verl_data_proto(self):
         inputs, other_info_list = self.tokenize_trajectories(return_reward_mask=True)
         group_ids = np.array([info["group_id"] for info in other_info_list], dtype=object)

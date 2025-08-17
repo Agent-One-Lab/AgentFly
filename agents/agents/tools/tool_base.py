@@ -7,7 +7,7 @@ from ..envs.manager.warm_pool import WarmPool
 from ..envs.env_base import BaseEnv
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
 from .utils.runner import syncronize
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List, Union, Optional
 import contextvars
 from . import TOOL_REGISTRY, TOOL_FACTORY
 import concurrent.futures
@@ -50,6 +50,14 @@ class Tool:
         stateful: bool = False,
         status: str = "success"
     ):
+        # Check if the function is a method
+        self.is_method = False
+        self.instance: Optional[Any] = None
+        sig = inspect.signature(func)
+        params = list(sig.parameters.keys())
+        if params and params[0] == 'self':
+            self.is_method = True
+            
         # Basic properties
         self.func = func
         self.name = name or func.__name__
@@ -119,7 +127,14 @@ class Tool:
             try:
                 if not self.is_stateful:
                     # For non-stateful tools, directly execute the function
-                    result = await self.user_func(**kwargs) if inspect.iscoroutinefunction(self.user_func) \
+                    if self.is_method:
+                        if self.instance is None:
+                            raise ValueError(f"Instance not set for method tool {self.name}")
+                        if inspect.iscoroutinefunction(self.user_func):
+                            result = await self.user_func(self.instance, **kwargs) if inspect.iscoroutinefunction(self.user_func) \
+                                else self.user_func(self.instance, **kwargs)
+                    else:
+                        result = await self.user_func(**kwargs) if inspect.iscoroutinefunction(self.user_func) \
                             else self.user_func(**kwargs)
                 else:
                     # For stateful tools, handle environment management
@@ -134,11 +149,21 @@ class Tool:
                             # token = current_env.set(env)
                             assert kwargs.get("env", None) is None, "env is not allowed to be passed to stateful tools"
                             try:
-                                result = await self.user_func(env=env,**kwargs) if inspect.iscoroutinefunction(self.user_func) \
-                                    else self.user_func(**kwargs)
+                                if self.is_method:
+                                    if self.instance is None:
+                                        raise ValueError(f"Instance not set for method tool {self.name}")
+                                    if inspect.iscoroutinefunction(self.user_func):
+                                        result = await self.user_func(self.instance, env=env, **kwargs) if inspect.iscoroutinefunction(self.user_func) \
+                                            else self.user_func(self.instance, env=env, **kwargs)
+                                else:
+                                    result = await self.user_func(env=env,**kwargs) if inspect.iscoroutinefunction(self.user_func) \
+                                        else self.user_func(**kwargs)
+                            except Exception as e:
+                                raise e # For debugging
                             finally:
                                 pass
             except Exception as e:
+                raise e # For debugging
                 result = str(e)
         # If the arguments are invalid, simply use the result from the validation
         else:
@@ -170,6 +195,8 @@ class Tool:
                 "status": self.status,
                 "info": info,
             }
+            if "image" in result:
+                result_dict["image"] = result["image"]
             return result_dict
         else:
             raise ValueError(f"Got invalid result: {type(result)} when calling {self.name} with arguments {kwargs}. The result should be a string or a dict.")
@@ -347,7 +374,6 @@ async def submit_tool_call(tool_name: str, tool_input: str, id: str=None) -> dic
     # Add id to the input for stateful tools
     if id is not None and tool_obj.is_stateful:
         tool_input_json["id"] = id
-    
     return await tool_obj(**tool_input_json)
 
 

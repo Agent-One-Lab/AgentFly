@@ -35,7 +35,7 @@ import uuid
 import warnings
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
-from ... import ENROOT_HOME
+from ... import ENROOT_HOME, ENROOT_DEBUG
 import socket
 import sys
 
@@ -305,8 +305,8 @@ class Containers:
                          else list(command)
         # print(start_cmd)
         process = subprocess.Popen(start_cmd,
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL if not ENROOT_DEBUG else None,
+                         stderr=subprocess.DEVNULL if not ENROOT_DEBUG else None,
                          start_new_session=True)
 
         deadline = time.time() + 15
