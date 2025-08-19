@@ -300,6 +300,7 @@ class ImageEditingAgent(BaseAgent):
         result = {
             "observation": f"Image Id: {image_id}",
             "image": image_base64,
+            "image_id": image_id
         }
         return result
 
@@ -370,9 +371,13 @@ class ImageEditingAgent(BaseAgent):
             negative_prompt=negative_prompt
         )
         observation = inpaint_result['observation']
-        image = inpaint_result['image']
+        image = inpaint_result['info']['image']
+        image_id = inpaint_result['info']['image_id']
         result = {
             "observation": observation,
-            "image": image
+            "image": image,
+            "image_id": image_id
         }
+        # If want to save the image, uncomment the following line
+        # self.save_image(image_id, f"inpainted_image_{image_id}.png")
         return result

@@ -342,7 +342,7 @@ class ChainGeneration:
                     action_input_node.observation_code = result["status"]
 
                     new_content = [{"type": "text", "text": observation}]
-                    if "image" in result:
+                    if "image" in result["info"]:
                         image = result["image"]
                         image_base64 = image_to_data_uri(image)
                         new_content.append({"type": "image", "image": image_base64})

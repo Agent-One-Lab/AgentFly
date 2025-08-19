@@ -66,14 +66,7 @@ class TestImageTools(unittest.TestCase):
                 detect_prompt="a dog",
                 prompt="a cat",
             )
-            try:
-                tool_call_result = json.loads(tool_call_result) 
-            except Exception as e:
-                print(f"Error when loading tool call result: {e}")
-
-            print(f"tool_call_result: {tool_call_result}")
-            tool_call_result = json.loads(tool_call_result['observation'])
-            self.agent.save_image(tool_call_result["image_id"], os.path.join(self.temp_dir, "auto_inpaint_image_tool.jpg"))
+            self.agent.save_image(tool_call_result["info"]["image_id"], os.path.join(self.temp_dir, "auto_inpaint_image_tool.jpg"))
             return tool_call_result
         
         # Run the async test
