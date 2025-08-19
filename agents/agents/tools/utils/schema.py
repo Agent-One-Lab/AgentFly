@@ -129,7 +129,9 @@ def validate_schema(name, description, signature, docs):
     docs_description = docs['description']
     if description and docs_description and docs_description != description:
         # raise ValueError(f"Description mismatch: {description} != {docs_description}")
-        warnings.warn(f"Description mismatch: {description} != {docs_description}, use the specified description by default.")
+        # warnings.warn(f"Description mismatch: {description} != {docs_description}, use the specified description by default.")
+        # TODO: currently we don't do anything here and prioritize the specified description by default.
+        pass
 
 
     docs_params = docs['params']
