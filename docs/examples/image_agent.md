@@ -8,14 +8,13 @@ pip install git+https://github.com/huggingface/diffusers.git
 
 ## Basic Usage
 
-The ImageEditingAgent is a powerful AI assistant specialized in image editing and manipulation tasks. It can detect objects, create masks, and perform inpainting operations.
 
 ### Creating an Agent
 
 ```python
 from agents.agents.specialized.image_agent.image_agent import ImageEditingAgent
 
-# Create an agent with different backends
+# Create an agent with asynchronous vllm backends
 agent = ImageEditingAgent(
     model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
     template="qwen2.5-vl-system-tool",
@@ -226,58 +225,3 @@ image = agent._get_image(image_id)
 # Save an image to disk
 agent.save_image(image_id, "output_image.jpg")
 ```
-
-## Suggestions for Future Additions
-
-Here are some suggestions to enhance the ImageEditingAgent documentation and functionality:
-
-### 1. **Additional Tool Examples**
-- Add examples for each individual tool (detect_objects, inpaint_image)
-- Show how to chain multiple tools together
-- Provide examples of different use cases (object removal, style transfer, etc.)
-
-### 2. **Error Handling and Debugging**
-- Document common error scenarios and solutions
-- Add debugging tips for tool failures
-- Show how to handle different image formats and sizes
-
-### 3. **Performance Optimization**
-- Document GPU vs CPU usage considerations
-- Add batch processing examples
-- Show how to optimize memory usage for large images
-
-### 4. **Integration Examples**
-- Show how to integrate with web applications
-- Add examples for batch processing multiple images
-- Demonstrate integration with other AI models
-
-### 5. **Advanced Techniques**
-- Add examples of custom mask creation
-- Show how to combine multiple inpainting operations
-- Document advanced prompt engineering for better results
-
-### 6. **Monitoring and Logging**
-- Add examples of using the monitoring system
-- Show how to track tool usage and performance
-- Document logging configuration options
-
-### 7. **Template Customization**
-- Show how to create custom conversation templates
-- Add examples of different system prompts
-- Document template best practices
-
-### 8. **Backend Comparison**
-- Document differences between available backends
-- Add performance benchmarks
-- Show when to use each backend
-
-### 9. **Testing and Validation**
-- Add more comprehensive testing examples
-- Show how to validate tool outputs
-- Add integration testing examples
-
-### 10. **Deployment and Production**
-- Add Docker deployment examples
-- Show how to scale the agent
-- Document production best practices
-

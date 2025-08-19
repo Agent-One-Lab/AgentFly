@@ -195,6 +195,8 @@ class VisionProcessor(ABC):
             # Check if element contains vision tokens
             if self._contains_vision_tokens(element):
                 # Expand vision tokens in this element
+                # Number of images and videos should be equal to the total number of vision tokens in the element
+                # We check whether all images and videos are processed later.
                 expanded_element = self.expand_vision_tokens(element, images, videos, processor)
                 cur_input_ids = tokenizer.encode(expanded_element, add_special_tokens=False)
             else:
@@ -210,6 +212,8 @@ class VisionProcessor(ABC):
             else:
                 labels.extend(cur_input_ids)
                 action_mask.extend([1] * len(cur_input_ids))
+
+        assert len(images) == len(videos) == 0, f"All images and videos should be processed, but got {len(images)} images and {len(videos)} videos left for vision template {self.config.model_type}."
         
         # Step 3: Create base inputs
         inputs = {
@@ -477,14 +481,15 @@ class PatchBasedProcessor(VisionProcessor):
         num_image_placeholders = prompt.count(self.config.image_token)
         num_video_placeholders = prompt.count(self.config.video_token)
         
-        if len(images) != num_image_placeholders:
-            raise ValueError(f"Number of images ({len(images)}) doesn't match placeholders ({num_image_placeholders})")
-        if len(videos) != num_video_placeholders:
-            raise ValueError(f"Number of videos ({len(videos)}) doesn't match placeholders ({num_video_placeholders})")
-        
+        # if len(images) != num_image_placeholders:
+        #     raise ValueError(f"Number of images ({len(images)}) doesn't match placeholders ({num_image_placeholders})")
+        # if len(videos) != num_video_placeholders:
+        #     raise ValueError(f"Number of videos ({len(videos)}) doesn't match placeholders ({num_video_placeholders})")
+        images_slice = [images.pop(0) for _ in range(num_image_placeholders)]
+        videos_slice = [videos.pop(0) for _ in range(num_video_placeholders)]
         # Preprocess images and videos to get individual token counts
-        processed_images = self.preprocess_images(images, processor) if images else {}
-        processed_videos = self.preprocess_videos(videos, processor) if videos else {}
+        processed_images = self.preprocess_images(images_slice, processor) if images_slice else {}
+        processed_videos = self.preprocess_videos(videos_slice, processor) if videos_slice else {}
         
         # Expand image tokens using regex to avoid infinite loops
         expanded_prompt = prompt
