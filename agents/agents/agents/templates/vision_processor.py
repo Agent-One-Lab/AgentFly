@@ -190,12 +190,16 @@ class VisionProcessor(ABC):
             labels.append(-100)
             action_mask.append(0)
         
+        images_to_process = [image for image in images]
+        videos_to_process = [video for video in videos]
         # Step 2: Process each element with vision token expansion
         for element, mask_flag in zip(elements, mask_flags):
             # Check if element contains vision tokens
             if self._contains_vision_tokens(element):
                 # Expand vision tokens in this element
-                expanded_element = self.expand_vision_tokens(element, images, videos, processor)
+                # Number of images and videos should be equal to the total number of vision tokens in the element
+                # We check whether all images and videos are processed later.
+                expanded_element = self.expand_vision_tokens(element, images_to_process, videos_to_process, processor)
                 cur_input_ids = tokenizer.encode(expanded_element, add_special_tokens=False)
             else:
                 cur_input_ids = tokenizer.encode(element, add_special_tokens=False)
@@ -210,6 +214,8 @@ class VisionProcessor(ABC):
             else:
                 labels.extend(cur_input_ids)
                 action_mask.extend([1] * len(cur_input_ids))
+
+        assert len(images_to_process) == len(videos_to_process) == 0, f"All images and videos should be processed, but got {len(images_to_process)} images and {len(videos_to_process)} videos left for vision template {self.config.model_type}."
         
         # Step 3: Create base inputs
         inputs = {
@@ -286,6 +292,7 @@ class PatchBasedProcessor(VisionProcessor):
             
             # Assume it's a file path
             else:
+                print(f"Loading image from file path: {image_input}")
                 return Image.open(image_input)
         
         # Handle bytes
@@ -477,40 +484,52 @@ class PatchBasedProcessor(VisionProcessor):
         num_image_placeholders = prompt.count(self.config.image_token)
         num_video_placeholders = prompt.count(self.config.video_token)
         
-        if len(images) != num_image_placeholders:
-            raise ValueError(f"Number of images ({len(images)}) doesn't match placeholders ({num_image_placeholders})")
-        if len(videos) != num_video_placeholders:
-            raise ValueError(f"Number of videos ({len(videos)}) doesn't match placeholders ({num_video_placeholders})")
-        
+        # if len(images) != num_image_placeholders:
+        #     raise ValueError(f"Number of images ({len(images)}) doesn't match placeholders ({num_image_placeholders})")
+        # if len(videos) != num_video_placeholders:
+        #     raise ValueError(f"Number of videos ({len(videos)}) doesn't match placeholders ({num_video_placeholders})")
+        images_slice = [images.pop(0) for _ in range(num_image_placeholders)]
+        videos_slice = [videos.pop(0) for _ in range(num_video_placeholders)]
         # Preprocess images and videos to get individual token counts
-        processed_images = self.preprocess_images(images, processor) if images else {}
-        processed_videos = self.preprocess_videos(videos, processor) if videos else {}
+
+        processed_images = [self.preprocess_images([image], processor) for image in images_slice]
+        processed_videos = [self.preprocess_videos([video], processor) for video in videos_slice]
         
-        # Expand image tokens using regex to avoid infinite loops
         expanded_prompt = prompt
-        if self.config.image_token in expanded_prompt:
-            if processed_images and "pixel_values" in processed_images:
-                # Calculate tokens for this specific image
-                image_tokens = self.calculate_image_tokens(processed_images, processor)
-                replacement = self.config.image_token * image_tokens
-            else:
-                replacement = self.config.image_token
-            
-            # Use regex to replace all occurrences at once
-            import re
-            expanded_prompt = re.sub(re.escape(self.config.image_token), replacement, expanded_prompt)
+        if self.config.image_token in expanded_prompt and processed_images:
+            parts = expanded_prompt.split(self.config.image_token)
+            expanded_parts = [parts[0]]
+            for idx in range(len(parts) - 1):
+                if idx < len(processed_images):
+                    processed_image = processed_images[idx]
+                    if "pixel_values" in processed_image:
+                        image_tokens = self.calculate_image_tokens(processed_image, processor)
+                        replacement = self.config.image_token * image_tokens
+                    else:
+                        replacement = self.config.image_token
+                else:
+                    replacement = self.config.image_token
+                expanded_parts.append(replacement)
+                expanded_parts.append(parts[idx+1])
+            expanded_prompt = ''.join(expanded_parts)
         
-        # Expand video tokens using regex to avoid infinite loops
-        if self.config.video_token in expanded_prompt:
-            if processed_videos and "pixel_values" in processed_videos:
-                # Calculate tokens for this specific video
-                video_tokens = self.calculate_video_tokens(processed_videos, processor)
-                replacement = self.config.video_token * video_tokens
-            else:
-                replacement = self.config.video_token
-            
-            # Use regex to replace all occurrences at once
-            expanded_prompt = re.sub(re.escape(self.config.video_token), replacement, expanded_prompt)
+        # Expand video tokens sequentially - each token gets replaced with its corresponding video
+        if self.config.video_token in expanded_prompt and processed_videos:
+            parts = expanded_prompt.split(self.config.video_token)
+            expanded_parts = [parts[0]]
+            for idx in range(len(parts) - 1):
+                if idx < len(processed_videos):
+                    processed_video = processed_videos[idx]
+                    if "pixel_values" in processed_video:
+                        video_tokens = self.calculate_video_tokens(processed_video, processor)
+                        replacement = self.config.video_token * video_tokens
+                    else:
+                        replacement = self.config.video_token
+                else:
+                    replacement = self.config.video_token
+                expanded_parts.append(replacement)
+                expanded_parts.append(parts[idx+1])
+            expanded_prompt = ''.join(expanded_parts)
         
         return expanded_prompt
     
