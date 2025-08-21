@@ -1,3 +1,4 @@
+from collections import defaultdict
 import copy
 from enum import Enum
 import os
@@ -219,26 +220,56 @@ def process_prompt_with_vision(
     )
 
 
-def tokenize_conversations(messages_list, tokenizer, conv_template, max_length, processor=None, return_tensors="pt", return_reward_mask=False):
+def tokenize_conversations(
+    messages_list,
+    tokenizer,
+    template,
+    max_length,
+    processor=None,
+    return_tensors="pt",
+    return_reward_mask=False,
+    add_generation_prompt=False,
+    padding_side="right",
+    concatenate_mm_inputs=False
+):
     batch_input_ids = []
     batch_attention_masks = []
     batch_labels = []
     batch_action_masks = []
+    batch_mm_inputs = []
     # TODO: add multiprocessing
     for messages in messages_list:
-        inputs = tokenize_conversation(messages, tokenizer, conv_template, max_length, processor=processor)
+        inputs = tokenize_conversation(messages, tokenizer, template, max_length, processor=processor, add_generation_prompt=add_generation_prompt)
         batch_input_ids.append(inputs['input_ids'].squeeze(0))
         batch_attention_masks.append(inputs['attention_mask'].squeeze(0))
         batch_labels.append(inputs['labels'].squeeze(0))
         batch_action_masks.append(inputs['action_mask'].squeeze(0))
-    
+        mm_inputs = {}
+        if "pixel_values" in inputs:
+            mm_inputs["pixel_values"] = inputs["pixel_values"]
+        else:
+            mm_inputs["pixel_values"] = None
+        if "image_grid_thw" in inputs:
+            mm_inputs["image_grid_thw"] = inputs["image_grid_thw"]
+        else:
+            mm_inputs["image_grid_thw"] = None
+
+        batch_mm_inputs.append(mm_inputs)
+
     if return_tensors == "pt":
         # Use pad_token_id from the tokenizer interface
         pad_token_id = getattr(tokenizer, 'pad_token_id', 0)
-        batch_input_ids = torch.nn.utils.rnn.pad_sequence(batch_input_ids, batch_first=True, padding_value=pad_token_id)
-        batch_attention_masks = torch.nn.utils.rnn.pad_sequence(batch_attention_masks, batch_first=True, padding_value=0)
-        batch_labels = torch.nn.utils.rnn.pad_sequence(batch_labels, batch_first=True, padding_value=-100)
-        batch_action_masks = torch.nn.utils.rnn.pad_sequence(batch_action_masks, batch_first=True, padding_value=0)
+
+        batch_input_ids = torch.nn.utils.rnn.pad_sequence(batch_input_ids, batch_first=True, padding_value=pad_token_id, padding_side=padding_side)
+        batch_attention_masks = torch.nn.utils.rnn.pad_sequence(batch_attention_masks, batch_first=True, padding_value=0, padding_side=padding_side)
+        batch_labels = torch.nn.utils.rnn.pad_sequence(batch_labels, batch_first=True, padding_value=-100, padding_side=padding_side)
+        batch_action_masks = torch.nn.utils.rnn.pad_sequence(batch_action_masks, batch_first=True, padding_value=0, padding_side=padding_side)
+
+    # convert [{"pixel_values": tensor, "image_grid_thw": tensor}, ...] to {"key1":  concat_tensor, "key2": concat_tensor, ...}
+    concatenated_mm_inputs = {}
+    if concatenate_mm_inputs:
+        for key in batch_mm_inputs[0].keys():
+            concatenated_mm_inputs[key] = torch.cat([mm_inputs[key] for mm_inputs in batch_mm_inputs if mm_inputs[key] is not None], dim=0)
 
     inputs = dict(
         input_ids=batch_input_ids,
@@ -249,6 +280,11 @@ def tokenize_conversations(messages_list, tokenizer, conv_template, max_length, 
 
     if return_reward_mask:
         inputs['reward_mask'] = transform_reward_mask(batch_action_masks)
+
+    if concatenate_mm_inputs:
+        inputs.update(concatenated_mm_inputs)
+    else:
+        inputs["mm_inputs"] = batch_mm_inputs
 
     return inputs
 

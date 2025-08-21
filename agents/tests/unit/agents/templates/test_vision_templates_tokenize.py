@@ -63,6 +63,25 @@ from qwen_vl_utils import process_vision_info
     #     {"role": "assistant", "content": "I am fine, thank you."},
     #     {"role": "user", "content": "What is 3 times 5?"},
     # ],
+    [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"},
+                {"type": "text", "text": "Describe these images."},
+                {"type": "image", "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"}
+            ]
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "The image is a cat.",
+                },
+            ],
+        },
+    ]
 ])
 @pytest.mark.parametrize("tools", [
     None,
@@ -94,7 +113,6 @@ def test_chat_template_equal(template, messages, tools, add_generation_prompt):
     official_prompt = tokenizer.decode(official_inputs['input_ids'][0])
     implemented_prompt = tokenizer.decode(implemented_inputs['input_ids'][0])
     print(f"Official prompt image tokens: {official_prompt.count('<|image_pad|>')}\nImplemented prompt image tokens: {implemented_prompt.count('<|image_pad|>')}")
-    
     print(f"Official images: {official_inputs['pixel_values'].shape}\nImplemented images: {implemented_inputs['pixel_values'].shape}")
 
     assert torch.equal(official_inputs["input_ids"], implemented_inputs["input_ids"]), f"""Offical 

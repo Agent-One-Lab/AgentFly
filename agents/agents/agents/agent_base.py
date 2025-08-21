@@ -239,7 +239,16 @@ class BaseAgent(ChainGeneration, ABC):
             info['last_response'] = last_response
             other_info_list.append(info)
 
-        inputs = tokenize_conversations(messages_list, tokenizer=tokenizer, conv_template=self.template, processor=self.processor, max_length=self.max_length, return_reward_mask=return_reward_mask)
+        inputs = tokenize_conversations(
+            messages_list,
+            tokenizer=tokenizer,
+            template=self.template,
+            processor=self.processor,
+            max_length=self.max_length,
+            return_reward_mask=return_reward_mask,
+            add_generation_prompt=True,
+            concatenate_mm_inputs=False,
+        )
         position_ids = torch.clip(torch.cumsum(inputs['attention_mask'], dim=-1) - 1, min=0, max=None)
         inputs['position_ids'] = position_ids
 
@@ -329,6 +338,10 @@ class BaseAgent(ChainGeneration, ABC):
             inputs[f"rm_{key}"] = np.array(values)
         # We handle the group id in the agent side, to be compatible with GRPO
         inputs["uid"] = group_ids
+
+        mm_inputs = inputs.pop("mm_inputs")
+
+        inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
         batch = DataProto.from_single_dict(inputs, meta_info={"use_agent": True})
 
         return batch
