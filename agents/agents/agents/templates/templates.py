@@ -210,7 +210,7 @@ class Template:
 
     def encode(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None) -> str:
         prompt, elements, roles = self.render(messages, tools=tools)
-        elements, mask_flags = self._postprocess_elements(elements, roles)
+        elements, mask_flags = self._postprocess_elements(elements, roles, messages=messages)
         input_ids = []
         attention_mask = []
         labels = []
@@ -236,7 +236,7 @@ class Template:
         return inputs
         
 
-    def _postprocess_elements(self, elements: List[str], roles) -> List[str]:
+    def _postprocess_elements(self, elements: List[str], roles , messages) -> List[str]:
         # Flag non-assistant messages
         new_elements = []
         mask_flags = []
@@ -249,11 +249,39 @@ class Template:
                 mask_flags.append(True)
 
         # return new_elements, mask_flags
+        loss_allowed_elem_set = set()
+        has_explicit_loss = messages is not None and any(isinstance(m, dict) and ("loss" in m) for m in messages)
+        if has_explicit_loss:
+            # Build a mapping from element index -> message index
+            role_to_msg_idx = [None] * len(roles)
+            msg_idx = 0
+            # Handle first role possibly being an auto-inserted default system
+            if len(roles) > 0 and roles[0] == Role.SYSTEM:
+                if messages and messages[0]["role"] == "system":
+                    role_to_msg_idx[0] = 0
+                    msg_idx = 1
+                else:
+                    role_to_msg_idx[0] = None  # inserted default system
 
+        # Map remaining roles 1:1 to messages
+        for i in range(1, len(roles)):
+            if roles[i] in (Role.USER, Role.ASSISTANT, Role.TOOL):
+                if msg_idx < len(messages):
+                    role_to_msg_idx[i] = msg_idx
+                    msg_idx += 1
+
+        # Collect assistant element indices whose backing message has loss=True
+        for i, r in enumerate(roles):
+            if r == Role.ASSISTANT:
+                mi = role_to_msg_idx[i]
+                if mi is not None and messages[mi].get("loss", True):
+                    loss_allowed_elem_set.add(i)
+     
         # merge non-assistant messages and handle the generation prefix and suffixes
         merged_elements = []
         merged_mask_flags = []
-
+        prev_element = ""
+        prev_mask_flag = False
         for i, (element, mask_flag) in enumerate(zip(new_elements, mask_flags)):
             if i == 0:
                 prev_element = element
@@ -267,7 +295,7 @@ class Template:
                         merged_elements.append(prefix)
                         merged_mask_flags.append(True)
                         merged_elements.append(content)
-                        merged_mask_flags.append(False)
+                        merged_mask_flags.append(False if (not has_explicit_loss or i in loss_allowed_elem_set) else True)                        
                         prev_element = suffix
                         prev_mask_flag = True # We need to mask the suffix
                     # Both previous and current elements are non-assistant messages
@@ -283,7 +311,7 @@ class Template:
                         merged_elements.append(prev_element)
                         merged_mask_flags.append(prev_mask_flag)
                         merged_elements.append(content)
-                        merged_mask_flags.append(False)
+                        merged_mask_flags.append(False if (not has_explicit_loss or i in loss_allowed_elem_set) else True)
                         prev_element = suffix
                         prev_mask_flag = True
                     # Previous element is assistant message, but the current one is not
@@ -528,8 +556,10 @@ class Chat:
         role_label, content_label = self._detect_labels(messages)
         hf_messages = []
         for message in messages:
-            hf_messages.append({"role": message[role_label], "content": message[content_label]})
-        
+            d = {"role": message[role_label], "content": message[content_label]}
+            if "loss" in message:
+                d["loss"] = message["loss"]
+            hf_messages.append(d)
         for message in hf_messages:
             self._convert_single_message_to_hf_format(message)
 

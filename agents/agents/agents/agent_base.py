@@ -44,7 +44,7 @@ class BaseAgent(ChainGeneration, ABC):
         log_file: str = "agent",
         project_name: str = None,
         run_name: str = None,
-        streaming: str = "console",
+        streaming: str = "none",
         **kwargs # To pass other unused arguments
     ):
         """
@@ -73,6 +73,8 @@ class BaseAgent(ChainGeneration, ABC):
         self.streaming_manager = StreamingManager()
         if streaming == "console":
             self.streaming_manager.add_observer(ConsoleStreamObserver())
+        elif streaming == "none" or streaming is None:
+            pass
         else:
             # TODO: Support other streaming modes
             raise ValueError(f"Streaming mode {streaming} is not supported.")
@@ -177,6 +179,12 @@ class BaseAgent(ChainGeneration, ABC):
         other_info_list = []
         for trajectory in trajectories:
             messages = trajectory["messages"]
+            if getattr(self,"optimize_last_turn_only",True):
+                assistant_idxs = [i for i, m in enumerate(messages) if m['role'] == 'assistant']
+                if assistant_idxs:
+                    for _i in assistant_idxs:
+                        messages[_i]['loss'] = False
+                    messages[assistant_idxs[-1]]["loss"] = True
             messages_list.append(messages)
             have_called_tool = False
             for message in messages:
