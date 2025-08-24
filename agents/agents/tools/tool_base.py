@@ -307,11 +307,19 @@ def tool(
     return decorator
 
 
-async def submit_tool_call(tool_name: str, tool_input: str, id: str=None) -> dict:
+async def submit_tool_call(
+    tool_name: str,
+    tool_input: str,
+    id: str=None,
+    allowed_tool_names: List[str] = None,
+) -> dict:
     """
     Submit a tool call to the environment.
     """
-    if tool_name not in TOOL_REGISTRY:
+    if allowed_tool_names is None:
+        allowed_tool_names = list(TOOL_REGISTRY.keys())
+
+    if tool_name not in allowed_tool_names:
         tool_name = "hallucination_tool"
         tool_input = {"tool_name": str(tool_name)}
 
@@ -332,6 +340,7 @@ async def submit_tool_call(tool_name: str, tool_input: str, id: str=None) -> dic
         # If the loaded input is not a dict, it means the input is not a valid JSON object
         if not isinstance(tool_input_json, dict):
             tool_input_json = None
+
     elif isinstance(tool_input, dict):
         tool_input_json = tool_input
     else:
@@ -351,14 +360,25 @@ async def submit_tool_call(tool_name: str, tool_input: str, id: str=None) -> dic
     return await tool_obj(**tool_input_json)
 
 
-def submit_tool_calls(tool_names: List[str], tool_inputs: List[Dict | str], ids: List[str]) -> List[dict]:
+def submit_tool_calls(
+    tool_names: List[str],
+    tool_inputs: List[Dict | str],
+    ids: List[str],
+    allowed_tool_names: List[str] = None,
+) -> List[dict]:
     """
     Submit tool calls to the environment. This is a synchronous wrapper that blocks until all results are ready.
     Uses ThreadPoolExecutor to run tool calls in parallel.
     """
+
+    if allowed_tool_names is None:
+        allowed_tool_names = list(TOOL_REGISTRY.keys())
+
+
     mapped_tool_names = []
     mapped_tool_inputs = []
     tool_objs = []
+
     for tool_name, tool_input, id in zip(tool_names, tool_inputs, ids):
         if isinstance(tool_input, dict):
             tool_input_json = tool_input
@@ -371,10 +391,12 @@ def submit_tool_calls(tool_names: List[str], tool_inputs: List[Dict | str], ids:
             raise ValueError(f"Invalid tool input: {tool_input}")
 
         
-        if tool_name not in TOOL_REGISTRY:
+        if tool_name not in allowed_tool_names:
+            # Called a non-existent tool
             mapped_tool_name = "hallucination_tool"
             tool_input_json = {"tool_name": tool_name}
         elif tool_input_json is None:
+            # Invalid input
             mapped_tool_name = "invalid_input_tool"
             tool_input_json = {"tool_input": tool_input}
         else:
@@ -408,13 +430,11 @@ def submit_tool_calls(tool_names: List[str], tool_inputs: List[Dict | str], ids:
 
 @tool()
 def hallucination_tool(tool_name):
-    return f"Hallucinated tool: {tool_name}"
+    return f"Hallucinated tool: {tool_name} does not exist."
 
 @tool()
 def invalid_input_tool(tool_input):
-    return f"Invalid input: {tool_input}, input mush be a valid JSON object."
-
-
+    return f"Invalid input: {tool_input}, input must be a valid JSON object."
 
 
 

@@ -255,7 +255,7 @@ main() {
     
     # Install Python dependencies
     print_status "Installing basic Python dependencies..."
-    pip install -e .
+    pip install -e . > /dev/null
     if [ $? -eq 0 ]; then
         print_success "Basic dependencies installed successfully!"
         INSTALLATION_STATUS+=("Basic Python dependencies: SUCCESS")
@@ -265,7 +265,7 @@ main() {
     fi
     
     print_status "Installing VERL dependencies..."
-    pip install -e '.[verl]' --no-build-isolation
+    pip install -e '.[verl]' --no-build-isolation > /dev/null
     if [ $? -eq 0 ]; then
         print_success "VERL dependencies installed successfully!"
         INSTALLATION_STATUS+=("VERL dependencies: SUCCESS")
@@ -309,14 +309,8 @@ main() {
         exit 1
     fi
     
-    # Setup conda environment and install redis-server
-    print_status "Setting up conda environment and redis-server..."
-    if setup_conda_environment; then
-        INSTALLATION_STATUS+=("conda environment setup: SUCCESS")
-    else
-        INSTALLATION_STATUS+=("conda environment setup: FAILED")
-    fi
-    
+    # Install redis-server (assuming we're already in a conda environment)
+    print_status "Installing redis-server via conda..."
     if install_redis; then
         INSTALLATION_STATUS+=("redis-server installation: SUCCESS")
     else
@@ -369,13 +363,9 @@ main() {
         INSTALLATION_STATUS+=("conda verification: FAILED")
     fi
     
-    if conda env list | grep -q "agentfly"; then
-        print_success "✓ agentfly conda environment"
-        INSTALLATION_STATUS+=("agentfly conda environment verification: SUCCESS")
-    else
-        print_error "✗ agentfly conda environment not found"
-        INSTALLATION_STATUS+=("agentfly conda environment verification: FAILED")
-    fi
+    # Skip agentfly environment check - assuming we're already in a conda environment
+    print_success "✓ conda environment (assuming active)"
+    INSTALLATION_STATUS+=("conda environment verification: SKIPPED (assumed active)")
     
     if command_exists redis-server; then
         print_success "✓ redis-server"
@@ -429,10 +419,9 @@ main() {
     
     echo ""
     print_status "Next steps:"
-    echo "  1. Activate the agentfly environment: conda activate agentfly"
-    echo "  2. If you just installed enroot, you may need to restart your terminal"
-    echo "  3. Check the documentation at: https://agentfly.readthedocs.io/"
-    echo "  4. Try running an example: cd verl && bash examples/run_agents/run_code_agent.sh"
+    echo "  1. If you just installed enroot, you may need to restart your terminal"
+    echo "  2. Check the documentation at: https://agentfly.readthedocs.io/"
+    echo "  3. Try running an example: cd verl && bash examples/run_agents/run_code_agent.sh"
     echo ""
 }
 
