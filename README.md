@@ -1,26 +1,53 @@
-# AgentFly: Scalable and Extensible Reinforcement Learning for LLM Agents
+# 🪽AgentFly: Training scalable LLM agents with RL (multi-turn, async tools/rewards, multimodal)
+
+
 
 <p align="center">
-<a href="https://arxiv.org/pdf/2507.14897" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/Paper-arXiv-%23ffc8dd?style=plastic&link=https%3A%2F%2Farxiv.org%2Fpdf%2F2507.14897"></a>
-<a href="https://agentfly.readthedocs.io/" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/Docs-AgentFly-%23a2d2ff?style=plastic&link=https%3A%2F%2Fagentfly.readthedocs.io%2F"></a>
-<a href="https://huggingface.co/collections/Agent-One/agentfly-6882061c6cf08537cb66c12b" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/Model-%F0%9F%A4%97HF-%23ffb703"></a>
+<a href="https://arxiv.org/pdf/2507.14897" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/arXiv-Paper-%23cdb4db?style=for-the-badge&logo=arxiv"></a>
+<a href="https://agentfly.readthedocs.io/" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/DOC-AgentFly-%23ffc8dd?style=for-the-badge&logo=readthedocs"></a>
+<a href="https://wandb.ai/AgentRL/Open" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/W%26B-LOG-%23ffafcc?style=for-the-badge&logo=weightsandbiases"></a>
+<a href="https://huggingface.co/collections/Agent-One/agentfly-6882061c6cf08537cb66c12b" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/HF-MODEL-%23bde0fe?style=for-the-badge&logo=huggingface"></a>
+<a href="https://github.com/Agent-One-Lab/AgentFly" target="_blank"><img alt="Static Badge" src="https://img.shields.io/github/stars/Agent-One-Lab/AgentFly?style=for-the-badge&logo=github&color=a2d2ff"></a>
 </p>
-
+<p align="center">
+<img alt="Static Badge" src="https://img.shields.io/badge/Agent%20RL--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Multi%20Turn--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Multi%20Modal--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Tool%20--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Reward%20--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Container%20--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Decouple%20--%23000000?style=social">
+<br>
+<img alt="Static Badge" src="https://img.shields.io/badge/Code%20Interpreter--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/WebShop--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/ScienceWorld--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Search--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/ALFWorld--%23000000?style=social">
+<br>
+<img alt="Static Badge" src="https://img.shields.io/badge/Chat%20Template--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Masking--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Asynchronous--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Chain%20Rollout--%23000000?style=social">
+</p>
 
 AgentFly is an extensible framework for building LLM agents with reinforcement learning. It supports multi-turn training by adapting traditional RL methods with token-level masking. It features a decorator-based interface for defining tools and reward functions, enabling seamless extension and ease of use. To support high-throughput training, it implemented asynchronous execution of tool calls and reward computations, and design a centralized resource management system for scalable environment coordination. A suite of prebuilt tools and environments are provided.
 ![Overview](assets/images/overview.png)
 
-## 🆕 News
+## News
 
-**Multi-Modal (Vision) Agent Training Support** - Thanks to the powerful template system, AgentFly now supports training vision-language agents! 🎉
-
-Train agents that can see and understand visual content, including GUI automation and image-based QA. See our [predefined training examples](docs/examples/predefined_training_examples.md) for ready-to-use scripts.
+**08/2025 Multi-Modal (Vision) Agent Training Support** - Thanks to the powerful template system, AgentFly now supports training vision-language agents! 🎉 Train agents that can see and understand visual content, including GUI automation and image-based QA. See our [predefined training examples](docs/examples/predefined_training_examples.md) for ready-to-use scripts.
 
 ---
 
-**New: Chat Template System** - A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. [Learn more →](docs/chat_template/)
+**08/2025 Chat Template System** - A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. [Learn more →](docs/chat_template/)
 
 ## Installation
+**Option 1**: One-line Installation:
+```
+bash install.sh # Assume conda with python3.10.x
+```
+**Option 2**: Customized Installation
+
 Clone and initialize the project:
 ```bash
 git clone https://github.com/Agent-One-Lab/AgentFly
@@ -40,6 +67,11 @@ Some of our tools & environments are managed by *enroot* backend. To use them, p
 Search requires redis to cache results, an optional way to install with conda:
 ```bash
 conda install conda-forge::redis-server==7.4.0
+```
+
+## Quick Start
+```
+
 ```
 
 ## Features
@@ -66,6 +98,10 @@ agent = ReactAgent(
 
 ### 3. Easy Development
 Decoupled agent and training module. Simply customize your own agent, which can directly be applied to training.
+
+## Training Curves
+Reward curves on Qwen2.5-Instruct 3B and 7B models.
+![Curves](assets/images/training_curves.png)
 
 
 ## Training
@@ -155,9 +191,6 @@ https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
 
 [Discord](https://discord.gg/CchUj7Sp)
 
-## Training Curves
-Reward curves on Qwen2.5-Instruct 3B and 7B models.
-![Curves](assets/images/training_curves.png)
 
 ## Cite
 If you used our code or find it helpful, please cite:

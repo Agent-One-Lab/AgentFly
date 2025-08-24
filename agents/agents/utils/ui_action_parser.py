@@ -4,6 +4,9 @@ import re
 import ast
 import math
 from typing import List, Dict, Any, Optional, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 IMAGE_FACTOR = 1  # Changed to match gui_reward.py
 MIN_PIXELS = 100 * 28 * 28
@@ -69,7 +72,7 @@ def parse_action(action_str: str) -> Optional[Dict[str, Any]]:
         return {'function': func_name, 'args': kwargs}
 
     except Exception as e:
-        print(f"Failed to parse action '{action_str}': {e}")
+        logger.debug(f"Failed to parse action '{action_str}': {e}")
         return None
 
 
@@ -145,11 +148,11 @@ def parse_action_to_structure_output(text: str,
                                      max_pixels: int = 16384 * 28 * 28,
                                      min_pixels: int = 100 * 28 * 28) -> Optional[List[Dict[str, Any]]]:
     """Parse action text to structured output."""
-    print(f"[parse_action_to_structure_output] Input text: {text[:500] if text else 'Empty text'}")
+    logger.debug(f"[parse_action_to_structure_output] Input text: {text[:500] if text else 'Empty text'}")
     
     # Handle empty or None responses
     if not text:
-        print(f"[parse_action_to_structure_output] Empty text, returning None")
+        logger.debug(f"[parse_action_to_structure_output] Empty text, returning None")
         return None
         
     text = text.strip()
@@ -197,11 +200,11 @@ def parse_action_to_structure_output(text: str,
             reflection = thought_match.group(1).strip()
     
     if "Action:" not in text:
-        print(f"[parse_action_to_structure_output] No 'Action:' found in text, returning None")
+        logger.debug(f"[parse_action_to_structure_output] No 'Action:' found in text, returning None")
         return None
         
     action_str = text.split("Action: ")[-1]
-    print(f"[parse_action_to_structure_output] Extracted action string: {action_str[:200]}")
+    logger.debug(f"[parse_action_to_structure_output] Extracted action string: {action_str[:200]}")
 
     # Parse multiple actions
     tmp_all_action = action_str.split(")\n\n")
@@ -228,7 +231,7 @@ def parse_action_to_structure_output(text: str,
     actions = []
     for action_instance, raw_str in zip(parsed_actions, all_action):
         if action_instance is None:
-            print(f"Action can't parse: {raw_str}")
+            logger.debug(f"Action can't parse: {raw_str}")
             continue
             
         action_type = action_instance["function"]
@@ -256,7 +259,7 @@ def parse_action_to_structure_output(text: str,
                     for num in numbers:
                         float(num.strip())
                 except ValueError:
-                    print(f"Warning: Invalid coordinate format in '{param_name}': '{ori_box}'")
+                    logger.debug(f"Warning: Invalid coordinate format in '{param_name}': '{ori_box}'")
                     return None
 
                 # Convert coordinates based on model type

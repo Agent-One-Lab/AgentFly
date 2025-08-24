@@ -70,6 +70,7 @@ class BaseAgent(ChainGeneration, ABC):
         self.template = template
         self.max_length = max_length
         self.tools = tools
+        self.tool_names = [tool.name for tool in tools]
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
         
@@ -209,7 +210,7 @@ class BaseAgent(ChainGeneration, ABC):
 
         return trajectories
 
-    def tokenize_trajectories(self, tokenizer = None, return_reward_mask: bool = False):
+    def tokenize_trajectories(self, tokenizer = None, return_reward_mask: bool = False, concatenate_mm_inputs: bool = True):
         if tokenizer is None:
             tokenizer = self.tokenizer
             
@@ -239,7 +240,16 @@ class BaseAgent(ChainGeneration, ABC):
             info['last_response'] = last_response
             other_info_list.append(info)
 
-        inputs = tokenize_conversations(messages_list, tokenizer=tokenizer, conv_template=self.template, processor=self.processor, max_length=self.max_length, return_reward_mask=return_reward_mask)
+        inputs = tokenize_conversations(
+            messages_list,
+            tokenizer=tokenizer,
+            template=self.template,
+            processor=self.processor,
+            max_length=self.max_length,
+            return_reward_mask=return_reward_mask,
+            add_generation_prompt=True,
+            concatenate_mm_inputs=concatenate_mm_inputs,
+        )
         position_ids = torch.clip(torch.cumsum(inputs['attention_mask'], dim=-1) - 1, min=0, max=None)
         inputs['position_ids'] = position_ids
 
@@ -318,7 +328,7 @@ class BaseAgent(ChainGeneration, ABC):
     
 
     def get_verl_data_proto(self):
-        inputs, other_info_list = self.tokenize_trajectories(return_reward_mask=True)
+        inputs, other_info_list = self.tokenize_trajectories(return_reward_mask=True, concatenate_mm_inputs=False)
         group_ids = np.array([info["group_id"] for info in other_info_list], dtype=object)
         # Do evaluation here
         reward_values, other_values = self.rewards
@@ -329,6 +339,10 @@ class BaseAgent(ChainGeneration, ABC):
             inputs[f"rm_{key}"] = np.array(values)
         # We handle the group id in the agent side, to be compatible with GRPO
         inputs["uid"] = group_ids
+        
+        if "mm_inputs" in inputs:
+            mm_inputs = inputs.pop("mm_inputs")
+            inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
         batch = DataProto.from_single_dict(inputs, meta_info={"use_agent": True})
 
         return batch

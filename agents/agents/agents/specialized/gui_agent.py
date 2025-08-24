@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 from typing import List, Any, Tuple, Dict, Optional
 from ..agent_base import BaseAgent
 from agents.utils.ui_action_parser import parse_action_to_structure_output, IMAGE_FACTOR
+
+logger = logging.getLogger(__name__)
 
 # Default image dimensions
 TEST_IMAGE_HEIGHT = 1080
@@ -96,8 +99,8 @@ class GUIAgent(BaseAgent):
         Returns:
             List of structured messages with tool calls
         """
-        print(f"[GUIAgent.parse] Number of responses: {len(responses)}")
-        print(f"[GUIAgent.parse] Raw responses type: {type(responses)}")
+        logger.debug(f"[GUIAgent.parse] Number of responses: {len(responses)}")
+        logger.debug(f"[GUIAgent.parse] Raw responses type: {type(responses)}")
         
         new_messages_list = []
         
@@ -109,7 +112,7 @@ class GUIAgent(BaseAgent):
             elif resp and resp.strip():
                 # Try to reformat responses that don't have the expected format
                 resp_lower = resp.lower()
-                print(f"[GUIAgent.parse] Response missing format, reformatting: {resp[:100]}")
+                logger.debug(f"[GUIAgent.parse] Response missing format, reformatting: {resp[:100]}")
                 
                 # Check if it contains action-like content
                 if any(action in resp_lower for action in ['click', 'type', 'scroll']):
@@ -128,9 +131,9 @@ class GUIAgent(BaseAgent):
         # Log responses for debugging
         for idx, resp in enumerate(responses[:3]):  # Log first 3 responses
             if resp:
-                print(f"[GUIAgent.parse] Response {idx} length: {len(resp)}, preview: {resp[:200]}")
+                logger.debug(f"[GUIAgent.parse] Response {idx} length: {len(resp)}, preview: {resp[:200]}")
             else:
-                print(f"[GUIAgent.parse] Response {idx} is None or empty")
+                logger.debug(f"[GUIAgent.parse] Response {idx} is None or empty")
         
         # Parse actions from responses
         action_list = []
@@ -145,13 +148,13 @@ class GUIAgent(BaseAgent):
         
         # Create messages with tool calls
         for i, (response, actions) in enumerate(zip(responses, action_list)):
-            print(f"[GUIAgent.parse] Processing response {i+1}: response_length={len(response) if response else 0}, actions={actions}")
+            logger.debug(f"[GUIAgent.parse] Processing response {i+1}: response_length={len(response) if response else 0}, actions={actions}")
             
             tool_calls = []
             
             if actions is not None and len(actions) > 0:
                 if len(actions) > 1:
-                    print(f"[GUIAgent.parse] Warning: Multiple actions found ({len(actions)}), using first one")
+                    logger.debug(f"[GUIAgent.parse] Warning: Multiple actions found ({len(actions)}), using first one")
                 action = actions[0]
                 tool_calls = [{
                     "id": str(i),
@@ -163,7 +166,7 @@ class GUIAgent(BaseAgent):
                 }]
             else:
                 # If no action was parsed, create a default click action at center
-                print(f"[GUIAgent.parse] No action parsed from response, creating default click action")
+                logger.debug(f"[GUIAgent.parse] No action parsed from response, creating default click action")
                 default_action = {
                     "action_type": "click",
                     "action_inputs": {"start_box": "(960, 540)"},
@@ -184,7 +187,7 @@ class GUIAgent(BaseAgent):
             status = "terminal"
             if actions and isinstance(actions[0], dict):
                 action_type = actions[0].get("action_type", "")
-                print(f"[GUIAgent.parse] Action type: {action_type}, terminating after one turn")
+                logger.debug(f"[GUIAgent.parse] Action type: {action_type}, terminating after one turn")
             
             message = {
                 "role": "assistant",
@@ -193,7 +196,7 @@ class GUIAgent(BaseAgent):
                 "loss": True,
                 "status": status
             }
-            print(f"[GUIAgent.parse] Created message with status={status}, tool_calls={len(tool_calls)}, content_length={len(response)}")
+            logger.debug(f"[GUIAgent.parse] Created message with status={status}, tool_calls={len(tool_calls)}, content_length={len(response)}")
             new_messages_list.append(message)
         
         return new_messages_list
