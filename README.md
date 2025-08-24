@@ -1,10 +1,9 @@
-# AgentFly: Scalable and Extensible Reinforcement Learning for LM Agents
+# 🪽AgentFly: Training scalable LLM agents with RL (multi-turn, async tools/rewards, multimodal)
 
 
 
 <p align="center">
-<a href="https://arxiv.org/pdf/2507.14897" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/arXiv-Paper-%23cdb4db?style=for-the-badge&logo=arxiv">
-</a>
+<a href="https://arxiv.org/pdf/2507.14897" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/arXiv-Paper-%23cdb4db?style=for-the-badge&logo=arxiv"></a>
 <a href="https://agentfly.readthedocs.io/" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/DOC-AgentFly-%23ffc8dd?style=for-the-badge&logo=readthedocs"></a>
 <a href="https://wandb.ai/AgentRL/Open" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/W%26B-LOG-%23ffafcc?style=for-the-badge&logo=weightsandbiases"></a>
 <a href="https://huggingface.co/collections/Agent-One/agentfly-6882061c6cf08537cb66c12b" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/HF-MODEL-%23bde0fe?style=for-the-badge&logo=huggingface"></a>
@@ -27,6 +26,8 @@
 <br>
 <img alt="Static Badge" src="https://img.shields.io/badge/Chat%20Template--%23000000?style=social">
 <img alt="Static Badge" src="https://img.shields.io/badge/Masking--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Asynchronous--%23000000?style=social">
+<img alt="Static Badge" src="https://img.shields.io/badge/Chain%20Rollout--%23000000?style=social">
 </p>
 
 AgentFly is an extensible framework for building LLM agents with reinforcement learning. It supports multi-turn training by adapting traditional RL methods with token-level masking. It features a decorator-based interface for defining tools and reward functions, enabling seamless extension and ease of use. To support high-throughput training, it implemented asynchronous execution of tool calls and reward computations, and design a centralized resource management system for scalable environment coordination. A suite of prebuilt tools and environments are provided.
@@ -66,6 +67,11 @@ Some of our tools & environments are managed by *enroot* backend. To use them, p
 Search requires redis to cache results, an optional way to install with conda:
 ```bash
 conda install conda-forge::redis-server==7.4.0
+```
+
+## Quick Start
+```
+
 ```
 
 ## Features
