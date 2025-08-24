@@ -4,14 +4,14 @@ Tool
 Base Tool Class
 ---------------
 
-.. autoclass:: agents.tools.tool_base.Tool
+.. autoclass:: agentfly.tools.tool_base.Tool
     :members:
     :special-members: __call__
 
 Tool Decorator
 -------------
 
-.. autofunction:: agents.tools.tool_base.tool
+.. autofunction:: agentfly.tools.tool_base.tool
 
 Predefined Tools
 ---------------

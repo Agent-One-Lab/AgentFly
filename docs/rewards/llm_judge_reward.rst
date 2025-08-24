@@ -3,7 +3,7 @@
 LLM-as-Judge Reward
 ===================
 
-.. currentmodule:: agents.agents.rewards.llm_as_judge.llm_as_judge_reward
+.. currentmodule:: agentfly.rewards.llm_as_judge.llm_as_judge_reward
 
 .. autofunction:: llm_as_judge_reward
 
@@ -62,7 +62,7 @@ Technical Details
 
 .. code-block:: python
 
-    from agents.agents.rewards import get_reward_from_name
+    from agentfly.rewards import get_reward_from_name
     
     # Get LLM judge reward function
     reward_fn = get_reward_from_name("llm_as_judge_reward")

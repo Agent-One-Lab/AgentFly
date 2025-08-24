@@ -41,8 +41,8 @@ This example shows how the ALFWorld reward is used with a ReactAgent:
 
 .. code-block:: python
 
-    from agents.agents.react.react_agent import ReactAgent
-    from agents.rewards import alfworld_episode_reward
+    from agentfly.agents.react.react_agent import ReactAgent
+    from agentfly.rewards import alfworld_episode_reward
 
     # Create ReactAgent with ALFWorld reward function
     react_agent = ReactAgent(
@@ -79,7 +79,7 @@ Simple Direct Usage
     print(f"Reward: {reward_result['reward']}")
     
     # Get reward by name
-    from agents.rewards import get_reward_from_name
+    from agentfly.rewards import get_reward_from_name
     reward_fn = get_reward_from_name("alfworld_episode_reward")
     result = await reward_fn("take apple", env)
     print(result)

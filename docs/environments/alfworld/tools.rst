@@ -8,12 +8,12 @@ The ALFWorld tools provide a Python interface for agents to interact with ALFWor
 Tools Reference
 ---------------
 
-.. currentmodule:: agents.tools.src.alfworld.tools
+.. currentmodule:: agentfly.tools.src.alfworld.tools
 
 alfworld_step
 ~~~~~~~~~~~~~
 
-.. autofunction:: agents.tools.src.alfworld.tools.alfworld_step
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_step
 
 **Function Signature:**
 
@@ -37,7 +37,7 @@ alfworld_step
 alfworld_reset
 ~~~~~~~~~~~~~~
 
-.. autofunction:: agents.tools.src.alfworld.tools.alfworld_reset
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_reset
 
 **Function Signature:**
 
@@ -56,7 +56,7 @@ alfworld_reset
 alfworld_get_admissible_commands
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: agents.tools.src.alfworld.tools.alfworld_get_admissible_commands
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_get_admissible_commands
 
 **Function Signature:**
 
@@ -75,7 +75,7 @@ alfworld_get_admissible_commands
 alfworld_get_task_objective
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: agents.tools.src.alfworld.tools.alfworld_get_task_objective
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_get_task_objective
 
 **Function Signature:**
 
@@ -101,13 +101,13 @@ This example shows how ALFWorld tools are used with a ReactAgent and LLM (Qwen2.
 
 .. code-block:: python
 
-    from agents.agents.react.react_agent import ReactAgent
-    from agents.tools.src.alfworld.tools import (
+    from agentfly.agents.react.react_agent import ReactAgent
+    from agentfly.tools.src.alfworld.tools import (
         alfworld_step, 
         alfworld_get_admissible_commands,
         alfworld_get_task_objective
     )
-    from agents.rewards import alfworld_episode_reward
+    from agentfly.rewards import alfworld_episode_reward
 
     # Configure tools for ReactAgent
     tools = [

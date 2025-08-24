@@ -30,7 +30,7 @@ Messages → Template Processing → Vision Processor → LLM-Ready Inputs
 ### Basic Vision Template
 
 ```python
-from agents.agents.agents.templates import Template
+from agentfly.agents.templates import Template
 
 vision_template = Template(
     name="vision-enabled",
@@ -142,7 +142,7 @@ def _infer_model_type(self) -> str:
 The default processor used by most vision models:
 
 ```python
-from agents.agents.agents.templates.vision_processor import PatchBasedProcessor
+from agentfly.agents.templates.vision_processor import PatchBasedProcessor
 
 # Automatically used for most models
 # Supports multiple image input formats
@@ -154,7 +154,7 @@ from agents.agents.agents.templates.vision_processor import PatchBasedProcessor
 Specialized processor for Qwen-VL models:
 
 ```python
-from agents.agents.agents.templates.vision_processor import QwenVLProcessor
+from agentfly.agents.templates.vision_processor import QwenVLProcessor
 
 # Qwen-VL specific image preprocessing
 # Custom token calculation using grid-based approach
@@ -166,7 +166,7 @@ from agents.agents.agents.templates.vision_processor import QwenVLProcessor
 Specialized processor for LLaVA models:
 
 ```python
-from agents.agents.agents.templates.vision_processor import LlavaProcessor
+from agentfly.agents.templates.vision_processor import LlavaProcessor
 
 # LLaVA specific token calculation
 # Optimized for LLaVA architecture
@@ -271,7 +271,7 @@ message_with_url = {
 ### Basic Vision Chat
 
 ```python
-from agents.agents.agents.templates import Chat
+from agentfly.agents.templates import Chat
 
 # Create chat with vision template
 chat = Chat(template="qwen2.5-vl", messages=[
@@ -453,7 +453,7 @@ def calculate_video_tokens(self, video_data, processor):
 ### Custom Vision Processors
 
 ```python
-from agents.agents.agents.templates.vision_processor import VisionProcessor, VisionProcessorConfig
+from agentfly.agents.templates.vision_processor import VisionProcessor, VisionProcessorConfig
 
 class CustomVisionProcessor(VisionProcessor):
     """Custom vision processor for specific needs"""
@@ -495,14 +495,14 @@ config = VisionProcessorConfig(
     vision_end="<custom_vision_end>"
 )
 
-from agents.agents.agents.templates.vision_processor import register_processor
+from agentfly.agents.templates.vision_processor import register_processor
 register_processor("custom-template", config, CustomVisionProcessor)
 ```
 
 ### Vision Configuration Options
 
 ```python
-from agents.agents.agents.templates.vision_processor import VisionProcessorConfig
+from agentfly.agents.templates.vision_processor import VisionProcessorConfig
 
 config = VisionProcessorConfig(
     model_type="qwen_vl",
@@ -558,9 +558,9 @@ config = VisionProcessorConfig(
 Here's a complete example of creating and using a vision template:
 
 ```python
-from agents.agents.agents.templates import Template, register_template, Chat
-from agents.agents.agents.templates.tool_policy import ToolPolicy, JsonFormatter
-from agents.agents.agents.templates.constants import ToolPlacement
+from agentfly.agents.templates import Template, register_template, Chat
+from agentfly.agents.templates.tool_policy import ToolPolicy, JsonFormatter
+from agentfly.agents.templates.constants import ToolPlacement
 
 # Create a comprehensive vision template
 vision_template = Template(

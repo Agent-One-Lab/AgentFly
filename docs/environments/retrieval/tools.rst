@@ -8,7 +8,7 @@ The Retrieval tools provide semantic search capabilities for document retrieval 
 Tools Reference
 ---------------
 
-.. currentmodule:: agents.tools.src.search
+.. currentmodule:: agentfly.tools.src.search
 
 asyncdense_retrieve
 ~~~~~~~~~~~~~~~~~~~

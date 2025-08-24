@@ -3,7 +3,7 @@
 ALFWorld Episode Reward
 ========================
 
-.. currentmodule:: agents.agents.rewards.alfworld_reward
+.. currentmodule:: agentfly.rewards.alfworld_reward
 
 .. autofunction:: alfworld_episode_reward
 
@@ -50,8 +50,8 @@ Technical Details
 
 .. code-block:: python
 
-    from agents.agents.rewards import get_reward_from_name
-    from agents.agents.envs import ALFWorldEnv
+    from agentfly.rewards import get_reward_from_name
+    from agentfly.envs import ALFWorldEnv
     
     # Get reward function
     reward_fn = get_reward_from_name("alfworld_episode_reward")

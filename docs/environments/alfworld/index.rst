@@ -35,7 +35,7 @@ For most use cases, you can use the ALFWorldEnv class directly:
 
 .. code-block:: python
 
-   from agents.agents.envs.alfworld_env import ALFWorldEnv
+   from agentfly.envs.alfworld_env import ALFWorldEnv
    
    # Create and start the environment
    env = ALFWorldEnv()

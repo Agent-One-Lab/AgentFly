@@ -37,7 +37,7 @@ For most use cases, you can use the PythonSandboxEnv class directly:
 
 .. code-block:: python
 
-   from agents.envs.python_env import PythonSandboxEnv
+   from agentfly.envs.python_env import PythonSandboxEnv
    
    # Create and start the environment
    env = PythonSandboxEnv()

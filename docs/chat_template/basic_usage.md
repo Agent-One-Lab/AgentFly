@@ -7,9 +7,9 @@ The Chat Template System provides a simple yet powerful interface for creating a
 ## Importing the System
 
 ```python
-from agents.agents.agents.templates import Chat, get_template, Template
-from agents.agents.agents.templates.tool_policy import ToolPolicy, JsonFormatter
-from agents.agents.agents.templates.system_policy import SystemPolicy
+from agentfly.agents.templates import Chat, get_template, Template
+from agentfly.agents.templates.tool_policy import ToolPolicy, JsonFormatter
+from agentfly.agents.templates.system_policy import SystemPolicy
 ```
 
 ## Using Pre-built Templates

@@ -52,7 +52,7 @@ Basic usage with direct instantiation:
 
 .. code-block:: python
 
-   from agents.envs.python_env import PythonSandboxEnv
+   from agentfly.envs.python_env import PythonSandboxEnv
    
    # Create environment with custom settings
    env = PythonSandboxEnv(

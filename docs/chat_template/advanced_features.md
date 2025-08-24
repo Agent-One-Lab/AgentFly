@@ -11,7 +11,7 @@ The Chat Template System provides advanced features for fine-grained control ove
 The system supports multiple strategies for where and how tools are integrated into prompts:
 
 ```python
-from agents.agents.agents.templates.constants import ToolPlacement
+from agentfly.agents.templates.constants import ToolPlacement
 
 # 1. SYSTEM placement - tools appear in system message
 system_placement = ToolPlacement.SYSTEM
@@ -31,7 +31,7 @@ Different strategies for formatting tool definitions:
 #### JSON Formatters
 
 ```python
-from agents.agents.agents.templates.tool_policy import (
+from agentfly.agents.templates.tool_policy import (
     JsonFormatter, JsonMinifiedFormatter, JsonIndentedFormatter, JsonCompactFormatter
 )
 
@@ -56,7 +56,7 @@ compact_formatter = JsonCompactFormatter(format_as_list=True)
 #### YAML Formatter
 
 ```python
-from agents.agents.agents.templates.tool_policy import YamlFormatter
+from agentfly.agents.templates.tool_policy import YamlFormatter
 
 # YAML formatting (requires PyYAML)
 yaml_formatter = YamlFormatter()
@@ -65,7 +65,7 @@ yaml_formatter = YamlFormatter()
 #### Custom Formatters
 
 ```python
-from agents.agents.agents.templates.tool_policy import ToolFormatter
+from agentfly.agents.templates.tool_policy import ToolFormatter
 
 class CustomToolFormatter(ToolFormatter):
     def format(self, tools):
@@ -101,7 +101,7 @@ custom_tool_policy = ToolPolicy(
 Process tool content before formatting:
 
 ```python
-from agents.agents.agents.templates.tool_policy import ToolContentProcessor
+from agentfly.agents.templates.tool_policy import ToolContentProcessor
 
 class ToolFilterProcessor(ToolContentProcessor):
     """Filter tools based on certain criteria"""
@@ -139,7 +139,7 @@ filtered_tool_policy = ToolPolicy(
 Fine-grained control over system message behavior:
 
 ```python
-from agents.agents.agents.templates.system_policy import SystemPolicy
+from agentfly.agents.templates.system_policy import SystemPolicy
 
 # Basic system policy
 basic_policy = SystemPolicy(
@@ -170,7 +170,7 @@ Transform system messages before rendering:
 #### Built-in Processors
 
 ```python
-from agents.agents.agents.templates.system_policy import Llama32DateProcessor
+from agentfly.agents.templates.system_policy import Llama32DateProcessor
 
 # Llama 3.2 date processor (adds current date)
 llama_date_policy = SystemPolicy(
@@ -183,7 +183,7 @@ llama_date_policy = SystemPolicy(
 #### Custom Content Processors
 
 ```python
-from agents.agents.agents.templates.system_policy import SystemContentProcessor
+from agentfly.agents.templates.system_policy import SystemContentProcessor
 
 class EnvironmentAwareProcessor(SystemContentProcessor):
     """Add environment information to system messages"""
@@ -225,7 +225,7 @@ lambda_policy = SystemPolicy(
 ### Template-Wide Settings
 
 ```python
-from agents.agents.agents.templates import GlobalPolicy
+from agentfly.agents.templates import GlobalPolicy
 
 # Add prefix to all prompts
 prefix_policy = GlobalPolicy(prefix="<|begin_of_text|>")
@@ -245,7 +245,7 @@ comprehensive_policy = GlobalPolicy(
 ### Conditional Templates
 
 ```python
-from agents.agents.agents.templates import Template
+from agentfly.agents.templates import Template
 
 # Template that changes based on context
 conditional_template = Template(

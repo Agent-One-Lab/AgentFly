@@ -8,12 +8,12 @@ The Code reward system provides evaluation functions for code execution tasks. T
 Reward Functions Reference
 --------------------------
 
-.. currentmodule:: agents.rewards.code_reward
+.. currentmodule:: agentfly.rewards.code_reward
 
 code_reward_test
 ~~~~~~~~~~~~~~~~
 
-.. autofunction:: agents.rewards.code_reward.code_reward_test
+.. autofunction:: agentfly.rewards.code_reward.code_reward_test
 
 **Function Signature:**
 
@@ -64,8 +64,8 @@ Evaluate simple code snippets:
 
 .. code-block:: python
 
-   from agents.rewards.code_reward import code_reward_test
-   from agents.envs.python_env import PythonSandboxEnv
+   from agentfly.rewards.code_reward import code_reward_test
+   from agentfly.envs.python_env import PythonSandboxEnv
    
    # Create environment
    env = await PythonSandboxEnv.acquire()
@@ -92,7 +92,7 @@ Create specialized reward functions for specific tasks:
 
 .. code-block:: python
 
-   from agents.rewards.reward_base import reward
+   from agentfly.rewards.reward_base import reward
    
    @reward(name="math_code_reward", env_cls=PythonSandboxEnv, pool_size=8)
    async def math_code_reward(prediction: str, env: PythonSandboxEnv) -> dict:

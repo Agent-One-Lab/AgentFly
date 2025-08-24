@@ -3,7 +3,7 @@
 Code Execution Reward
 ======================
 
-.. currentmodule:: agents.agents.rewards.code_reward
+.. currentmodule:: agentfly.rewards.code_reward
 
 .. autofunction:: code_reward_test
 
@@ -51,8 +51,8 @@ Technical Details
 
 .. code-block:: python
 
-    from agents.agents.rewards import get_reward_from_name
-    from agents.agents.envs import PythonSandboxEnv
+    from agentfly.rewards import get_reward_from_name
+    from agentfly.envs import PythonSandboxEnv
     
     # Get reward function
     reward_fn = get_reward_from_name("code_reward_test")

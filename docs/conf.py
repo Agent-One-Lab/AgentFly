@@ -4,10 +4,7 @@ import inspect
 import importlib
 
 # Add both project root and agents directory to the Python path
-project_root = os.path.abspath('..')
-agents_root = os.path.join(project_root, 'agents')
-sys.path.insert(0, project_root)
-sys.path.insert(0, agents_root)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 project   = "AgentFly"
 author    = "AgentFly Team"
@@ -57,13 +54,13 @@ def setup(app):
             # Import the original function modules
             try:
                 if tool_name == "code_interpreter":
-                    from agents.tools.src.code.tools import code_interpreter
+                    from agentfly.tools.src.code.tools import code_interpreter
                     original_func = code_interpreter.user_func
                 elif tool_name == "google_search_serper":
-                    from agents.tools.src.search.google_search import google_search_serper
+                    from agentfly.tools.src.search.google_search import google_search_serper
                     original_func = google_search_serper.user_func
                 elif tool_name == "answer":
-                    from agents.tools.src.react.tools import answer
+                    from agentfly.tools.src.react.tools import answer
                     original_func = answer.user_func
                 else:
                     return [nodes.paragraph(text=f"Tool {tool_name} not found")]

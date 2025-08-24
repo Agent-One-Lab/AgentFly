@@ -3,7 +3,7 @@
 Question Answering Rewards
 ===========================
 
-.. currentmodule:: agents.agents.rewards.qa_reward
+.. currentmodule:: agentfly.rewards.qa_reward
 
 QA reward functions evaluate agent performance on question answering tasks using F1 score and exact match metrics.
 
