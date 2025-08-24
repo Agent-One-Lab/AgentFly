@@ -11,10 +11,10 @@ We can specify the following arguments to use a predefined agent:
 The following shows an example to use Qwen2.5-7B-Instruct as a react agent:
 
 ```python
-from agents.agents.react.react_agent import ReactAgent
-from agents.tools.src.code.tools import code_interpreter
-from agents.tools.src.search.google_search import google_search_serper
-from agents.tools.src.react.tools import answer
+from agentfly.agents.react.react_agent import ReactAgent
+from agentfly.tools.src.code.tools import code_interpreter
+from agentfly.tools.src.search.google_search import google_search_serper
+from agentfly.tools.src.react.tools import answer
 
 tools = [google_search_serper, answer]
 
@@ -82,10 +82,10 @@ We provide the following agent that we can try:
 - WebShop Agent:
 ```python
 import asyncio
-from agents.agents import ReactAgent
-from agents.tools import webshop_browser
-from agents.rewards import webshop_reward
-from agents.agents.chain.streaming_observer import ConsoleStreamObserver
+from agentfly.agents import ReactAgent
+from agentfly.tools import webshop_browser
+from agentfly.rewards import webshop_reward
+from agentfly.agents.chain.streaming_observer import ConsoleStreamObserver
 
 tools = [webshop_browser]
 
@@ -117,8 +117,8 @@ await agent.run_async(
 ```
 - Science World Agent
 ```python
-from agents.tools import scienceworld_explorer
-from agents.rewards import scienceworld_reward
+from agentfly.tools import scienceworld_explorer
+from agentfly.rewards import scienceworld_reward
 
 
 tools = [scienceworld_explorer]
@@ -182,7 +182,7 @@ print(agent.rewards)
 - Retrieval Agent
 
 ```python
-from agents.tools import dense_retrieve, asyncdense_retrieve
+from agentfly.tools import dense_retrieve, asyncdense_retrieve
 
 tools = [dense_retrieve]
 

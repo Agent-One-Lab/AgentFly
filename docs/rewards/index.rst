@@ -32,7 +32,7 @@ Quick Start
 
 .. code-block:: python
 
-   from agents.agents.rewards import get_reward_from_name
+   from agentfly.rewards import get_reward_from_name
    
    # Get a specific reward function
    math_reward = get_reward_from_name("math_reward")

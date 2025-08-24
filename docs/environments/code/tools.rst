@@ -8,12 +8,12 @@ The Code environment provides tools for executing Python code in secure, isolate
 Tools Reference
 ---------------
 
-.. currentmodule:: agents.tools.src.code.tools
+.. currentmodule:: agentfly.tools.src.code.tools
 
 code_interpreter
 ~~~~~~~~~~~~~~~~
 
-.. autofunction:: agents.tools.src.code.tools.code_interpreter
+.. autofunction:: agentfly.tools.src.code.tools.code_interpreter
 
 **Function Signature:**
 
@@ -46,8 +46,8 @@ Execute simple Python expressions and statements:
 
 .. code-block:: python
 
-   from agents.tools import code_interpreter
-   from agents.envs.python_env import PythonSandboxEnv
+   from agentfly.tools import code_interpreter
+   from agentfly.envs.python_env import PythonSandboxEnv
    
    # Create environment
    env = await PythonSandboxEnv.acquire()
@@ -183,8 +183,8 @@ Real-world usage with ReactAgent for problem-solving:
 
 .. code-block:: python
 
-   from agents.agents.react.react_agent import ReactAgent
-   from agents.rewards.code_reward import code_reward_test
+   from agentfly.agents.react.react_agent import ReactAgent
+   from agentfly.rewards.code_reward import code_reward_test
    
    # Task information for the agent
    task_info = """Execute Python code to solve computational problems. 

@@ -8,8 +8,8 @@ The Code HTTP server provides a FastAPI-based execution environment for Python c
 Server Module Reference
 -----------------------
 
-.. currentmodule:: agents.dockers.python_env.python_http_server
-.. automodule:: agents.dockers.python_env.python_http_server
+.. currentmodule:: agentfly.dockers.python_env.python_http_server
+.. automodule:: agentfly.dockers.python_env.python_http_server
     :members:
     :undoc-members:
     :show-inheritance:

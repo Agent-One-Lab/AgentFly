@@ -8,8 +8,8 @@ The ALFWorldEnv class provides a Python interface to interact with ALFWorld envi
 Class Reference
 ---------------
 
-.. currentmodule:: agents.envs.alfworld_env
-.. autoclass:: agents.envs.alfworld_env.ALFWorldEnv
+.. currentmodule:: agentfly.envs.alfworld_env
+.. autoclass:: agentfly.envs.alfworld_env.ALFWorldEnv
     :members:
     :undoc-members:
     :show-inheritance:
@@ -23,7 +23,7 @@ Basic Usage
 
 .. code-block:: python
 
-    from agents.agents.envs.alfworld_env import ALFWorldEnv
+    from agentfly.envs.alfworld_env import ALFWorldEnv
     
     # Create environment with default settings
     env = ALFWorldEnv()

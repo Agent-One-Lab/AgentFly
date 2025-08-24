@@ -26,7 +26,7 @@ Quick Start
 
 .. code-block:: python
 
-   from agents.agents.tools.src.search.async_dense_retriever import asyncdense_retrieve
+   from agentfly.tools.src.search.async_dense_retriever import asyncdense_retrieve
    
    # Retrieve relevant documents
    result = await asyncdense_retrieve("What is machine learning?")

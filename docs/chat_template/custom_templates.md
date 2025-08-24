@@ -9,7 +9,7 @@ The Chat Template System is designed to be highly extensible, allowing you to cr
 ### Core Template Fields
 
 ```python
-from agents.agents.agents.templates import Template
+from agentfly.agents.templates import Template
 
 template = Template(
     name="my-custom-template",           # Unique identifier
@@ -122,7 +122,7 @@ vision_template = Template(
 ### System Policy
 
 ```python
-from agents.agents.agents.templates.system_policy import SystemPolicy
+from agentfly.agents.templates.system_policy import SystemPolicy
 
 # Basic system policy
 system_policy = SystemPolicy(
@@ -147,8 +147,8 @@ system_policy = SystemPolicy(
 ### Tool Policy
 
 ```python
-from agents.agents.agents.templates.tool_policy import ToolPolicy, JsonFormatter, JsonIndentedFormatter
-from agents.agents.agents.templates.constants import ToolPlacement
+from agentfly.agents.templates.tool_policy import ToolPolicy, JsonFormatter, JsonIndentedFormatter
+from agentfly.agents.templates.constants import ToolPlacement
 
 # Basic tool policy
 tool_policy = ToolPolicy(
@@ -167,7 +167,7 @@ tool_policy = ToolPolicy(
 ### Global Policy
 
 ```python
-from agents.agents.agents.templates import GlobalPolicy
+from agentfly.agents.templates import GlobalPolicy
 
 global_policy = GlobalPolicy(
     prefix="<|begin_of_text|>"               # Add prefix to all prompts
@@ -177,10 +177,10 @@ global_policy = GlobalPolicy(
 ## Complete Template Example
 
 ```python
-from agents.agents.agents.templates import Template, GlobalPolicy
-from agents.agents.agents.templates.system_policy import SystemPolicy
-from agents.agents.agents.templates.tool_policy import ToolPolicy, JsonIndentedFormatter
-from agents.agents.agents.templates.constants import ToolPlacement
+from agentfly.agents.templates import Template, GlobalPolicy
+from agentfly.agents.templates.system_policy import SystemPolicy
+from agentfly.agents.templates.tool_policy import ToolPolicy, JsonIndentedFormatter
+from agentfly.agents.templates.constants import ToolPlacement
 
 # Create a comprehensive template
 comprehensive_template = Template(
@@ -224,13 +224,13 @@ comprehensive_template = Template(
 ### Registering a Template
 
 ```python
-from agents.agents.agents.templates import register_template
+from agentfly.agents.templates import register_template
 
 # Register the template
 register_template(comprehensive_template)
 
 # Now you can use it
-from agents.agents.agents.templates import get_template
+from agentfly.agents.templates import get_template
 template = get_template("comprehensive-example")
 ```
 
@@ -244,7 +244,7 @@ register_template(comprehensive_template, override=True)
 ### Template Registry Management
 
 ```python
-from agents.agents.agents.templates import TEMPLATES
+from agentfly.agents.templates import TEMPLATES
 
 # List all registered templates
 print("Available templates:", list(TEMPLATES.keys()))
@@ -348,9 +348,9 @@ register_template(modified)
 Here's a complete example of creating a custom template for a specific use case:
 
 ```python
-from agents.agents.agents.templates import Template, register_template
-from agents.agents.agents.templates.tool_policy import ToolPolicy, JsonCompactFormatter
-from agents.agents.agents.templates.constants import ToolPlacement
+from agentfly.agents.templates import Template, register_template
+from agentfly.agents.templates.tool_policy import ToolPolicy, JsonCompactFormatter
+from agentfly.agents.templates.constants import ToolPlacement
 
 # Create a coding assistant template
 coding_template = Template(
@@ -394,7 +394,7 @@ Available Tools:
 register_template(coding_template)
 
 # Test the template
-from agents.agents.agents.templates import Chat
+from agentfly.agents.templates import Chat
 
 chat = Chat(template="coding-assistant", messages=[
     {"role": "user", "content": "Write a Python function to calculate fibonacci numbers"}

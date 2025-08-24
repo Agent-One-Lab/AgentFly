@@ -3,7 +3,7 @@
 Math Reward Functions
 =====================
 
-.. currentmodule:: agents.agents.rewards.math_reward
+.. currentmodule:: agentfly.rewards.math_reward
 
 Math reward functions evaluate agent performance on mathematical problem-solving tasks with various behavioral requirements.
 

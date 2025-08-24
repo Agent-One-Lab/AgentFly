@@ -8,8 +8,8 @@ The ALFWorld HTTP server provides a RESTful API for interacting with ALFWorld en
 Server Module Reference
 -----------------------
 
-.. currentmodule:: agents.dockers.alfworld_env.alfworld_http_server
-.. automodule:: agents.dockers.alfworld_env.alfworld_http_server
+.. currentmodule:: agentfly.dockers.alfworld_env.alfworld_http_server
+.. automodule:: agentfly.dockers.alfworld_env.alfworld_http_server
     :members:
     :undoc-members:
     :show-inheritance:

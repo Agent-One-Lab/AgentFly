@@ -54,7 +54,7 @@ Welcome to the comprehensive documentation for the Chat Template System - a powe
 ## 🎯 Quick Start
 
 ```python
-from agents.agents.agents.templates import Chat, get_template
+from agentfly.agents.templates import Chat, get_template
 
 # Get a pre-built template
 template = get_template("qwen2.5")
