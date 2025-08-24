@@ -281,10 +281,19 @@ def tokenize_conversations(
     if return_reward_mask:
         inputs['reward_mask'] = transform_reward_mask(batch_action_masks)
 
-    if concatenate_mm_inputs:
-        inputs.update(concatenated_mm_inputs)
-    else:
-        inputs["mm_inputs"] = batch_mm_inputs
+    # Check if we need mm_inputs
+    mm_keys = list(batch_mm_inputs[0].keys())
+    return_mm_inputs = False
+    for key in mm_keys:
+        if any(mm_inputs[key] is not None for mm_inputs in batch_mm_inputs):
+            return_mm_inputs = True
+            break
+
+    if return_mm_inputs:
+        if concatenate_mm_inputs:
+            inputs.update(concatenated_mm_inputs)
+        else:
+            inputs["mm_inputs"] = batch_mm_inputs
 
     return inputs
 

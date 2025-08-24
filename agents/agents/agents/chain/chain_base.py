@@ -474,7 +474,12 @@ class ChainGeneration:
             have_set_tools = True
 
         # Execute tool call
-        result = await submit_tool_call(tool_name, tool_input, id=chain_id)
+        result = await submit_tool_call(
+            tool_name,
+            tool_input,
+            id=chain_id,
+            allowed_tool_names=self.tool_names
+        )
         
         if enable_streaming:
             # Emit tool observation event
