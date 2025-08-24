@@ -123,6 +123,12 @@ def ok_vqa_reward(prediction: str, answers: List[str], trajectory: List[str]) ->
 
 @reward(name="infoseek_reward")
 def infoseek_reward(prediction: str, answer: Union[str, List[str]], answer_eval: List[str | Dict], trajectory: List[str]) -> float:
+    # format reward
+    call_tool_count = 0
+    for msg in trajectory:
+        if msg["role"] == "tool":
+            call_tool_count += 1
+    
     f1_scores = []
     answers = []
     if isinstance(answer, str):
@@ -137,5 +143,10 @@ def infoseek_reward(prediction: str, answer: Union[str, List[str]], answer_eval:
         f1, precision, recall = f1_score(prediction, _answer)
         f1_scores.append(f1)
 
-    # All answers are the correct answer, take the max f1 score
-    return max(f1_scores)
+    max_f1_score = max(f1_scores)
+    
+    call_tool_reward = 1.0 if call_tool_count > 1 else 0.0
+
+    reward = 0.2 * call_tool_reward + 0.8 * max_f1_score
+
+    return reward

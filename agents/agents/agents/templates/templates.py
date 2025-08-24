@@ -345,6 +345,10 @@ class Template:
             for item in content:
                 if item["type"] == "text":
                     text += item["text"]
+                elif item["type"] in ["image", "image_url"]:
+                    text += self.vision_start + self.image_token + self.vision_end
+                elif item["type"] == "video":
+                    text += self.vision_start + self.video_token + self.vision_end
                 else:
                     raise ValueError(f"Invalid message type: {item['type']}")
         
@@ -949,11 +953,11 @@ class Chat:
                     # Not sure what to do with other types of content
                     pass
 
-    def convert_to_hf_format_messages(self, messages: List[Dict]) -> List[Dict]:
+    def convert_to_hf_format_messages(self, messages: Union[List[Dict], Dict[str, List[Dict]]]) -> List[Dict]:
+        hf_messages = []
         if messages is None:
             return None
         role_label, content_label = self._detect_labels(messages)
-        hf_messages = []
         for message in messages:
             hf_messages.append({"role": message[role_label], "content": message[content_label]})
         

@@ -132,5 +132,9 @@ outputs
 
 # Notebooks
 agents/tests/*.ipynb
+agents/tests/*.jpg
+agents/tests/*.jpeg
+agents/tests/*.png
 agents/agents/*.ipynb
+agents/temp/
 

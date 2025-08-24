@@ -60,6 +60,25 @@ import pytest
         {"role": "assistant", "content": "I am fine, thank you."},
         {"role": "user", "content": "What is 3 times 5?"},
     ],
+    [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": "https://images.unsplash.com/photo-1592194996308-7b43878e84a6"},
+                {"type": "text", "text": "Describe these images."},
+                {"type": "image", "image": "https://images.unsplash.com/photo-1599158164704-ef1ec0c94b1c"}
+            ]
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "The image is a cat.",
+                },
+            ],
+        },
+    ]
 ])
 @pytest.mark.parametrize("tools", [
     None,
