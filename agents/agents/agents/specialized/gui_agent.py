@@ -4,7 +4,7 @@
 import json
 from typing import List, Any, Tuple, Dict, Optional
 from ..agent_base import BaseAgent
-from agents.utils.ui_action_parser import parse_action_to_structure_output, IMAGE_FACTOR
+from agents.agents.utils.ui_action_parser import parse_action_to_structure_output, IMAGE_FACTOR
 
 # Default image dimensions
 TEST_IMAGE_HEIGHT = 1080

@@ -1,3 +1,6 @@
+import sys
+sys.path.insert(0, '/research/d1/gds/xmhu23/AgentFly')
+
 from agents.agents.specialized.image_agent.image_agent import ImageEditingAgent
 import pytest
 
@@ -38,4 +41,6 @@ async def test_image_agent():
         enable_streaming=True
     )
     agent.print_messages(index=0)
+    print("run_async finished")
+    print(agent.messages)
     

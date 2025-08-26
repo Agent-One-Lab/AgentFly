@@ -19,6 +19,7 @@ from diffusers import (
     StableDiffusionXLInpaintPipeline,
     StableDiffusionInstructPix2PixPipeline,
     StableDiffusionXLPipeline,
+    QwenImageEditPipeline
 )
 from diffusers.utils import load_image
 
@@ -484,6 +485,68 @@ class IPAdapterSDXLTool(EditingTool):
         out = pipe(**kwargs_pipe)
         return out.images[0]
 
+class QwenImageEditTool:
+    """
+    Qwen-Image-Edit tool for instruction-based image editing.
+    Based on https://huggingface.co/Qwen/Qwen-Image-Edit
+    """
+    def __init__(self, model_id="Qwen/Qwen-Image-Edit", device=None):
+        self.model_id = model_id
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self._pipeline = None
+
+    def _lazy_init(self):
+        """Lazy initialization of the pipeline to save memory."""
+        if self._pipeline is None:
+            print(f"INFO: Loading Qwen-Image-Edit pipeline on {self.device}...")
+            self._pipeline = QwenImageEditPipeline.from_pretrained(
+                self.model_id,
+                torch_dtype=torch.bfloat16 if self.device != "cpu" else torch.float32
+            )
+            self._pipeline.to(self.device)
+            self._pipeline.set_progress_bar_config(disable=None)
+            print("INFO: Qwen-Image-Edit pipeline loaded successfully!")
+
+    def apply(
+        self,
+        image: Image.Image,
+        prompt: str,
+        negative_prompt: str = " ",
+        true_cfg_scale: float = 4.0,
+        num_inference_steps: int = 50,
+        seed: int = 0
+    ) -> Image.Image:
+        """
+        Applies the image editing based on the given prompt.
+        
+        Args:
+            image: Input PIL Image
+            prompt: Text prompt for editing
+            negative_prompt: Negative prompt (default: " ")
+            true_cfg_scale: CFG scale (default: 4.0)
+            num_inference_steps: Number of inference steps (default: 50)
+            seed: Random seed (default: 0)
+            
+        Returns:
+            Edited PIL Image
+        """
+        self._lazy_init()
+
+        inputs = {
+            "image": image.convert("RGB"),
+            "prompt": prompt,
+            "generator": torch.manual_seed(seed),
+            "true_cfg_scale": true_cfg_scale,
+            "negative_prompt": negative_prompt,
+            "num_inference_steps": num_inference_steps,
+        }
+
+        with torch.inference_mode():
+            output = self._pipeline(**inputs)
+            edited_image = output.images[0]
+        
+        return edited_image
+
 
 # -----------------------------
 # Registry & Results
@@ -868,3 +931,63 @@ if __name__ == "__main__":
         print("Demo 7 failed:", e)
 
 
+    """
+    Qwen-Image-Edit tool for instruction-based image editing.
+    Based on https://huggingface.co/Qwen/Qwen-Image-Edit
+    """
+    def __init__(self, model_id="Qwen/Qwen-Image-Edit", device=None):
+        self.model_id = model_id
+        self.device = device or ("cuda:1" if torch.cuda.is_available() else "cpu")
+        self._pipeline = None
+
+    def _lazy_init(self):
+        """Lazy initialization of the pipeline to save memory."""
+        if self._pipeline is None:
+            print(f"INFO: Loading Qwen-Image-Edit pipeline on {self.device}...")
+            self._pipeline = QwenImageEditPipeline.from_pretrained(
+                self.model_id,
+                torch_dtype=torch.bfloat16 if self.device != "cpu" else torch.float32
+            )
+            self._pipeline.to(self.device)
+            self._pipeline.set_progress_bar_config(disable=None)
+            print("INFO: Qwen-Image-Edit pipeline loaded successfully!")
+
+    def apply(
+        self,
+        image: Image.Image,
+        prompt: str,
+        negative_prompt: str = " ",
+        true_cfg_scale: float = 4.0,
+        num_inference_steps: int = 50,
+        seed: int = 0
+    ) -> Image.Image:
+        """
+        Applies the image editing based on the given prompt.
+        
+        Args:
+            image: Input PIL Image
+            prompt: Text prompt for editing
+            negative_prompt: Negative prompt (default: " ")
+            true_cfg_scale: CFG scale (default: 4.0)
+            num_inference_steps: Number of inference steps (default: 50)
+            seed: Random seed (default: 0)
+            
+        Returns:
+            Edited PIL Image
+        """
+        self._lazy_init()
+
+        inputs = {
+            "image": image.convert("RGB"),
+            "prompt": prompt,
+            "generator": torch.manual_seed(seed),
+            "true_cfg_scale": true_cfg_scale,
+            "negative_prompt": negative_prompt,
+            "num_inference_steps": num_inference_steps,
+        }
+
+        with torch.inference_mode():
+            output = self._pipeline(**inputs)
+            edited_image = output.images[0]
+        
+        return edited_image

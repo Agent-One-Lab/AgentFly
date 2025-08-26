@@ -21,6 +21,7 @@ from .utils import (
     SDXLInpaintTool,
     InstructPix2PixTool,
     IPAdapterSDXLTool,
+    QwenImageEditTool,
     dilate_mask,
     feather_mask,
     visualize_boxes,
@@ -29,6 +30,7 @@ from .utils import (
 from ....utils.vision import image_to_data_uri, image_to_pil
 
 # Global variables for tools
+_qwen_image_edit_tool = None
 _detector = None
 _sam_refiner = None
 _flux_tool = None
@@ -43,30 +45,34 @@ Always provide clear, step-by-step instructions and call the appropriate tools f
 
 def _get_tools():
     """Initialize tools if not already done"""
-    global _detector, _sam_refiner, _flux_tool, _sd_inpaint_tool, _sdxl_inpaint_tool, _instruct_pix2pix_tool, _ip_adapter_tool
+    global _detector, _sam_refiner, _flux_tool, _sd_inpaint_tool, _sdxl_inpaint_tool, _instruct_pix2pix_tool, _ip_adapter_tool, _qwen_image_edit_tool
     
     import torch
     
     if _detector is None:
-        _detector = GroundingDINOTool(model_id="IDEA-Research/grounding-dino-base", device="cuda" if torch.cuda.is_available() else "cpu")
+        _detector = GroundingDINOTool(model_id="IDEA-Research/grounding-dino-base", device="cuda:1" if torch.cuda.is_available() else "cpu")
     
     if _sam_refiner is None:
-        _sam_refiner = SAMRefiner(model_id="facebook/sam-vit-base", device="cuda" if torch.cuda.is_available() else "cpu")
+        _sam_refiner = SAMRefiner(model_id="facebook/sam-vit-base", device="cuda:1" if torch.cuda.is_available() else "cpu")
     
     if _flux_tool is None:
-        _flux_tool = FluxKontextTool(device="cuda" if torch.cuda.is_available() else "cpu")
+        _flux_tool = FluxKontextTool(device="cuda:1" if torch.cuda.is_available() else "cpu")
     
     if _sd_inpaint_tool is None:
-        _sd_inpaint_tool = SDInpaintTool(device="cuda" if torch.cuda.is_available() else "cpu")
+        _sd_inpaint_tool = SDInpaintTool(device="cuda:1" if torch.cuda.is_available() else "cpu")
     
     if _sdxl_inpaint_tool is None:
-        _sdxl_inpaint_tool = SDXLInpaintTool(device="cuda" if torch.cuda.is_available() else "cpu")
+        _sdxl_inpaint_tool = SDXLInpaintTool(device="cuda:1" if torch.cuda.is_available() else "cpu")
     
     if _instruct_pix2pix_tool is None:
-        _instruct_pix2pix_tool = InstructPix2PixTool(device="cuda" if torch.cuda.is_available() else "cpu")
+        _instruct_pix2pix_tool = InstructPix2PixTool(device="cuda:1" if torch.cuda.is_available() else "cpu")
     
     if _ip_adapter_tool is None:
-        _ip_adapter_tool = IPAdapterSDXLTool(device="cuda" if torch.cuda.is_available() else "cpu")
+        _ip_adapter_tool = IPAdapterSDXLTool(device="cuda:1" if torch.cuda.is_available() else "cpu")
+    
+    if _qwen_image_edit_tool is None:
+        # 分配到不同的 GPU 以避免 OOM
+        _qwen_image_edit_tool = QwenImageEditTool(device="cuda:1" if torch.cuda.is_available() else "cpu")
 
 _get_tools()
 
@@ -108,7 +114,7 @@ class ImageEditingAgent(BaseAgent):
         **kwargs
     ):
         self._image_database = {}
-        tools = [self.auto_inpaint_image_tool]
+        tools = [self.qwen_edit_image_tool]
         super().__init__(
             model_name_or_path=model_name_or_path,
             system_prompt=IMAGE_AGENT_SYSTEM_PROMPT,
@@ -376,3 +382,52 @@ class ImageEditingAgent(BaseAgent):
             "image": image
         }
         return result
+    
+    @tool(
+        name="qwen_edit_image",
+        description="Edit an image using Qwen-Image-Edit model with natural language instructions. Useful for tasks like changing colors, adding/removing elements, or style transfer."
+    )
+    async def qwen_edit_image_tool(
+        self,
+        image_id: str,
+        prompt: str,
+        negative_prompt: str = " ",
+        true_cfg_scale: float = 4.0,
+        num_inference_steps: int = 50,
+        seed: int = 0
+    ) -> str:
+        """
+        Edit an image using Qwen-Image-Edit.
+        
+        Args:
+            image_id: ID of the image to edit
+            prompt: Natural language instruction for editing
+            negative_prompt: Negative prompt (default: " ")
+            true_cfg_scale: CFG scale (default: 4.0)
+            num_inference_steps: Number of steps (default: 50)
+            seed: Random seed (default: 0)
+            
+        Returns:
+            JSON string with observation and edited image data
+        """
+        _get_tools()
+        
+        image = self._get_image(image_id)
+        
+        edited_image = _qwen_image_edit_tool.apply(
+            image=image,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            true_cfg_scale=true_cfg_scale,
+            num_inference_steps=num_inference_steps,
+            seed=seed
+        )
+        
+        image_base64 = image_to_data_uri(edited_image)
+        new_image_id = self._store_image(edited_image)
+        
+        result = {
+            "observation": f"Image Id: {new_image_id}",
+            "image": image_base64
+        }
+        return json.dumps(result)

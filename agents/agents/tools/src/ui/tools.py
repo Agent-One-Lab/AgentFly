@@ -4,7 +4,7 @@
 import json
 from typing import Any
 from ...tool_base import tool
-from agents.utils.ui_action_parser import parsing_response_to_pyautogui_code
+from agents.agents.utils.ui_action_parser import parsing_response_to_pyautogui_code
 
 # Default image dimensions for UI interactions
 DEFAULT_IMAGE_HEIGHT = 1080
