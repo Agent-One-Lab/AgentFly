@@ -41,6 +41,7 @@ async def test_image_agent():
         enable_streaming=True
     )
     agent.print_messages(index=0)
-    print("run_async finished")
-    print(agent.messages)
-    
+
+    inputs, _ = agent.tokenize_trajectories()
+    for k, v in inputs.items():
+        print(f"{k}: {v.shape}")
