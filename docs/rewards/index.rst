@@ -25,7 +25,6 @@ Available Reward Functions
    code_reward  
    math_reward
    qa_reward
-   llm_judge_reward
 
 Quick Start
 ===========

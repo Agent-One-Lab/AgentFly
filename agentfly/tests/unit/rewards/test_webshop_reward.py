@@ -1,7 +1,7 @@
 from ....rewards.webshop_reward import webshop_reward
 import pytest
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_webshop_reward():
     prediction = "Thank you for shopping with us"
     reward = await webshop_reward(prediction, task_id=0, id="test_webshop_reward")

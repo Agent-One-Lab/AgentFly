@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from ....agents.specialized.gui_agent import GUIAgent
 from ....rewards.gui_reward import gui_reward
 from ....utils.ui_action_parser import parse_action_to_structure_output, IMAGE_FACTOR
-
+from ....tools import pyautogui_code_generator
 
 class TestGUIAgent:
     """Test suite for GUI Agent implementation."""
@@ -23,7 +23,8 @@ class TestGUIAgent:
         agent = GUIAgent(
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
-            tools=["pyautogui_code_generator"]
+            tools=[pyautogui_code_generator],
+            backend="async_vllm"
         )
         assert agent is not None
         assert agent.system_prompt is not None
@@ -35,7 +36,8 @@ class TestGUIAgent:
         agent = GUIAgent(
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
-            tools=[]
+            tools=[],
+            backend="async_vllm"
         )
         
         responses = [
@@ -56,7 +58,8 @@ class TestGUIAgent:
         agent = GUIAgent(
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
-            tools=[]
+            tools=[],
+            backend="async_vllm"
         )
         
         responses = [
@@ -74,7 +77,8 @@ class TestGUIAgent:
         agent = GUIAgent(
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
-            tools=[]
+            tools=[],
+            backend="async_vllm"
         )
         
         responses = [""]

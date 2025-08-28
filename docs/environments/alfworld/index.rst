@@ -24,7 +24,6 @@ The ALFWorld environment includes the following components:
    :maxdepth: 2
 
    environment
-   http_server
    tools
    rewards
 

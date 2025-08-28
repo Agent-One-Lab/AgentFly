@@ -6,7 +6,7 @@ from ....tools import tool
 from ....rewards import reward
 
 
-@pytest.mark.asyncio()
+@pytest.mark.asyncio(loop_scope="session")
 async def test_tool_reward_env():
     @tool(env_cls=PythonSandboxEnv, name="test_tool", pool_size=4)
     async def test_tool(code: str, env: PythonSandboxEnv):

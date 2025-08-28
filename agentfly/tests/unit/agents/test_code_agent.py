@@ -35,9 +35,9 @@ async def test_code_agent_end_to_end():
         }
     ]
 
-    await agent.run_async(
-        max_steps=4,
-        start_messages=messages,
+    await agent.run(
+        max_turns=4,
+        messages=messages,
         num_chains=2
     )
 

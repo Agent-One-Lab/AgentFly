@@ -8,12 +8,12 @@ The Code Environment provides a secure Python sandbox execution environment usin
 PythonSandboxEnv Class Reference
 --------------------------------
 
-.. currentmodule:: agents.envs.python_env
+.. currentmodule:: agentfly.envs.python_env
 
 PythonSandboxEnv
 ~~~~~~~~~~~~~~~~
 
-.. autoclass:: agents.envs.python_env.PythonSandboxEnv
+.. autoclass:: agentfly.envs.python_env.PythonSandboxEnv
    :members:
    :undoc-members:
    :show-inheritance:

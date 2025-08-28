@@ -648,6 +648,23 @@ def math_reward_think(prediction: str, answer: str, trajectory: List[Dict]) -> f
             "acc": 0.0,
         }
 
+
+@reward(name="math_reward_string_equal")
+def math_reward_string_equal(prediction: str, answer: str) -> float:
+    import re
+
+    def extract_last_number(s: str):
+        matches = re.findall(r'\d+', s)  # find all sequences of digits
+        return int(matches[-1]) if matches else None
+
+    prediction = extract_last_number(prediction)
+    
+    if prediction == answer:
+        return 1.0
+    else:
+        return 0.0
+
+
 if __name__ == "__main__":
     result = symbolic_math_equal("I got answer is \\boxed{2/3}", "May be it's \\boxed{\\frac{2}{3}}")
     print(result)

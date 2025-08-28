@@ -57,13 +57,13 @@ math_reward_tool
 math_reward_thought
 -------------------
 
-.. autofunction:: math_reward_thought
+.. autofunction:: math_reward_think
 
 **Function Signature:**
 
 .. code-block:: python
 
-    def math_reward_thought(prediction: str, answer: str, trajectory: List[Dict]) -> dict
+    def math_reward_think(prediction: str, answer: str, trajectory: List[Dict]) -> dict
 
 **Description:** Rewards mathematical correctness with thinking process requirement.
 

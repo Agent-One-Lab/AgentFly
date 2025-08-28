@@ -1,5 +1,5 @@
 import pytest
-from ....agents.chain.chain_base import Chain, Node, ChainGeneration
+from ....agents.chain.chain_base import Chain, Node, ChainRollout
 
 
 def test_node_creation():
