@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 from ..utils.json import jsonish
 from ...tools.tool_base import Tool
+from ..parsers import extract_tool_calls
 try:
     from verl.protocol import DataProto
 except ImportError:
@@ -12,6 +13,10 @@ from ..agent_base import BaseAgent
 import torch
 import numpy as np
 import re
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 def parse_react_step(text: str) -> Dict[str, Optional[str]]:
     """
@@ -45,33 +50,6 @@ def parse_react_step(text: str) -> Dict[str, Optional[str]]:
         result["input"] = input_match.group(1).strip()
     
     return result
-
-def extract_tool_calls(action_input: str) -> List[Dict]:
-    if action_input is None:
-        return []
-    
-    tool_call_str = ""
-    # Extract the tool call from the action input
-    # 1. Extract with qwen style
-    pattern = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
-    m = pattern.search(action_input)
-    # If we find a tool call, extract it
-    if m:
-        tool_call_str = m.group(1).strip()
-        try:
-            tool_call = jsonish(tool_call_str)
-            return [tool_call]
-        except:
-            pass
-    
-    # 2. Extract directly
-    try:
-        tool_call = jsonish(action_input)
-        return [tool_call]
-    except:
-        pass
-    
-    return []
 
 
 ReactSystemPromptTemplate = """You are a ReAct-style agent. When you receive a user query, in each step, you must:
@@ -156,6 +134,8 @@ class ReactAgent(BaseAgent):
             else:
                 tool_calls = extract_tool_calls(action_input)
             
+            logger.debug(f"[ReactAgent] extracted tool_calls: {tool_calls}")
+
             formatted_tool_calls = []
             # We only support one tool call for now
             if len(tool_calls) == 1:

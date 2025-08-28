@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from .templates.utils import tokenize_conversations
 from .templates.vision_processor import is_vision_template
-from .chain.chain_base import ChainGeneration
+from .chain.chain_base import ChainRollout
 import os
 import transformers
 import warnings
@@ -27,7 +27,7 @@ except ImportError:
 
 Logger = logging.getLogger(__name__)
 
-class BaseAgent(ChainGeneration, ABC):
+class BaseAgent(ChainRollout, ABC):
     """
     Base class for all agents. All agent should subclass this class. A customized agent can implement the following methods:
     
@@ -155,6 +155,29 @@ class BaseAgent(ChainGeneration, ABC):
             raise ValueError("model_name_or_path must be a string.")
 
         return llm_engine
+
+    async def run(self,
+        messages: Union[List[dict], np.ndarray, Dict],
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ):
+        """
+        This is the main interface for running the agent. It is a wrapper of different 
+        rollout methods, which must be asynchronous. Currently, we only support chain-based rollout.
+        Args:
+            messages: List of messages to generate responses for.
+            max_turns: The maximum number of turns to generate.
+            generation_config: The generation configuration.
+            **kwargs: Additional keyword arguments for generation.
+
+        """
+        return await self.run_async(
+            messages,
+            max_turns=max_turns,
+            generation_config=generation_config,
+            **kwargs,
+        )
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"

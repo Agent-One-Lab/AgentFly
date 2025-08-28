@@ -6,7 +6,7 @@ from ....rewards import webshop_reward
 
 
 @pytest.mark.gpu
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_webshop_agent_call():
     tools = [webshop_browser, answer]
     agent = ReactAgent(
@@ -42,9 +42,9 @@ async def test_webshop_agent_call():
     ]
 
 
-    await agent.run_async(
-            max_steps=8,
-            start_messages=messages,
+    await agent.run(
+            max_turns=8,
+            messages=messages,
             num_chains=4
         )
 

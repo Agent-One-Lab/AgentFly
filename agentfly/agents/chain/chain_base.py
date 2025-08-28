@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 import time
+from ..utils.messages import MessagesList, Messages
 from ...utils.timing import Timer
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 import uuid
@@ -18,6 +19,7 @@ from .streaming_observer import ConsoleStreamObserver, StreamingManager, StreamE
 
 @dataclass
 class Node:
+    messages: Messages
     is_terminal: bool = False
     is_pruned: bool = False
     type: Optional[str] = None
@@ -26,7 +28,6 @@ class Node:
     observation_code: Optional[str] = None
     parent: Optional["Node"] = None
     children: List["Node"] = field(default_factory=list)
-    messages: List[Any] = field(default_factory=list)
 
     @property
     def depth(self) -> int:
@@ -92,7 +93,7 @@ class Chain:
         observation_code: Optional[str] = None,
         messages: Optional[List[Any]] = None
     ) -> Node:
-        messages = messages if messages is not None else []
+        messages = Messages.from_turns(messages)
         new_node = Node(
             is_terminal=is_terminal,
             is_pruned=is_pruned,
@@ -124,7 +125,7 @@ class Chain:
         return chain_json
 
 
-class ChainGeneration:
+class ChainRollout:
     """
     Basic class for chain-based rollout. It starts multiple chains and runs them asynchronously.
     """
@@ -157,18 +158,18 @@ class ChainGeneration:
             "chains": [chain.to_json() for chain in self.chains]
         }
 
-    def initialise_chains(self, msgs_list: List[List[Dict]], info_list: List[Dict], num_chains: int) -> Tuple[Dict[str, Chain], Dict[str, Node]]:
+    def initialize_chains(self, messages_list: MessagesList, num_chains: int) -> Tuple[Dict[str, Chain], Dict[str, Node]]:
         chains = {}
         start_nodes = {}
-        group_ids = [str(uuid.uuid4()) for _ in range(len(msgs_list))]
+        group_ids = [str(uuid.uuid4()) for _ in range(len(messages_list))]
 
-        for group_idx, (prompt_msgs, info) in enumerate(zip(msgs_list, info_list)):
+        for group_idx, messages in enumerate(messages_list):
             group_id = group_ids[group_idx]
             for j in range(num_chains):
-                ch = Chain(info | {"group_id": group_id})
+                ch = Chain(messages.meta | {"group_id": group_id})
                 root = ch.add_node(
                     type="Action Input",
-                    messages=deepcopy(prompt_msgs)
+                    messages=deepcopy(messages.messages)
                 )
 
                 cid = str(uuid.uuid4())
@@ -182,40 +183,13 @@ class ChainGeneration:
         for id, node in self.current_nodes.items():
             info = self.chains[id].info
             message_item = {}
-            message_item["messages"] = node.messages
+            message_item["messages"] = node.messages.messages
             message_item.update(info)
             messages.append(message_item)
         return messages
 
-    def prepare_chain_messages(self, start_messages: Union[List[dict], np.ndarray]):
-        if isinstance(start_messages, np.ndarray):
-            start_messages_list = start_messages.tolist()
-        else:
-            start_messages_list = start_messages
-
-        if self.system_prompt is not None and self.system_prompt != "":
-            for message in start_messages_list:
-                if message["messages"][0]["role"] != "system":
-                    message["messages"].insert(0, {"role": "system", "content": self.system_prompt})
-        
-        example_message = start_messages_list[0]
-        if isinstance(example_message, dict):
-            assert "messages" in example_message
-        
-        messages_list = []
-        other_info_list = []
-        for message in start_messages_list:
-            messages_list.append(message["messages"])
-            info = {}
-            for key, value in message.items():
-                if key != "messages":
-                    info[key] = value
-            other_info_list.append(info)
-        
-        return messages_list, other_info_list
-
-    def validate_run_args(self, max_steps: int, num_chains: int, enable_streaming: bool):
-        assert max_steps >= 1, "max_steps must be at least 1."
+    def validate_run_args(self, max_turns: int, num_chains: int, enable_streaming: bool):
+        assert max_turns >= 1, "max_turns must be at least 1."
         assert num_chains >= 1, "num_chains must be at least 1."
         for observer in self.streaming_manager.observers:
             if isinstance(observer, ConsoleStreamObserver) and enable_streaming:
@@ -223,8 +197,8 @@ class ChainGeneration:
         
     
     async def run_async(self,
-        max_steps: int,
-        start_messages: Union[List[dict], np.ndarray],
+        messages: List[Dict],
+        max_turns: int,
         num_chains: int,
         generation_config: Optional[Dict[str, Any]] = None,
         enable_streaming: bool = False,
@@ -241,13 +215,13 @@ class ChainGeneration:
             enable_streaming: Whether to enable streaming mode.
             streaming_callback: Optional callback for streaming events.
         """
-        self.validate_run_args(max_steps, num_chains, enable_streaming)
+        self.validate_run_args(max_turns, num_chains, enable_streaming)
         Monitor.ensure_started()
         self.reset()
-        messages_list, other_info_list = self.prepare_chain_messages(start_messages)
-        chains, first_nodes = self.initialise_chains(
+
+        messages_list = MessagesList.from_data(messages)
+        chains, first_nodes = self.initialize_chains(
             messages_list,
-            other_info_list,
             num_chains
         )
         tool_schemas = [tool.schema for tool in self.tools]
@@ -260,7 +234,7 @@ class ChainGeneration:
                         node,
                         chains[cid],
                         tool_schemas,
-                        max_steps=max_steps,
+                        max_turns=max_turns,
                         done_queue=done_q,
                         enable_streaming=enable_streaming
                     )
@@ -284,7 +258,7 @@ class ChainGeneration:
         first_node: Node,
         chain: Chain,
         tools: List[Dict],
-        max_steps: int,
+        max_turns: int,
         done_queue: asyncio.Queue,
         enable_streaming: bool = False
     ):
@@ -295,8 +269,8 @@ class ChainGeneration:
         depth = 0
         have_set_tools = False
 
-        while not current_node.is_terminal and depth < max_steps:
-            newest_messages = deepcopy(current_node.messages)
+        while not current_node.is_terminal and depth < max_turns:
+            newest_messages = current_node.messages.copy()
             
             if not current_node.is_terminal:
                 # Generate response
@@ -307,7 +281,7 @@ class ChainGeneration:
                 newest_messages.append(new_msg)
                 thought_node = chain.add_node(
                     type="Thought",
-                    messages=deepcopy(newest_messages),
+                    messages=newest_messages.copy(),
                     description=new_msg.get("content", "")
                 )
                 thought_node.is_terminal = new_msg.get("status", "continue") in self.terminal_status
@@ -329,7 +303,7 @@ class ChainGeneration:
                     # Create action input node
                     action_input_node = chain.add_node(
                         type="Action Input",
-                        messages=deepcopy(newest_messages),
+                        messages=newest_messages.copy(),
                         description=result.get("arguments", "")
                     )
                     
@@ -344,7 +318,7 @@ class ChainGeneration:
                         "tool_name": result["name"],
                         "content": [{"type": "text", "text": observation}],
                     })
-                    action_input_node.messages = deepcopy(newest_messages)
+                    action_input_node.messages = newest_messages.copy()
                     action_input_node.is_terminal = result["status"] in self.terminal_status
             else:
                 # No tool calls, chain is finished
@@ -389,7 +363,7 @@ class ChainGeneration:
             if has_streaming:
                 # Collect full response from streaming
                 full_response = ""
-                async for chunk in self.generate_streaming([current_node.messages], tools=tools):
+                async for chunk in self.generate_streaming([current_node.messages.messages], tools=tools):
                     await self.streaming_manager.emit_event(StreamEvent(
                         event_type=StreamEventType.LLM_GENERATION_CHUNK,
                         chain_id=chain_id,
@@ -412,12 +386,12 @@ class ChainGeneration:
                 ))
                 
                 # Parse response
-                new_msg = self.parse([full_response], self.tools)
+                new_msg = self.parse([full_response], tools=self.tools)
                 return new_msg[0]
             else:
                 # Fallback to non-streaming generation
-                responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
-                new_msg = self.parse(responses, self.tools)
+                responses = await self.generate_async([current_node.messages.messages], tools=tools, num_return_sequences=1)
+                new_msg = self.parse(responses, tools=self.tools)
                 
                 # Emit a single chunk event for the full response
                 full_response = new_msg[0].get("content", "")
@@ -452,8 +426,8 @@ class ChainGeneration:
                 return new_msg[0]
         else:
             # Non-streaming generation
-            responses = await self.generate_async([current_node.messages], tools=tools, num_return_sequences=1)
-            new_msg = self.parse(responses, self.tools)
+            responses = await self.generate_async([current_node.messages.messages], tools=tools, num_return_sequences=1)
+            new_msg = self.parse(responses, tools=self.tools)
             return new_msg[0]
 
     async def _execute_tool_call(self, tool_call, newest_messages, chain, chain_id, depth, have_set_tools, enable_streaming):
@@ -464,7 +438,7 @@ class ChainGeneration:
         # Create action node
         action_node = chain.add_node(
             type="Action",
-            messages=deepcopy(newest_messages),
+            messages=newest_messages.copy(),
             description=tool_name
         )
         

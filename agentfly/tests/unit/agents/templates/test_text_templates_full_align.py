@@ -13,8 +13,8 @@ from transformers import AutoTokenizer
 import pytest
 
 @pytest.mark.parametrize("model_name_or_path", [
-    # "Qwen/Qwen2.5-3B-Instruct",
-    "mistralai/Mistral-7B-Instruct-v0.3",
+    "Qwen/Qwen2.5-3B-Instruct",
+    # "mistralai/Mistral-7B-Instruct-v0.3",
 ])
 @pytest.mark.parametrize("messages", [
     [

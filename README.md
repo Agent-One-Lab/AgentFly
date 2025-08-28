@@ -48,30 +48,28 @@ bash install.sh # Assume conda with python3.10.x
 ```
 **Option 2**: Customized Installation
 
-Clone and initialize the project:
-```bash
-git clone https://github.com/Agent-One-Lab/AgentFly
-cd AgentFly
-git submodule init
-git submodule update
-```
-Basic python packages installation:
-```bash
-pip install -e .
-pip install -e '.[verl]' --no-build-isolation
-```
-Optionally, some tools actually require some additional dependencies:
-
-Some of our tools & environments are managed by *enroot* backend. To use them, please install [enroot](https://github.com/NVIDIA/enroot/blob/master/doc/installation.md) (sudo required). Such tools include code_interpreter, retrieval, webshop, alfworld, sciencworld.
-
-Search requires redis to cache results, an optional way to install with conda:
-```bash
-conda install conda-forge::redis-server==7.4.0
-```
+Please refer to [installation.md](docs/start/installation.md) for custmoized installation.
 
 ## Quick Start
-```
+```python
+# Really small example to build an agent and run
+from agentfly.agents import HFAgent
+from agentfly.tools import calculate
+messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]
+agent = HFAgent(
+    model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
+    tools=[calculate],
+    template="qwen2.5",
+    backend="async_vllm",
+)
+await agent.run(
+    messages=messages,
+    max_turns=3,
+    num_chains=1
+)
 
+trajectories = agent.trajectories
+print(trajectories)
 ```
 
 ## Features

@@ -357,11 +357,13 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
             await self._client.aclose()
             self._client = None
 
-    async def close(self) -> None:
+    def close(self) -> None:
         """
         Release everything allocated by the environment (alias for aclose).
         """
-        await self.aclose()
+        if self._container:
+            self._container.kill()
+            self._container = None
 
     async def _connect(self):
         """

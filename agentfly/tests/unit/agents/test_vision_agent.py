@@ -37,9 +37,9 @@ async def test_vision_agent():
     ]
 
 
-    await react_agent.run_async(
-        max_steps=3,
-        start_messages=messages,
+    await react_agent.run(
+        max_turns=3,
+        messages=messages,
         num_chains=10
     )
     messages_list = react_agent.get_messages()

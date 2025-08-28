@@ -3,9 +3,22 @@ TOOL_REGISTRY = {}
 TOOL_FACTORY = {}
 
 from typing import List
-from .tool_base import Tool, hallucination_tool, invalid_input_tool, tool, submit_tool_call, submit_tool_calls
+from .tool_base import (
+    Tool, 
+    hallucination_tool,
+    invalid_input_tool,
+    tool,
+    submit_tool_call,
+    submit_tool_calls
+)
 from .src.code.tools import code_interpreter
-from .src.alfworld.tools import alfworld_step, alfworld_get_task_objective, alfworld_get_admissible_commands, alfworld_reset
+from .src.alfworld.tools import (
+    alfworld_step,
+    alfworld_get_task_objective,
+    alfworld_get_admissible_commands,
+    alfworld_reset
+)
+from .src.calculate.tools import calculate
 from .src.search.google_search import google_search_serper
 from .src.search.dense_retriever import dense_retrieve
 from .src.search.async_dense_retriever import asyncdense_retrieve
@@ -16,30 +29,6 @@ from .src.search.async_dense_retriever import asyncdense_retrieve
 from .src.scienceworld.tools import scienceworld_explorer
 from .src.ui.tools import pyautogui_code_generator
 
-# Export the tools
-__all__ = [
-    "asyncdense_retrieve",
-    "dense_retrieve"
-    "http_retrieve",
-    "code_interpreter",
-    "alfworld_step",
-    "alfworld_reset", 
-    "alfworld_get_admissible_commands",
-    "google_search_serper",
-    "answer_qa",
-    "answer_math",
-    "hallucination_tool",
-    "invalid_input_tool",
-    "submit_tool_call",
-    "submit_tool_calls",
-    "tool",
-    "webshop_browser"
-    "alfworld_get_task_objective"
-    "alfworld_reset"
-    "asyncdense_retrieve"
-    "pyautogui_code_generator"
-    # "current_env"
-]
 
 # Add explicit tools in case they weren't auto-registered
 EXPLICIT_TOOLS = {

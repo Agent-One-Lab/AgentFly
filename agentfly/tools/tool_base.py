@@ -172,7 +172,7 @@ class Tool:
             }
             return result_dict
         else:
-            raise ValueError(f"Got invalid result: {type(result)} when calling {self.name} with arguments {kwargs}. The result should be a string or a dict.")
+            raise ValueError(f"Got invalid result: {type(result)} when calling {self.name} with arguments {kwargs}. The result should be a string or a dict containing 'observation' as a key.")
         
 
     def call(self, **kwargs):

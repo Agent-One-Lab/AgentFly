@@ -2,13 +2,13 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-include = ["agentfly", "verl"]
-
 [tool.pytest.ini_options]
 markers = [
     "gpu: marks tests as requiring GPU resources"
 ]
+
+[tool.setuptools]
+packages = ["agentfly"]
 
 [project]
 name = "AgentFly"

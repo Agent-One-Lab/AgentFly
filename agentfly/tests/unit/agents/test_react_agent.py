@@ -56,7 +56,11 @@ Input: {"query": "test query"}"""]
             ]
         }
     ]
-    await agent.run_async(start_messages=messages, max_steps=4, num_chains=1)
+    await agent.run(
+        max_turns=4,
+        messages=messages,
+        num_chains=1
+    )
     messages_list = agent.get_messages()
     print(messages_list[0])
     
