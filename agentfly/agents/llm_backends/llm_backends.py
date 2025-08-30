@@ -14,13 +14,11 @@ import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from ..utils.verl import pad_tensor_to_rank_size
-import os
-os.environ["VLLM_USE_V1"] = "1"
+from ...utils.verl import pad_tensor_to_rank_size
 from vllm import LLM, AsyncLLMEngine, SamplingParams, AsyncEngineArgs
 import openai
-from .templates.templates import Chat
-from .templates.vision_processor import get_processor
+from ..templates.templates import Chat
+from ..templates.vision_processor import get_processor
 import logging
 import PIL
 
@@ -35,7 +33,14 @@ except ImportError:
     pass
 
 class LLMBackend:
-    """Base class for LLM backends"""
+    """Base class for LLM backends.
+    
+    This abstract base class provides a unified interface for different LLM implementations.
+    All backend implementations must inherit from this class and implement the required methods.
+    
+    Attributes:
+        config: Configuration dictionary containing backend-specific parameters.
+    """
     
     def __init__(self, **kwargs):
         self.config = kwargs
@@ -61,9 +66,23 @@ class LLMBackend:
         raise NotImplementedError("Subclasses must implement generate_streaming()")
 
 class TransformersBackend(LLMBackend):
-    """HuggingFace Transformers implementation"""
+    """HuggingFace Transformers implementation for local model inference.
+    
+    This backend uses the Hugging Face Transformers library to load and run models locally.
+    It supports both synchronous and asynchronous text generation with streaming capabilities.
+    """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+        """Initialize TransformersBackend.
+        
+        Args:
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
         
         self.model_name = model_name_or_path
@@ -151,9 +170,23 @@ class TransformersBackend(LLMBackend):
             inputs['attention_mask'] = torch.cat([inputs['attention_mask'], torch.ones(1, 1, device=inputs['attention_mask'].device)], dim=1)
 
 class VLLMBackend(LLMBackend):
-    """vLLM implementation"""
+    """vLLM implementation for high-performance model inference.
+    
+    This backend uses the vLLM library for optimized inference of large language models.
+    vLLM provides efficient memory management and high throughput for model serving.
+    """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+        """Initialize VLLMBackend.
+        
+        Args:
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
 
         self.model_name = model_name_or_path
@@ -234,9 +267,23 @@ class VLLMBackend(LLMBackend):
                         yield sequence.text
 
 class AsyncVLLMBackend(LLMBackend):
-    """Async vLLM implementation"""
+    """Asynchronous vLLM implementation for high-performance model inference.
+    
+    This backend uses the vLLM AsyncLLMEngine for asynchronous inference, providing
+    better resource utilization and scalability for concurrent requests.
+    """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+        """Initialize AsyncVLLMBackend.
+        
+        Args:
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters that will be passed to AsyncEngineArgs.
+        """
         super().__init__(**kwargs)
 
         self.model_name = model_name_or_path
@@ -244,11 +291,17 @@ class AsyncVLLMBackend(LLMBackend):
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
         self.template = template
-        # Load model
-        self.llm_engine = AsyncLLMEngine.from_engine_args(
-            AsyncEngineArgs(
+        
+        if 'engine_args' in kwargs:
+            engine_args = kwargs.pop('engine_args')
+            engine_args.model = self.model_name
+        else:
+            engine_args = AsyncEngineArgs(
                 model=self.model_name,
+                **kwargs,
             )
+        self.llm_engine = AsyncLLMEngine.from_engine_args(
+            engine_args
         )
         
     def _process_inputs(self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]):
@@ -327,9 +380,23 @@ class AsyncVLLMBackend(LLMBackend):
                         yield sequence.text
 
 class AsyncVerlBackend(LLMBackend):
-    """Verl implementation"""
+    """Asynchronous Verl implementation for distributed model inference.
+    
+    This backend uses the Verl framework for distributed and asynchronous model inference.
+    Verl provides capabilities for running models across multiple workers and handling
+    complex inference pipelines.
+    """
     
     def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=8192, **kwargs):
+        """Initialize AsyncVerlBackend.
+        
+        Args:
+            llm_engine: Verl engine instance for distributed inference.
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
         self.model_name = model_name_or_path
         self.max_length = max_length
@@ -394,9 +461,11 @@ class AsyncVerlBackend(LLMBackend):
 
 
 class ClientBackend(LLMBackend):
-    """
-    Thin async/sync wrapper around OpenAI-compatible chat API.
-    Call `generate(...)` with *one* or *many* message lists.
+    """OpenAI-compatible client backend for remote API inference.
+    
+    This backend provides a thin wrapper around OpenAI-compatible chat APIs,
+    supporting both synchronous and asynchronous operations. It includes built-in
+    rate limiting and retry mechanisms for reliable API communication.
     """
 
     def __init__(
@@ -411,6 +480,19 @@ class ClientBackend(LLMBackend):
         max_new_tokens: int = 1024,
         **kwargs,
     ):
+        """Initialize ClientBackend.
+        
+        Args:
+            model_name_or_path (str): Name of the model to use for inference.
+            template (str): Chat template to use for formatting messages.
+            base_url (str): Base URL for the API endpoint. Defaults to localhost:8000.
+            max_requests_per_minute (int): Rate limiting for API requests. Defaults to 100.
+            timeout (int): Request timeout in seconds. Defaults to 600.
+            api_key (str): API key for authentication. Defaults to "EMPTY" for local servers.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
 
         # --- connection
