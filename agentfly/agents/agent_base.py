@@ -4,7 +4,13 @@ import json
 from .utils.messages import MessagesList
 from .templates.templates import get_template
 from ..__init__ import AGENT_DATA_DIR
-from .llm_backend import AsyncVLLMBackend, AsyncVerlBackend, ClientBackend, TransformersBackend, VLLMBackend
+from .llm_backends import (
+    AsyncVLLMBackend,
+    AsyncVerlBackend,
+    ClientBackend,
+    TransformersBackend,
+)
+from .llm_backends.backend_configs import BACKEND_CONFIGS
 from ..utils.logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -18,7 +24,6 @@ import warnings
 import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 from .utils.tokenizer import create_processor, create_tokenizer
-from .backend_config import BACKEND_CONFIGS
 try:
     from verl.protocol import DataProto
 except ImportError:

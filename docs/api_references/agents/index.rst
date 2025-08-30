@@ -16,6 +16,7 @@ Base Agent
    :maxdepth: 2
 
    agent
+   llm_backends
 
 Core Classes
 ===========
