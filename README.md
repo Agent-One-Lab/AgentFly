@@ -109,7 +109,7 @@ Suppose you are in a compute node (with 8 gpus). We have prepared some training 
 Run RL training of code_interpreter:
 ```python
 cd verl
-bash examples/run_agents/run_code_agent.sh
+bash run_agents/run_code_agent.sh
 ```
 ### Customized Training
 To customize your own training, you need to prepare: 1. Datasets. 2. Define or use existing tools. 3. Define or use existing rewards. 3. Define your own agents or use an existing type of agent.
@@ -187,7 +187,7 @@ https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
 ## Contribute & Discussion
 [WeChat|微信](assets/images/wechat.jpg)
 
-[Discord](https://discord.gg/CchUj7Sp)
+[Discord](https://discord.com/invite/ekrKVg8Y)
 
 
 ## Cite
