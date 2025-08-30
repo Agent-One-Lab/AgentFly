@@ -2,7 +2,7 @@ from ...tool_base import tool
 from sympy import simplify, sympify, Rational
 
 @tool(name="calculator", description="Calculate the result of a mathematical expression.")
-def calculate(expression: str):
+def calculator(expression: str):
     try:
         expr = sympify(expression)
         result = simplify(expr)

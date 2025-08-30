@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Union
 from copy import deepcopy
+import numpy as np
 
 Part = Dict[str, Any]          # e.g., {"type": "text", "text": "..."} or {"type": "image", "image": "..."}
 Turn = Dict[str, Any]          # {"role": "...", "content": [Part, ...], ...}
@@ -167,6 +168,19 @@ class Messages:
         out["messages"] = list(self._data["messages"])
         return out
 
+    def set_system_prompt(self, system_prompt: str, enforce: bool = True) -> None:
+        
+        assert isinstance(system_prompt, str), "System prompt must be a string."
+
+        if "messages" in self._data:
+            if self._data["messages"][0]["role"] == "system":
+                if enforce:
+                    self._data["messages"][0]["content"] = [{"type": "text", "text": system_prompt}]
+                else:
+                    raise MessagesValidationError("System prompt already exists.")
+            else:
+                self._data["messages"].insert(0, {"role": "system", "content": system_prompt})
+
     def __len__(self) -> int:
         return len(self._data["messages"])
 
@@ -231,12 +245,14 @@ class MessagesList:
     @classmethod
     def from_data(
         cls,
-        data: Union[Mapping[str, Any], Sequence[Any]],
+        data: Union[Mapping[str, Any], Sequence[Any], np.ndarray],
         *,
         default_meta: Mapping[str, Any] | None = None,
         strict: bool = True,
         allow_legacy_content: bool = True,
     ) -> "MessagesList":
+        if isinstance(data, np.ndarray):
+            data = data.tolist()
 
         default_meta = dict(default_meta or {})
         ms = cls(strict=strict, allow_legacy_content=allow_legacy_content)

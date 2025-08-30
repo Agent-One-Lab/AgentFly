@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import json
-
+from .utils.messages import MessagesList
 from .templates.templates import get_template
 from ..__init__ import AGENT_DATA_DIR
 from .llm_backend import AsyncVLLMBackend, AsyncVerlBackend, ClientBackend, TransformersBackend, VLLMBackend
@@ -43,7 +43,7 @@ class BaseAgent(ChainRollout, ABC):
         system_prompt: str = None,
         tools: List = None,
         max_length: int=8192,
-        backend: str = "transformers",
+        backend: str = "async_vllm",
         backend_config: Any = None,
         reward_fn: Callable = None,
         log_file: str = "agent",
@@ -156,6 +156,22 @@ class BaseAgent(ChainRollout, ABC):
 
         return llm_engine
 
+    def _preprocess_messages(self, messages: List[Dict]):
+        """
+        Do some necessary preprocessings to the messages, such as adding the sytem prompt
+        Args:
+            messages: List of messages to preprocess.
+
+        Returns:
+            List of preprocessed messages.
+        """
+        messages_list = MessagesList.from_data(messages)
+        for messages in messages_list:
+            if self.system_prompt:
+                messages.set_system_prompt(self.system_prompt, enforce=False)
+
+        return messages_list.to_list()
+
     async def run(self,
         messages: Union[List[dict], np.ndarray, Dict],
         max_turns: int,
@@ -172,8 +188,10 @@ class BaseAgent(ChainRollout, ABC):
             **kwargs: Additional keyword arguments for generation.
 
         """
+        processed_messages = self._preprocess_messages(messages)
+
         return await self.run_async(
-            messages,
+            processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
             **kwargs,

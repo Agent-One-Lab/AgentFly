@@ -4,10 +4,10 @@ A simplest agent can be build by initializing the agent instance with tools. The
 
 ```python
 from agentfly.agents import HFAgent
-from agentfly.tools import calculate
+from agentfly.tools import calculator
 agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
-    tools=[calculate],
+    tools=[calculator],
     template="qwen2.5",
     backend="async_vllm",
 )

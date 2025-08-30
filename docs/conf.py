@@ -17,6 +17,7 @@ extensions = [
     "sphinx.ext.napoleon",    # Google/NumPy-style docstrings
     "sphinx.ext.viewcode",    # add "[source]" links
     "sphinx.ext.autosectionlabel",
+    "sphinx_design"
 ]
 
 # recognise both .md and .rst
@@ -26,9 +27,91 @@ templates_path   = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
 
 
-html_theme = 'furo'
+# html_theme = 'furo'
+html_theme = 'sphinx_book_theme'
 # html_theme       = "sphinx_rtd_theme"  # Commented out to use furo theme
 html_static_path = ["_static"]
+
+
+
+# html_theme_options = {
+#     "logo": {
+#         "text": "🪽AgentFly\n",
+#         "image_light": "_static/logo-light.png",
+#         "image_dark": "_static/logo-dark.png",
+#     }
+# }
+html_theme_options = {
+    # "path_to_docs": "docs",
+    "repository_url": "https://github.com/executablebooks/sphinx-book-theme",
+    "repository_branch": "master",
+    "launch_buttons": {
+        "binderhub_url": "https://mybinder.org",
+        "colab_url": "https://colab.research.google.com/",
+        "deepnote_url": "https://deepnote.com/",
+        "notebook_interface": "jupyterlab",
+        "thebe": True,
+        # "jupyterhub_url": "https://datahub.berkeley.edu",  # For testing
+    },
+    "use_edit_page_button": True,
+    "use_source_button": True,
+    "use_issues_button": True,
+    "use_repository_button": True,
+    "use_download_button": True,
+    "use_sidenotes": True,
+    "show_toc_level": 2,
+    "show_navbar_depth": 2,
+    "navigation_depth": 4,
+    "collapse_navigation": False,
+    "globaltoc_collapse": False,
+    "announcement": (
+        "⚠️The latest release refactored our HTML, "
+        "so double-check your custom CSS rules!⚠️"
+    ),
+    "logo": {
+        "image_dark": "_static/logo-wide-dark.svg",
+        "text": "🪽AgentFly Document",  # Uncomment to try text with logo
+    },
+    "icon_links": [
+        {
+            "name": "Paper",
+            "url": "https://arxiv.org/pdf/2507.14897",
+            "icon": "https://cdn.simpleicons.org/arxiv",
+            "type": "url",
+        },
+        {
+            "name": "WANDB",
+            "url": "https://wandb.ai/AgentRL/Open",
+            "icon": "https://cdn.simpleicons.org/weightsandbiases",
+            "type": "url"
+        },
+        {
+            "name": "HF",
+            "url": "https://huggingface.co/collections/Agent-One/agentfly-6882061c6cf08537cb66c12b",
+            "icon": "https://cdn.simpleicons.org/huggingface/FF9A00",
+            "type": "url",
+        },
+        {
+            "name": "GitHub",
+            "url": "https://github.com/Agent-One-Lab/AgentFly",
+            "icon": "https://cdn.simpleicons.org/github",
+            "type": "url",
+        },
+    ],
+    # For testing
+    # "use_fullscreen_button": False,
+    # "home_page_in_toc": True,
+    # "extra_footer": "<a href='https://google.com'>Test</a>",  # DEPRECATED KEY
+    # "show_navbar_depth": 2,
+    # Testing layout areas
+    # "navbar_start": ["test.html"],
+    # "navbar_center": ["test.html"],
+    # "navbar_end": ["test.html"],
+    # "navbar_persistent": ["test.html"],
+    # "footer_start": ["test.html"],
+    # "footer_end": ["test.html"]
+}
+
 
 # Configure autodoc to include special methods
 autodoc_default_options = {

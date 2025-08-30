@@ -476,7 +476,7 @@ class ChainRollout:
     async def _finalize_chain(self, chain_id, chain, current_node, depth):
         """Finalize the chain with reward calculation and cleanup."""
         if self._reward_fn is not None:
-            trajectory = current_node.messages
+            trajectory = current_node.messages.messages
             final_response = self.extract_final_response(trajectory)
             other_args = {k: v for k, v in chain.info.items() if k not in ['prediction', 'trajectory', 'id']}
             chain.info["reward"] = await self._reward_fn(prediction=final_response, **other_args, trajectory=trajectory, id=chain_id)

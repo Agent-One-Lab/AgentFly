@@ -11,7 +11,7 @@ from agentfly.tools import tool
 from sympy import simplify, sympify, Rational
 
 @tool(name="calculator", description="Calculate the result of a mathematical expression.")
-def calculate(expression: str):
+def calculator(expression: str):
     try:
         expr = sympify(expression)
         result = simplify(expr)
@@ -36,21 +36,28 @@ Now we have the tool, we can then define the reward function, which also simply 
 from agentfly.rewards import reward
 
 @reward(name="math_reward_string_equal")
-def math_reward_string_equal(prediction: str, answer: str) -> float:
-    import re
+def math_reward_string_equal(prediction: str, answer: str, trajectory: List[Dict]) -> float:
 
     def extract_last_number(s: str):
         matches = re.findall(r'\d+', s)  # find all sequences of digits
-        return int(matches[-1]) if matches else None
+        return matches[-1] if matches else None
 
-    prediction = extract_last_number(prediction)
+    tool_count = 0
+    for msg in trajectory:
+        if msg["role"] == "tool":
+            tool_count += 1
     
-    if prediction == answer:
-        return 1.0
-    else:
+    if tool_count < 1:
         return 0.0
+    else:
+        prediction = extract_last_number(prediction)
+        
+        if prediction == answer:
+            return 1.0
+        else:
+            return 0.1
 ```
-
+Note that in this reward function, we use the trajectory to count how many tools the agent has called. If the agent called at least one, we give it the basic format reward (0.1), then if it further gets the answer correct, it gets the full reward (1.0).
 Now we can use the agent with the reward function we just defined.
 
 ```python
@@ -58,7 +65,7 @@ from agentfly.agents import HFAgent
 from agentfly.tools import calculate
 agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
-    tools=[calculate],
+    tools=[calculator],
     template="qwen2.5",
     reward_fn=math_reward_string_equal,
     backend="async_vllm",
