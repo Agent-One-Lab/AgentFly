@@ -13,6 +13,7 @@ jobs:
 
     strategy:
       matrix:
+        python-version: ["3.10"]
         test-file:
           - agentfly/tests/unit/envs/ --ignore tests/unit/envs/test_webshop_text_env.py --ignore tests/unit/envs/test_alfworld_env.py
           - agentfly/tests/unit/envs/test_alfworld_env.py
@@ -34,6 +35,13 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Verify Python
+        run: |
+          which python
+          python --version
+          which pip
+          python -m pip --version
+
       - name: Free up disk space
         run: |
           echo "Before cleanup:"
@@ -52,6 +60,7 @@ jobs:
         run: |
           pip install -e .
           pip install datasets
+          pip install -e '.[dev]' --no-build-isolation
 
       - name: Cache AgentFly cache
         uses: actions/cache@v4
