@@ -33,14 +33,6 @@ html_theme = 'sphinx_book_theme'
 html_static_path = ["_static"]
 
 
-
-# html_theme_options = {
-#     "logo": {
-#         "text": "🪽AgentFly\n",
-#         "image_light": "_static/logo-light.png",
-#         "image_dark": "_static/logo-dark.png",
-#     }
-# }
 html_theme_options = {
     # "path_to_docs": "docs",
     "repository_url": "https://github.com/executablebooks/sphinx-book-theme",
@@ -64,10 +56,6 @@ html_theme_options = {
     "navigation_depth": 4,
     "collapse_navigation": False,
     "globaltoc_collapse": False,
-    "announcement": (
-        "⚠️The latest release refactored our HTML, "
-        "so double-check your custom CSS rules!⚠️"
-    ),
     "logo": {
         "image_dark": "_static/logo-wide-dark.svg",
         "text": "🪽AgentFly Document",  # Uncomment to try text with logo
