@@ -16,3 +16,4 @@ bs4
 qwen_vl_utils
 onnxruntime
 mpmath
+wandb
