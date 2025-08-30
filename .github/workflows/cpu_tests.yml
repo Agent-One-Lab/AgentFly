@@ -50,7 +50,7 @@ jobs:
 
       - name: Install dependencies (main repo)
         run: |
-          pip install -r agents/requirements.txt
+          pip install -e .
           pip install datasets
 
       - name: Cache AgentFly cache
