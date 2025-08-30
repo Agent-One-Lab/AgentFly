@@ -358,7 +358,7 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp):
 if __name__=="__main__":
     "python -m agents.agents.templates.utils"
     # model = "/mnt/sharefs/users/haonan.li/models/Qwen2.5-7B-instruct-am_think_v1_distilled"
-    model = "Qwen/Qwen2.5-7B-Instruct"
+    model = "Qwen/Qwen2.5-3B-Instruct"
     # vllm_serve(model, "qwen2.5-think", 2, 1, 4)
     vllm_serve(model, "qwen2.5", 1, 1, 1)
 
