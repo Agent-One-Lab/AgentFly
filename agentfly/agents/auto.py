@@ -7,6 +7,7 @@ from .agent_base import BaseAgent
 from .react.react_agent import ReactAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
+from .specialized.hf_agent import HFAgent
 from ..rewards.reward_base import get_reward_from_name
 
 
@@ -168,3 +169,4 @@ AutoAgent.register_agent("code", CodeAgent)
 AutoAgent.register_agent("openai", OpenAIAgent)
 AutoAgent.register_agent("think", ThinkAgent)
 AutoAgent.register_agent("gui", GUIAgent)
+AutoAgent.register_agent("hf", HFAgent)

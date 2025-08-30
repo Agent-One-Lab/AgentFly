@@ -4,9 +4,6 @@
 Reward Functions
 ###################
 
-.. contents::
-   :local:
-   :depth: 2
 
 Overview
 ========
@@ -50,7 +47,6 @@ Reward Function Categories
 **Task-Specific Rewards**
     - Math Problem Solving Rewards
     - Question Answering (QA) Rewards
-    - LLM-as-Judge Reward
 
 **Format-Aware Rewards**
     - Tool Usage Rewards
@@ -103,5 +99,4 @@ All reward functions use the ``@reward`` decorator which:
 **Decorator Parameters:**
     - ``name``: Unique identifier for the reward function
     - ``env_cls``: Environment class for stateful rewards (optional)
-    - ``pool_size``: Number of environment instances to pool (optional)
-    - ``llm_config``: LLM configuration for judge-based rewards (optional) 
+    - ``pool_size``: Number of environment instances to pool (optional) 

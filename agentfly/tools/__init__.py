@@ -18,7 +18,7 @@ from .src.alfworld.tools import (
     alfworld_get_admissible_commands,
     alfworld_reset
 )
-from .src.calculate.tools import calculate
+from .src.calculate.tools import calculator
 from .src.search.google_search import google_search_serper
 from .src.search.dense_retriever import dense_retrieve
 from .src.search.async_dense_retriever import asyncdense_retrieve
@@ -46,7 +46,8 @@ EXPLICIT_TOOLS = {
     "hallucination_tool": hallucination_tool,
     "invalid_input_tool": invalid_input_tool,
     "dense_retrieve": dense_retrieve,
-    "pyautogui_code_generator": pyautogui_code_generator
+    "pyautogui_code_generator": pyautogui_code_generator,
+    "calculator": calculator
 }
 
 # Update the registry with explicit tools
@@ -62,6 +63,7 @@ def register_tool(tool_name, tool_func):
         tool_name: The name of the tool
         tool_func: The tool function or BaseTool instance
     """
+    global TOOL_REGISTRY
     TOOL_REGISTRY[tool_name] = tool_func
 
 def get_tool_from_name(tool_name: str) -> Tool:

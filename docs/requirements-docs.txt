@@ -5,3 +5,8 @@ sphinx-markdown-tables
 # Classic Read-the-Docs look
 sphinx-rtd-theme
 # Sphinx itself is pulled transitively
+sphinx-book-theme
+
+# Grid
+sphinx-design
+
