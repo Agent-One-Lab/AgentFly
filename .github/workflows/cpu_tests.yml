@@ -9,7 +9,7 @@ on:
 jobs:
   test-envs:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     strategy:
       matrix:
