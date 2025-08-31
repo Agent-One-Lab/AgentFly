@@ -349,16 +349,17 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp):
     with open(f"{AGENT_DATA_DIR}/cache/jinja_template.jinja", "w") as f:
         f.write(jinja_template)
     # command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
-    command = f"vllm serve {model_name_or_path} --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+    command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes"
 
     print(command)
     os.system(command)
 
 
 if __name__=="__main__":
-    "python -m agents.agents.templates.utils"
+    "python -m agentfly.agents.templates.utils"
     # model = "/mnt/sharefs/users/haonan.li/models/Qwen2.5-7B-instruct-am_think_v1_distilled"
-    model = "Qwen/Qwen2.5-7B-Instruct"
+    # model = "Qwen/Qwen2.5-3B-Instruct"
+    model = "Qwen/Qwen2.5-VL-3B-Instruct"
     # vllm_serve(model, "qwen2.5-think", 2, 1, 4)
-    vllm_serve(model, "qwen2.5", 1, 1, 1)
+    vllm_serve(model, "qwen2.5-vl-system-tool", 1, 1, 1)
 

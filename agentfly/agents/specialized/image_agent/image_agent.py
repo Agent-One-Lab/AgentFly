@@ -1,3 +1,4 @@
+import logging
 import os
 import random
 import re
@@ -28,6 +29,9 @@ from .utils import (
     fetch_image
 )
 from ....utils.vision import image_to_data_uri, image_to_pil
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # Global variables for tools
 _qwen_image_edit_tool = None
@@ -141,37 +145,50 @@ class ImageEditingAgent(BaseAgent):
         image.save(path)
 
 
-    def parse(self, responses: List[str], **kwargs) -> List[str]:
+    def parse(self, responses: List[str | Dict], **kwargs) -> List[str]:
+        logger.debug(f"[ImageEditingAgent.parse] responses: {responses}")
         new_messages_list = []
         for response in responses:
-            tool_calls = extract_tool_calls(response)
-            if len(tool_calls) == 1:
-                tool_call = tool_calls[0]
-                formatted_tool_calls = []
-                try:
-                    tool_call = json.loads(tool_call)
-                    # {"name": "...", "arguments": "..."}
-                    if "name" in tool_call and "arguments" in tool_call:
-                        name = tool_call["name"]
-                        arguments = tool_call["arguments"]
-
-                        formatted_tool_calls.append({
-                            "id": None,
-                            "type": "function",
-                            "function": {
-                                "name": name,
-                                "arguments": arguments
-                            }
-                        })
-                except Exception as e:
-                    pass
+            formatted_tool_calls = []
+            if isinstance(response, dict):
+                response_text = response["response_text"]
+                if response['tool_calls'] and len(response["tool_calls"]) > 0:
+                    tool_calls = [response["tool_calls"][0]] # We only support one tool call for now
+                else:
+                    tool_calls = []
+                new_messages_list.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": response_text}],
+                    "tool_calls": tool_calls,
+                })
             else:
-                pass
-            new_messages_list.append({
-                "role": "assistant",
-                "content": [{"type": "text", "text": response}],
-                "tool_calls": formatted_tool_calls,
-            })
+                tool_calls = extract_tool_calls(response)
+                if len(tool_calls) == 1:
+                    tool_call = tool_calls[0]
+                    try:
+                        tool_call = json.loads(tool_call)
+                        # {"name": "...", "arguments": "..."}
+                        if "name" in tool_call and "arguments" in tool_call:
+                            name = tool_call["name"]
+                            arguments = tool_call["arguments"]
+
+                            formatted_tool_calls.append({
+                                "id": None,
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": arguments
+                                }
+                            })
+                    except Exception as e:
+                        pass
+                else:
+                    pass
+                new_messages_list.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": response}],
+                    "tool_calls": formatted_tool_calls,
+                })
         return new_messages_list
 
     def _detect_and_insert_image_id(self, messages: List[dict]):
@@ -435,4 +452,4 @@ class ImageEditingAgent(BaseAgent):
             "observation": f"Image Id: {new_image_id}",
             "image": image_base64
         }
-        return json.dumps(result)
+        return result

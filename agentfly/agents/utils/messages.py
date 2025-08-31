@@ -58,7 +58,8 @@ class Messages:
         if ptype == "text":
             if "text" not in p:
                 raise MessagesValidationError("Text part missing 'text' field.")
-            if not isinstance(p["text"], str):
+            if not isinstance(p["text"], str) and p['text'] is not None:
+                # For openai models, we may directly get the tool call, and the response content can be None 
                 raise MessagesValidationError("Text part 'text' must be a string.")
             return dict(p)
 

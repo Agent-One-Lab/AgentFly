@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import json
 import time
+from ...utils.vision import image_to_data_uri
 from ..utils.messages import MessagesList, Messages
 from ...utils.timing import Timer
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
@@ -16,6 +17,10 @@ from ...utils.monitor import JsonlSink, MetricEvent, Monitor, WandbSink, emit, s
 from ... import AGENT_DATA_DIR
 import wandb
 from .streaming_observer import ConsoleStreamObserver, StreamingManager, StreamEvent, StreamEventType
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 @dataclass
 class Node:
@@ -314,7 +319,8 @@ class ChainRollout:
                     action_input_node.observation_code = result["status"]
 
                     new_content = [{"type": "text", "text": observation}]
-                    if "image" in result["info"]:
+                    # Handle multi-modal outputs
+                    if "image" in result:
                         image = result["image"]
                         image_base64 = image_to_data_uri(image)
                         new_content.append({"type": "image", "image": image_base64})
@@ -381,6 +387,8 @@ class ChainRollout:
                     ))
                     # chunk is the whole generated text
                     full_response = chunk
+
+                logger.debug(f"[ChainRollout._generate_response] full_response: {full_response}")
                 
                 # Emit generation end event
                 await self.streaming_manager.emit_event(StreamEvent(

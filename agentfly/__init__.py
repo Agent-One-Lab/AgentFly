@@ -33,3 +33,5 @@ if os.getenv("ENROOT_DEBUG", "0") == "1":
     ENROOT_DEBUG = True
 else:
     ENROOT_DEBUG = False
+
+os.environ["VLLM_CONFIGURE_LOGGING"] = "1"

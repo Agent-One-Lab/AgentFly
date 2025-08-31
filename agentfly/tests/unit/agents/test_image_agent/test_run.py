@@ -235,6 +235,7 @@ async def interactive_test():
     print("\n👋 再见！")
 
 if __name__ == "__main__":
+    """python -m agentfly.tests.unit.agents.test_image_agent.test_run"""
     # 选择测试模式
     print("请选择测试模式:")
     print("1. 运行预定义测试用例")

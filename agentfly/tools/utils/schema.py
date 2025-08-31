@@ -165,6 +165,12 @@ def validate_schema(name, description, signature, docs):
             if k == "type":
                 if v == "str":
                     param_info[k] = "string"
+                if v == "int":
+                    param_info[k] = "integer"
+                if v == "float":
+                    param_info[k] = "number"
+                if v == "bool":
+                    param_info[k] = "boolean"
 
     # we need to remove env from the schema
     if "env" in properties:

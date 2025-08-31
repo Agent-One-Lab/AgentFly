@@ -7,6 +7,7 @@ from asyncore import loop
 from collections import deque
 import copy
 from functools import partial
+import json
 import time
 from typing import Dict, Any, List, Optional, Callable, AsyncGenerator
 import uuid
@@ -14,13 +15,13 @@ import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from ..utils.verl import pad_tensor_to_rank_size
-import os
-os.environ["VLLM_USE_V1"] = "1"
+from ... import AGENT_DATA_DIR
+from ...utils.vision import image_to_data_uri
+from ...utils.verl import pad_tensor_to_rank_size
 from vllm import LLM, AsyncLLMEngine, SamplingParams, AsyncEngineArgs
 import openai
-from .templates.templates import Chat
-from .templates.vision_processor import get_processor
+from ..templates.templates import Chat
+from ..templates.vision_processor import get_processor
 import logging
 import PIL
 
@@ -35,7 +36,14 @@ except ImportError:
     pass
 
 class LLMBackend:
-    """Base class for LLM backends"""
+    """Base class for LLM backends.
+    
+    This abstract base class provides a unified interface for different LLM implementations.
+    All backend implementations must inherit from this class and implement the required methods.
+    
+    Attributes:
+        config: Configuration dictionary containing backend-specific parameters.
+    """
     
     def __init__(self, **kwargs):
         self.config = kwargs
@@ -61,9 +69,23 @@ class LLMBackend:
         raise NotImplementedError("Subclasses must implement generate_streaming()")
 
 class TransformersBackend(LLMBackend):
-    """HuggingFace Transformers implementation"""
+    """HuggingFace Transformers implementation for local model inference.
+    
+    This backend uses the Hugging Face Transformers library to load and run models locally.
+    It supports both synchronous and asynchronous text generation with streaming capabilities.
+    """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+        """Initialize TransformersBackend.
+        
+        Args:
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
         
         self.model_name = model_name_or_path
@@ -151,9 +173,23 @@ class TransformersBackend(LLMBackend):
             inputs['attention_mask'] = torch.cat([inputs['attention_mask'], torch.ones(1, 1, device=inputs['attention_mask'].device)], dim=1)
 
 class VLLMBackend(LLMBackend):
-    """vLLM implementation"""
+    """vLLM implementation for high-performance model inference.
+    
+    This backend uses the vLLM library for optimized inference of large language models.
+    vLLM provides efficient memory management and high throughput for model serving.
+    """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+        """Initialize VLLMBackend.
+        
+        Args:
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
 
         self.model_name = model_name_or_path
@@ -234,9 +270,23 @@ class VLLMBackend(LLMBackend):
                         yield sequence.text
 
 class AsyncVLLMBackend(LLMBackend):
-    """Async vLLM implementation"""
+    """Asynchronous vLLM implementation for high-performance model inference.
+    
+    This backend uses the vLLM AsyncLLMEngine for asynchronous inference, providing
+    better resource utilization and scalability for concurrent requests.
+    """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+        """Initialize AsyncVLLMBackend.
+        
+        Args:
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters that will be passed to AsyncEngineArgs.
+        """
         super().__init__(**kwargs)
 
         self.model_name = model_name_or_path
@@ -244,11 +294,17 @@ class AsyncVLLMBackend(LLMBackend):
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
         self.template = template
-        # Load model
-        self.llm_engine = AsyncLLMEngine.from_engine_args(
-            AsyncEngineArgs(
+        
+        if 'engine_args' in kwargs:
+            engine_args = kwargs.pop('engine_args')
+            engine_args.model = self.model_name
+        else:
+            engine_args = AsyncEngineArgs(
                 model=self.model_name,
+                **kwargs,
             )
+        self.llm_engine = AsyncLLMEngine.from_engine_args(
+            engine_args
         )
         
     def _process_inputs(self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]):
@@ -327,9 +383,23 @@ class AsyncVLLMBackend(LLMBackend):
                         yield sequence.text
 
 class AsyncVerlBackend(LLMBackend):
-    """Verl implementation"""
+    """Asynchronous Verl implementation for distributed model inference.
+    
+    This backend uses the Verl framework for distributed and asynchronous model inference.
+    Verl provides capabilities for running models across multiple workers and handling
+    complex inference pipelines.
+    """
     
     def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=8192, **kwargs):
+        """Initialize AsyncVerlBackend.
+        
+        Args:
+            llm_engine: Verl engine instance for distributed inference.
+            model_name_or_path (str): Name or path of the pre-trained model to load.
+            template (str): Chat template to use for formatting messages.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
         self.model_name = model_name_or_path
         self.max_length = max_length
@@ -394,9 +464,11 @@ class AsyncVerlBackend(LLMBackend):
 
 
 class ClientBackend(LLMBackend):
-    """
-    Thin async/sync wrapper around OpenAI-compatible chat API.
-    Call `generate(...)` with *one* or *many* message lists.
+    """OpenAI-compatible client backend for remote API inference.
+    
+    This backend provides a thin wrapper around OpenAI-compatible chat APIs,
+    supporting both synchronous and asynchronous operations. It includes built-in
+    rate limiting and retry mechanisms for reliable API communication.
     """
 
     def __init__(
@@ -411,6 +483,19 @@ class ClientBackend(LLMBackend):
         max_new_tokens: int = 1024,
         **kwargs,
     ):
+        """Initialize ClientBackend.
+        
+        Args:
+            model_name_or_path (str): Name of the model to use for inference.
+            template (str): Chat template to use for formatting messages.
+            base_url (str): Base URL for the API endpoint. Defaults to localhost:8000.
+            max_requests_per_minute (int): Rate limiting for API requests. Defaults to 100.
+            timeout (int): Request timeout in seconds. Defaults to 600.
+            api_key (str): API key for authentication. Defaults to "EMPTY" for local servers.
+            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
+            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
+            **kwargs: Additional configuration parameters.
+        """
         super().__init__(**kwargs)
 
         # --- connection
@@ -434,59 +519,108 @@ class ClientBackend(LLMBackend):
     # --------------------------------------------------------------------- #
     @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
     def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
+        LOGGER.debug(f"[ClientBackend] _blocking_call kwargs: {kwargs}")
         if "num_return_sequences" in kwargs:
             n = kwargs.pop("num_return_sequences")
         else:
             n = 1
 
-        if "tool_choice" in kwargs:
-            tool_choice = kwargs.pop("tool_choice")
-        else:
-            tool_choice = "none"
+        LOGGER.debug(f"[ClientBackend] messages: {messages}")
 
-        print(f"[ClientBackend] messages: {messages}")
+        # with open(f"{AGENT_DATA_DIR}/debug/messages_{len(messages)}.json", "w") as f:
+        #     json.dump(messages, f, indent=4)
+        # with open(f"{AGENT_DATA_DIR}/debug/args.json", 'w') as f:
+        #     json.dump(kwargs, f, indent=4)
+
         resp = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
             timeout=self.timeout,
-            max_tokens=self.max_new_tokens,
+            max_completion_tokens=self.max_new_tokens,
             n=n,
-            tool_choice=tool_choice,
             **kwargs,
         )
         resp_json = resp.dict()
         response_texts = [choice["message"]["content"] for choice in resp_json["choices"]]
         tool_calls = [choice["message"]["tool_calls"] for choice in resp_json["choices"]]
 
-        if tool_choice == "none":
+        if kwargs.get("tool_choice", "none") == "none":
             return response_texts
         else:
             return {
                 "response_texts": response_texts,
                 "tool_calls": tool_calls,
             }
+    
+    async def generate_streaming(self, messages: List[List[Dict]], **kwargs) -> AsyncGenerator[str, None]:
+        """
+        This is actually the not streaming. We simply return the generated text.
+        """
+        LOGGER.debug(f"[ClientBackend] generate_streaming kwargs: {kwargs}")
+        response_texts_dicts = await self.async_generate(messages, **kwargs)
+        for response in response_texts_dicts:
+            yield response
 
-    async def _call(self, messages: List[List[Dict]], **kw) -> str:
+    async def _call(self, messages: List[List[Dict]], **kwargs) -> str:
         # acquire a rate‑limit token
         async with self._tokens:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, partial(self._blocking_call, messages, **kw))
+            return await loop.run_in_executor(None, partial(self._blocking_call, messages, **kwargs))
 
-    def _convert_to_openai_chat_without_tool_call_processing(self, messages: list) -> list:
+    def _convert_to_openai_chat_without_tool_call_processing(self, messages: list, is_openai_model: bool = False) -> list:
         """
         We use the pure generated content as the history. So we don't want any tool call to be part of the history.
         This is used when models are not openai's official models like GPT-4o.
         TODO: we need to add support for openai models
         """
         messages = copy.deepcopy(messages)
+        
         for message in messages:
-            if "tool_calls" in message:
-                del message["tool_calls"]
-            if "tool_call_id" in message:
-                del message["tool_call_id"]
-            if "tool_choice" in message:
-                del message["tool_choice"]
+            if is_openai_model:
+                if message['role'] == 'assistant':
+                    if 'tool_calls' in message and len(message['tool_calls']) > 1:
+                        if 'content' in message and message['content'] is None:
+                            del message['content']
+            else:
+                if "tool_calls" in message:
+                    del message["tool_calls"]
+                if "tool_call_id" in message:
+                    del message["tool_call_id"]
+                if "tool_choice" in message:
+                    del message["tool_choice"]
+
+            if isinstance(message["content"], list):
+                new_content = []
+                for item in message["content"]:
+                    if item["type"] in ["image"]:
+                        if is_openai_model:
+                            # OpenAI chat completion API only supports image_url
+                            # And we keep all images to be base64 for compatibility
+                            image = image_to_data_uri(item["image"])
+                            new_content.append({"type": "image_url", "image_url": {"url": image}})
+                        else:
+                            new_content.append(item)
+                    else:
+                        new_content.append(item)
+                message["content"] = new_content
+
         return messages
+
+    def _preprocess_messages_and_args(self, messages_list, **kwargs):
+        is_openai_model = False
+        if "gpt" in self.model_name.lower() or "api.openai.com" in self.base_url:
+            is_openai_model = True
+
+        messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages, is_openai_model) for messages in messages_list]
+        
+        if is_openai_model:
+            kwargs['tool_choice'] = "auto"
+        else:
+            # For self-deployed models, we will use the response to extract tool calls
+            kwargs['tool_choice'] = "none"
+        
+        return messages_list, kwargs
+
 
     # Public API ‑‑ sync or async depending on caller's context
     def async_generate(
@@ -507,8 +641,9 @@ class ClientBackend(LLMBackend):
             messages_list = [messages]  # single
         else:
             messages_list = messages     # batch
-        print(f"[ClientBackend] messages_list: {messages_list}")
-        messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
+
+        messages_list, kwargs = self._preprocess_messages_and_args(messages_list, **kwargs)
+        LOGGER.debug(f"[ClientBackend] messages_list: {messages_list}")
 
         async def _runner():
             tasks = [asyncio.create_task(self._call(_input, **kwargs)) for _input in messages_list]
@@ -516,12 +651,12 @@ class ClientBackend(LLMBackend):
             response_texts_list_or_dict = await asyncio.gather(*tasks)
             # return is a dict if tool_choice is not none, otherwise a list of strings
             if isinstance(response_texts_list_or_dict[0], dict):
+                # Flatten the response list
                 response_texts = [text for response in response_texts_list_or_dict for text in response["response_texts"]]
                 tool_calls = [tool_call for response in response_texts_list_or_dict for tool_call in response["tool_calls"]]
-                return {
-                    "response_texts": response_texts,
-                    "tool_calls": tool_calls,
-                }
+                return [
+                    {"response_text": response_text, "tool_calls": _tool_calls} for response_text, _tool_calls in zip(response_texts, tool_calls)
+                ]
             else:
                 response_texts = [text for response in response_texts_list_or_dict for text in response]
                 return response_texts
