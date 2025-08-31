@@ -123,7 +123,7 @@ tests/e2e/toy_examples/deepspeed/synchronous/output.txt
 
 # data
 *.parquet
-agents/agents/data/*
+agentfly/agents/data/*
 
 # local logs
 logs
@@ -131,7 +131,15 @@ log
 outputs
 *.out
 
-# Notebooks
-agents/tests/*.ipynb
-agents/agents/*.ipynb
+# Notebooks, images, and temp files
+agentfly/tests/*.ipynb
+agentfly/tests/*.jpg
+agentfly/tests/*.jpeg
+agentfly/tests/*.png
+agentfly/agents/*.ipynb
+agentfly/temp/
+temp/
+test_outputs/
+agentfly/data/
+*.ipynb
 

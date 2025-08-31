@@ -10,5 +10,5 @@ sphinx:
 
 python:
   install:
-    - requirements: agents/requirements.txt
+    - requirements: agentfly/requirements.txt
     - requirements: docs/requirements-docs.txt

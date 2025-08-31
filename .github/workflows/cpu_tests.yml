@@ -9,18 +9,19 @@ on:
 jobs:
   test-envs:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     strategy:
       matrix:
+        python-version: ["3.10"]
         test-file:
-          - tests/unit/envs/ --ignore tests/unit/envs/test_webshop_text_env.py --ignore tests/unit/envs/test_alfworld_env.py
-          - tests/unit/envs/test_alfworld_env.py
+          - agentfly/tests/unit/envs/ --ignore agentfly/tests/unit/envs/test_webshop_text_env.py --ignore agentfly/tests/unit/envs/test_alfworld_env.py
+          - agentfly/tests/unit/envs/test_alfworld_env.py
           # - tests/unit/envs/test_webshop_text_env.py # TODO: add minimal variant of the webshop docker image
-          - tests/unit/rewards/ --ignore tests/unit/rewards/test_env_id.py --ignore tests/unit/rewards/test_webshop_reward.py
-          - tests/unit/tools/ --ignore tests/unit/tools/test_webshop_tool.py --ignore tests/unit/tools/test_scienceworld_tool.py --ignore tests/unit/tools/test_code_tool.py
-          - tests/unit/tools/test_scienceworld_tool.py
-          - tests/unit/tools/test_code_tool.py
+          - agentfly/tests/unit/rewards/ --ignore agentfly/tests/unit/rewards/test_env_id.py --ignore agentfly/tests/unit/rewards/test_webshop_reward.py
+          - agentfly/tests/unit/tools/ --ignore agentfly/tests/unit/tools/test_webshop_tool.py --ignore agentfly/tests/unit/tools/test_scienceworld_tool.py --ignore agentfly/tests/unit/tools/test_code_tool.py
+          - agentfly/tests/unit/tools/test_scienceworld_tool.py
+          - agentfly/tests/unit/tools/test_code_tool.py
           # - test/unit/agents/ # TODO: recheck this
 
     steps:
@@ -33,6 +34,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      - name: Verify Python
+        run: |
+          which python
+          python --version
+          which pip
+          python -m pip --version
 
       - name: Free up disk space
         run: |
@@ -50,8 +58,9 @@ jobs:
 
       - name: Install dependencies (main repo)
         run: |
-          pip install -r agents/requirements.txt
+          pip install -e .
           pip install datasets
+          pip install -e '.[dev]' --no-build-isolation
 
       - name: Cache AgentFly cache
         uses: actions/cache@v4
@@ -75,5 +84,4 @@ jobs:
 
       - name: Run unit test (${{ matrix.test-file }})
         run: |
-          cd agents
-          python -m pytest ${{ matrix.test-file }}
+          pytest ${{ matrix.test-file }}

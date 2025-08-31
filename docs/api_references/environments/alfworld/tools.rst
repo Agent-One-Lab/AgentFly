@@ -1,0 +1,257 @@
+.. _alfworld_tools:
+
+ALFWorld Tools
+==============
+
+The ALFWorld tools provide a Python interface for agents to interact with ALFWorld environments. These tools enable agents to take actions, query the environment state, and gather information about available commands and objectives.
+
+Tools Reference
+---------------
+
+.. currentmodule:: agentfly.tools.src.alfworld.tools
+
+alfworld_step
+~~~~~~~~~~~~~
+
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_step
+
+**Function Signature:**
+
+.. code-block:: python
+
+    async def alfworld_step(action: str, env: ALFWorldEnv) -> dict
+
+**Description:** Take an action in the ALFWorld environment and return the observation
+
+**Parameters:**
+    - **action** (str): The action command to execute in the environment. Examples: "go to kitchen", "take apple", "open fridge", "look around"
+    - **env** (ALFWorldEnv): The ALFWorld environment instance to interact with
+
+**Returns:**
+    dict: A dictionary containing:
+        - observation (str): The text observation from the environment after taking the action
+        - reward (float): The reward received for this action
+        - done (bool): Whether the episode has completed (task finished or failed)
+        - info (dict): Additional information including the reward value
+
+alfworld_reset
+~~~~~~~~~~~~~~
+
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_reset
+
+**Function Signature:**
+
+.. code-block:: python
+
+    async def alfworld_reset(env: ALFWorldEnv) -> str
+
+**Description:** Reset the ALFWorld environment to start a new episode
+
+**Parameters:**
+    - **env** (ALFWorldEnv): The ALFWorld environment instance to reset
+
+**Returns:**
+    str: The initial observation containing the task description and starting state of the environment
+
+alfworld_get_admissible_commands
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_get_admissible_commands
+
+**Function Signature:**
+
+.. code-block:: python
+
+    async def alfworld_get_admissible_commands(env: ALFWorldEnv) -> str
+
+**Description:** Get the list of admissible commands for the current state in ALFWorld
+
+**Parameters:**
+    - **env** (ALFWorldEnv): The ALFWorld environment instance to query
+
+**Returns:**
+    str: A newline-separated string of valid commands that can be executed in the current state
+
+alfworld_get_task_objective
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: agentfly.tools.src.alfworld.tools.alfworld_get_task_objective
+
+**Function Signature:**
+
+.. code-block:: python
+
+    async def alfworld_get_task_objective(env: ALFWorldEnv) -> str
+
+**Description:** Get the current task objective/goal from the ALFWorld environment
+
+**Parameters:**
+    - **env** (ALFWorldEnv): The ALFWorld environment instance to query
+
+**Returns:**
+    str: A formatted string containing the task objective and task type. Format: "Task: [objective]\nTask Type: [type]"
+
+Usage with ReactAgent
+---------------------
+
+Real Example from Benchmark
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This example shows how ALFWorld tools are used with a ReactAgent and LLM (Qwen2.5-7B-Instruct):
+
+.. code-block:: python
+
+    from agentfly.agents.react.react_agent import ReactAgent
+    from agentfly.tools.src.alfworld.tools import (
+        alfworld_step, 
+        alfworld_get_admissible_commands,
+        alfworld_get_task_objective
+    )
+    from agentfly.rewards import alfworld_episode_reward
+
+    # Configure tools for ReactAgent
+    tools = [
+        alfworld_step,
+        alfworld_get_task_objective,
+        alfworld_get_admissible_commands
+    ]
+
+    # Task instructions for the LLM
+    task_info = """Navigate the ALFWorld environment and complete tasks by interacting with objects. Use the tools provided to step through the environment.
+
+    Navigation Actions
+    go to [object] [number] - Move to a specific object (e.g., "go to sidetable 1")
+    look - Observe current surroundings and nearby objects
+    examine [object] [number] - Get detailed information about a specific object
+
+    Object Manipulation
+    take [object] [number] from [location] [number] - Pick up an object from a location
+    move [object] [number] to [location] [number] - Place a held object at a destination
+    inventory - Tells what items you are holding at the moment
+
+    Important Note
+    When you keep getting "Nothing happens" as feedback, use admissible_commands tool commands to see why, because it's very likely your action/command is wrong!"""
+
+    # Create ReactAgent with ALFWorld tools
+    react_agent = ReactAgent(
+        "Qwen/Qwen2.5-7B-Instruct",
+        tools=tools,
+        reward_fn=alfworld_episode_reward,
+        template="qwen-chat",
+        task_info=task_info,
+        backend="async_vllm",
+        debug=True
+    )
+
+Agent Execution Example
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    # Prepare messages for the agent
+    question = "Solve the task generated by the environment."
+    messages = [
+        {
+            "messages": [
+                {"role": "user", "content": f"{question}"}
+            ],
+            "question": f"{question}",
+        },
+    ]
+
+    # Run agent with multiple trajectories
+    await react_agent.run_async(
+        max_steps=12,
+        start_messages=messages,
+        num_chains=4  # Generate 4 trajectories for the question
+    )
+
+Tool Schema Examples
+-------------------
+
+The tools provide structured function schemas for LLM integration:
+
+alfworld_step Schema
+~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    {
+        'function': {
+            'description': 'Take an action in the ALFWorld environment and return the observation',
+            'name': 'alfworld_step',
+            'parameters': {
+                'properties': {'action': {'type': 'string'}},
+                'required': ['action'],
+                'type': 'object'
+            }
+        },
+        'type': 'function'
+    }
+
+alfworld_get_admissible_commands Schema
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    {
+        'function': {
+            'description': 'Get the list of admissible commands for the current state in ALFWorld',
+            'name': 'alfworld_get_admissible_commands',
+            'parameters': {
+                'properties': {},
+                'required': [],
+                'type': 'object'
+            }
+        },
+        'type': 'function'
+    }
+
+alfworld_get_task_objective Schema
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    {
+        'function': {
+            'description': 'Get the current task objective/goal from the ALFWorld environment',
+            'name': 'alfworld_get_task_objective',
+            'parameters': {
+                'properties': {},
+                'required': [],
+                'type': 'object'
+            }
+        },
+        'type': 'function'
+    }
+
+Simple Direct Usage
+-------------------
+
+Basic Tool Calls
+~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    # Simple direct tool usage
+    result = await alfworld_step(action="look")
+    print(result["observation"])
+    
+    # Get available commands
+    commands = await alfworld_get_admissible_commands()
+    print(commands)
+    
+    # Get task objective  
+    objective = await alfworld_get_task_objective()
+    print(objective)
+
+Tool Configuration
+-----------------
+
+Pool Sizes and Statefulness
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* **alfworld_step**: Pool size 8, stateless - For frequent action execution
+* **alfworld_reset**: Pool size 32, stateful - For episode initialization  
+* **alfworld_get_admissible_commands**: Pool size 8, stateless - For state queries
+* **alfworld_get_task_objective**: Pool size 8, stateless - For task information 
