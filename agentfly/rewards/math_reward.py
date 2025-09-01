@@ -459,8 +459,8 @@ def math_equal_naive(gold_answer, final_answer):
 
 
 @reward(name="math_reward")
-def math_reward(prediction: str, golden_answer: str, **kwargs) -> float:
-    if symbolic_math_equal(prediction, golden_answer):
+def math_reward(prediction: str, answer: str, **kwargs) -> float:
+    if symbolic_math_equal(prediction, answer):
         return 1.0
     else:
         return 0.0
