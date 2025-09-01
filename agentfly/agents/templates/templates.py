@@ -399,6 +399,9 @@ class Template:
                     text += item["text"]
                 elif item["type"] == "image":
                     text += self.vision_start + self.image_token + self.vision_end
+                # This is for openai format, since chat completion API only supports image_url
+                elif item["type"] == "image_url":
+                    text += self.vision_start + self.image_token + self.vision_end
                 else:
                     raise ValueError(f"Invalid message type: {item['type']}")
         tool_message = self.tool_template.format(observation=text)
@@ -837,6 +840,8 @@ class Template:
             "{% set ns.txt = ns.txt + item['text'] %}",
             "{% elif item['type'] == 'image' %}",
             "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% elif item['type'] == 'image_url' %}",
+            "{% set ns.txt = ns.txt + _img_tok %}",
             "{% elif item['type'] == 'video' %}",
             "{% set ns.txt = ns.txt + _vid_tok %}",
             "{% endif %}",
@@ -863,7 +868,17 @@ class Template:
             "{% if m['content'] is string %}",
             "{{ _t_pref }}{{ m['content'] }}{{ _t_suff }}",
             "{% else %}",
-            "{{ _t_pref }}{{ m['content'][0]['text'] }}{{ _t_suff }}",
+            "{% set ns = namespace(txt='') %}",
+            "{% for item in m['content'] %}",
+            "{% if item['type'] == 'text' %}",
+            "{% set ns.txt = ns.txt + item['text'] %}",
+            "{% elif item['type'] == 'image' %}",
+            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% elif item['type'] == 'image_url' %}",
+            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% endif %}",
+            "{% endfor %}",
+            "{{ _t_pref }}{{ ns.txt }}{{ _t_suff }}",
             "{% endif %}",
             "{% endif %}",
             "{% endif %}",

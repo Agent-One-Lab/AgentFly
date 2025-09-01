@@ -27,6 +27,7 @@ import PIL
 
 
 LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.DEBUG)
 
 try:
     from verl.protocol import DataProto
@@ -527,10 +528,10 @@ class ClientBackend(LLMBackend):
 
         LOGGER.debug(f"[ClientBackend] messages: {messages}")
 
-        # with open(f"{AGENT_DATA_DIR}/debug/messages_{len(messages)}.json", "w") as f:
-        #     json.dump(messages, f, indent=4)
-        # with open(f"{AGENT_DATA_DIR}/debug/args.json", 'w') as f:
-        #     json.dump(kwargs, f, indent=4)
+        with open(f"{AGENT_DATA_DIR}/debug/messages_{len(messages)}.json", "w") as f:
+            json.dump(messages, f, indent=4)
+        with open(f"{AGENT_DATA_DIR}/debug/args.json", 'w') as f:
+            json.dump(kwargs, f, indent=4)
 
         resp = self.client.chat.completions.create(
             model=self.model_name,
@@ -593,13 +594,10 @@ class ClientBackend(LLMBackend):
                 new_content = []
                 for item in message["content"]:
                     if item["type"] in ["image"]:
-                        if is_openai_model:
-                            # OpenAI chat completion API only supports image_url
-                            # And we keep all images to be base64 for compatibility
-                            image = image_to_data_uri(item["image"])
-                            new_content.append({"type": "image_url", "image_url": {"url": image}})
-                        else:
-                            new_content.append(item)
+                        # OpenAI chat completion API only supports image_url
+                        # And we keep all images to be base64 for compatibility
+                        image = image_to_data_uri(item["image"])
+                        new_content.append({"type": "image_url", "image_url": {"url": image}})
                     else:
                         new_content.append(item)
                 message["content"] = new_content
