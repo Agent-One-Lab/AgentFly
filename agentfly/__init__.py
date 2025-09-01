@@ -29,4 +29,9 @@ AGENT_CONFIG_DIR = os.getenv("AGENT_CONFIG_DIR", AGENT_CONFIG_DIR)
 
 ENROOT_HOME = os.getenv("ENROOT_HOME", ENROOT_HOME)
 
-os.environ["VLLM_CONFIGURE_LOGGING"] = "0"
+if os.getenv("ENROOT_DEBUG", "0") == "1":
+    ENROOT_DEBUG = True
+else:
+    ENROOT_DEBUG = False
+
+os.environ["VLLM_CONFIGURE_LOGGING"] = "1"

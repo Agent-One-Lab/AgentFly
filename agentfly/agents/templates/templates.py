@@ -8,7 +8,7 @@ import warnings
 import logging
 import torch
 from transformers import PreTrainedTokenizer
-from .preprocess import open_image_from_any
+from ...utils.vision import open_image_from_any
 from .vision_processor import is_vision_template
 import re
 from typing import Protocol
@@ -391,8 +391,19 @@ class Template:
         if isinstance(content, str):
             text = content
         else:
-            assert len(content) == 1, "Tool message must be a single message"
-            text = content[0]["text"]
+            # assert len(content) == 1, "Tool message must be a single message"
+            # text = content[0]["text"]
+            text = ""
+            for item in content:
+                if item["type"] == "text":
+                    text += item["text"]
+                elif item["type"] == "image":
+                    text += self.vision_start + self.image_token + self.vision_end
+                # This is for openai format, since chat completion API only supports image_url
+                elif item["type"] == "image_url":
+                    text += self.vision_start + self.image_token + self.vision_end
+                else:
+                    raise ValueError(f"Invalid message type: {item['type']}")
         tool_message = self.tool_template.format(observation=text)
         return tool_message
     
@@ -829,6 +840,8 @@ class Template:
             "{% set ns.txt = ns.txt + item['text'] %}",
             "{% elif item['type'] == 'image' %}",
             "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% elif item['type'] == 'image_url' %}",
+            "{% set ns.txt = ns.txt + _img_tok %}",
             "{% elif item['type'] == 'video' %}",
             "{% set ns.txt = ns.txt + _vid_tok %}",
             "{% endif %}",
@@ -855,7 +868,17 @@ class Template:
             "{% if m['content'] is string %}",
             "{{ _t_pref }}{{ m['content'] }}{{ _t_suff }}",
             "{% else %}",
-            "{{ _t_pref }}{{ m['content'][0]['text'] }}{{ _t_suff }}",
+            "{% set ns = namespace(txt='') %}",
+            "{% for item in m['content'] %}",
+            "{% if item['type'] == 'text' %}",
+            "{% set ns.txt = ns.txt + item['text'] %}",
+            "{% elif item['type'] == 'image' %}",
+            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% elif item['type'] == 'image_url' %}",
+            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% endif %}",
+            "{% endfor %}",
+            "{{ _t_pref }}{{ ns.txt }}{{ _t_suff }}",
             "{% endif %}",
             "{% endif %}",
             "{% endif %}",
@@ -949,9 +972,11 @@ class Chat:
             for item in message['content']:
                 if item['type'] == 'text':
                     continue
-                else:
-                    # Not sure what to do with other types of content
+                elif item['type'] in ["image", "image_url"]:
                     pass
+                else:
+                    raise ValueError(f"Invalid message type: {item['type']}")
+                
 
     def convert_to_hf_format_messages(self, messages: Union[List[Dict], Dict[str, List[Dict]]]) -> List[Dict]:
         hf_messages = []
@@ -1029,6 +1054,23 @@ register_template(
         name="qwen2.5-vl",
         system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
         system_message="You are a helpful assistant.",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",
+        vision_start="<|vision_start|>",
+        vision_end="<|vision_end|>",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        stop_words=["<|im_end|>"],
+    )
+)
+
+register_template(
+    Template(
+        name="qwen2.5-vl-system-tool",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        system_message="You are a helpful assistant.",
+        system_template_with_tools="""<|im_start|>system\n{system_message}\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",

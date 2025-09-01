@@ -86,7 +86,7 @@ async def test_env_full_shopping_flow():
     assert 'observation' in observation
     assert 'reward' in observation
     
-    await env.close()
+    await env.aclose()
 
 # @pytest.mark.asyncio
 # async def test_pagination_navigation():

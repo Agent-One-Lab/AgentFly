@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
+import inspect
 import json
+from ..tools.tool_base import Tool
 from .utils.messages import MessagesList
 from .templates.templates import get_template
 from ..__init__ import AGENT_DATA_DIR
@@ -10,6 +12,7 @@ from .llm_backends import (
     ClientBackend,
     TransformersBackend,
 )
+from termcolor import colored
 from .llm_backends.backend_configs import BACKEND_CONFIGS
 from ..utils.logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -75,6 +78,15 @@ class BaseAgent(ChainRollout, ABC):
         self.template = template
         self.max_length = max_length
         self.tools = tools
+        
+        tool_methods = []
+        for name, method in inspect.getmembers(self):
+            if isinstance(method, Tool):
+                tool_methods.append(method)
+        for tool_method in tool_methods:
+            if hasattr(tool_method, 'is_method') and tool_method.is_method:
+                tool_method.instance = self
+        
         self.tool_names = [tool.name for tool in tools]
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
@@ -117,6 +129,7 @@ class BaseAgent(ChainRollout, ABC):
             warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
     
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
+        assert not (self.template and backend == "client"), "For client backend, we do not support template. Set the template when deploying the model."
         if isinstance(model_name_or_path, str):
             # Extract backend-specific configuration
             config_kwargs = {}
@@ -225,24 +238,24 @@ class BaseAgent(ChainRollout, ABC):
         """
         return await self.llm_engine.generate_async(messages_list_or_inputs, **args)
     
-    async def generate_streaming(self, messages_list_or_inputs: List[List[Dict]], streaming_callback=None, **args):
+    async def generate_streaming(self, messages_list_or_inputs: List[List[Dict]], **kwargs):
+        Logger.debug(f"[BaseAgent] generate_streaming kwargs: {kwargs}")
         """
         Generate responses with streaming support. This method yields response chunks as they are generated.
 
         Args:
             messages_list_or_inputs: List of messages to generate responses for.
-            streaming_callback: Optional callback function for streaming chunks.
             **args: Additional arguments for generation.
 
         Yields:
             str: Response chunks as they are generated.
         """
         if hasattr(self.llm_engine, 'generate_streaming'):
-            async for chunk in self.llm_engine.generate_streaming(messages_list_or_inputs, streaming_callback=streaming_callback, **args):
+            async for chunk in self.llm_engine.generate_streaming(messages_list_or_inputs, **kwargs):
                 yield chunk
         else:
             # Fallback to non-streaming generation
-            responses = await self.generate_async(messages_list_or_inputs, **args)
+            responses = await self.generate_async(messages_list_or_inputs, **kwargs)
             for response in responses:
                 yield response
 
@@ -256,7 +269,7 @@ class BaseAgent(ChainRollout, ABC):
 
         return trajectories
 
-    def tokenize_trajectories(self, tokenizer = None, return_reward_mask: bool = False, concatenate_mm_inputs: bool = True):
+    def tokenize_trajectories(self, template = None, tokenizer = None, return_reward_mask: bool = False, concatenate_mm_inputs: bool = True):
         if tokenizer is None:
             tokenizer = self.tokenizer
             
@@ -289,7 +302,7 @@ class BaseAgent(ChainRollout, ABC):
         inputs = tokenize_conversations(
             messages_list,
             tokenizer=tokenizer,
-            template=self.template,
+            template=template or self.template,
             processor=self.processor,
             max_length=self.max_length,
             return_reward_mask=return_reward_mask,
@@ -371,8 +384,25 @@ class BaseAgent(ChainRollout, ABC):
                 reward_values.append(reward_value_or_dict)
 
         return reward_values, other_values
-    
 
+    def print_messages(self, index: int = 0):
+        messages = self.get_messages()
+        for message in messages[index]["messages"]:
+            role = message["role"]
+            text = f"{role}: "
+            content = message["content"]
+            if isinstance(content, str):
+                text += content
+            elif isinstance(content, list):
+                for item in content: 
+                    if item["type"] == "text":
+                        text += item["text"]
+                    elif item["type"] == "image":
+                        text += colored("ImagePlaceholder", "red")
+            else:
+                raise ValueError(f"Invalid content type: {type(content)}")
+            print(text)
+    
     def get_verl_data_proto(self):
         inputs, other_info_list = self.tokenize_trajectories(return_reward_mask=True, concatenate_mm_inputs=False)
         group_ids = np.array([info["group_id"] for info in other_info_list], dtype=object)

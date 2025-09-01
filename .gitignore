@@ -54,6 +54,7 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+agents/temp/
 nosetests.xml
 coverage.xml
 *,cover
@@ -130,13 +131,15 @@ log
 outputs
 *.out
 
-# Notebooks
+# Notebooks, images, and temp files
 agentfly/tests/*.ipynb
 agentfly/tests/*.jpg
 agentfly/tests/*.jpeg
 agentfly/tests/*.png
 agentfly/agents/*.ipynb
 agentfly/temp/
+temp/
+test_outputs/
 agentfly/data/
 *.ipynb
 

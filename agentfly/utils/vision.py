@@ -75,7 +75,19 @@ def image_to_data_uri(img: Union[Image.Image, str, dict], fmt=None) -> str:
         b64 = base64.b64encode(buf.getvalue()).decode()
         return f"data:image/{detected_fmt.lower()};base64,{b64}"
     elif isinstance(img, str):
-        return img
+        # Check if it's a URL
+        parsed = urlparse(img)
+        if parsed.scheme in {"http", "https"}:
+            # Fetch the image from URL
+            resp = requests.get(img, timeout=10)
+            resp.raise_for_status()
+            img_bytes = resp.content
+            # Detect format from magic bytes
+            detected_fmt = fmt or detect_image_format_from_bytes(img_bytes)
+            return f"data:image/{detected_fmt.lower()};base64,{base64.b64encode(img_bytes).decode('utf-8')}"
+        else:
+            # Not a URL, return as is (could be a file path or base64 string)
+            return img
     elif isinstance(img, bytes):
         # Try to detect format from magic bytes
         detected_fmt = fmt or detect_image_format_from_bytes(img)
