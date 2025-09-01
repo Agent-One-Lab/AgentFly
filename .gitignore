@@ -137,6 +137,8 @@ agentfly/tests/*.jpeg
 agentfly/tests/*.png
 agentfly/agents/*.ipynb
 agentfly/temp/
+temp/
+test_outputs/
 agentfly/data/
 *.ipynb
 
