@@ -235,6 +235,11 @@ pytest agentfly/tests/unit/agents/test_image_agent/test_image_agent_backends.py:
 pytest agentfly/tests/unit/agents/test_image_agent/test_image_agent_backends.py::test_image_agent_async_vllm -s
 ```
 
+Run the test_run file
+```
+python -m agentfly.tests.unit.agents.test_image_agent.test_run
+```
+
 ## Advanced Features
 
 ### Custom Tool Parameters
