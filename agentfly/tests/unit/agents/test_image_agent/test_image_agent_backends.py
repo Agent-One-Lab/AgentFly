@@ -1,3 +1,4 @@
+import os
 from .....agents import ImageEditingAgent
 from .....agents.llm_backends import ClientConfig, AsyncVLLMConfig
 import pytest
@@ -34,6 +35,45 @@ async def test_image_agent_client():
     await agent.run(
         messages=messages_list,
         max_turns=4,
+        num_chains=1,
+        enable_streaming=True
+    )
+    agent.print_messages(index=0)
+
+
+@pytest.mark.asyncio
+async def test_image_agent_openai():
+    agent = ImageEditingAgent(
+        model_name_or_path="gpt-5-mini",
+        backend="client",
+        backend_config=ClientConfig(
+            base_url="https://api.openai.com/v1",
+            api_key=os.getenv("OPENAI_API_KEY"),
+        ),
+        streaming="console"
+    )
+    messages_list = [
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "Find what animal is in the image, then inpaint it with a cat."
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+    await agent.run(
+        messages=messages_list,
+        max_turns=5,
         num_chains=1,
         enable_streaming=True
     )

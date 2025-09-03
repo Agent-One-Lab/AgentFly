@@ -143,3 +143,6 @@ test_outputs/
 agentfly/data/
 *.ipynb
 
+
+# Ignore all images in current folder
+/*.jpg

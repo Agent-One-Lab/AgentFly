@@ -31,7 +31,6 @@ from .utils import (
 from ....utils.vision import image_to_data_uri, image_to_pil
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 # Global variables for tools
 _qwen_image_edit_tool = None
@@ -118,7 +117,7 @@ class ImageEditingAgent(BaseAgent):
         **kwargs
     ):
         self._image_database = {}
-        tools = [self.qwen_edit_image_tool]
+        tools = [self.detect_objects_tool, self.inpaint_image_tool, self.auto_inpaint_image_tool]
         super().__init__(
             model_name_or_path=model_name_or_path,
             system_prompt=IMAGE_AGENT_SYSTEM_PROMPT,
@@ -284,8 +283,8 @@ class ImageEditingAgent(BaseAgent):
         guidance_scale: float = 5.5, 
         num_inference_steps: int = 30, 
         strength: float = 0.95, 
-        seed: Optional[int] = None, 
-        negative_prompt: Optional[str] = None
+        seed: int = None, 
+        negative_prompt: str = None
     ) -> str:
         """
         Fill in masked areas of an image using AI generation.
@@ -342,8 +341,8 @@ class ImageEditingAgent(BaseAgent):
         guidance_scale: float = 5.5, 
         num_inference_steps: int = 30, 
         strength: float = 0.95, 
-        seed: Optional[int] = None, 
-        negative_prompt: Optional[str] = None, 
+        seed: int = None, 
+        negative_prompt: str = None, 
         auto_mask_dilate: int = 1, 
         auto_mask_feather: int = 1
     ) -> str:

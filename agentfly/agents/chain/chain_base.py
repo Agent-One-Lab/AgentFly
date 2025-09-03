@@ -20,7 +20,6 @@ from .streaming_observer import ConsoleStreamObserver, StreamingManager, StreamE
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 @dataclass
 class Node:
