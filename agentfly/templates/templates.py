@@ -25,6 +25,7 @@ from .constants import Role
 from .system_policy import Llama32DateProcessor, SystemPolicy
 from .tool_policy import ToolPolicy
 from .constants import ToolPlacement, Role
+from .global_policy import GlobalPolicy
 
 Logger = logging.getLogger(__name__)
 
@@ -36,15 +37,25 @@ if not Logger.handlers:
     console_handler.setFormatter(formatter)
     Logger.addHandler(console_handler)
 
-@dataclasses.dataclass
-class GlobalPolicy:
-    prefix: str = None
-
 
 @dataclasses.dataclass
 class Template:
-    """A class that manages prompt templates and keeps all conversation history."""
-    # Properties
+    """Class that holds all the components of a chat template. Convert messages to string prompts, tokenize messages to token ids, and generate jinja-based chat templates.
+
+    Args:
+        name: The name of this template
+        system_template: The system template component
+        system_template_with_tools: The system template with tool usage component
+        system_message: The default system message
+        stop_words: The stop words where the model stops generating (usually EOS token)
+        tool_template: The tool response template component
+        user_template: The user template component
+        user_template_with_tools: The user template with tool usage component
+        assistant_template: The assistant template component
+        global_policy: The global policy, controls the behavior of the template
+        system_policy: The system message policy, controls the behavior of forming the system message
+        tool_policy: The tool policy for the template, controls the behavior of forming tools.
+    """
     # The name of this template
     name: str
     # The template of the system prompt
@@ -142,10 +153,7 @@ class Template:
             return False
 
     def render(self, messages: List[Dict], tools=None, add_generation_prompt: bool = False) -> str:
-        """Render the template and return
-        1. the final prompt string,
-        2. the list of string *elements* that compose the prompt, and
-        3. the corresponding list of *roles* (used by downstream post-processing).
+        """Render the template.
 
         The heavy lifting is delegated to small, single-purpose helpers so the
         high-level flow is immediately apparent:
@@ -153,6 +161,16 @@ class Template:
             1. _insert_tools              – decide where the tool catalogue lives
             2. _encode_turns              – encode every conversation turn
             3. _maybe_add_generation_prompt – append the generation prefix if requested
+
+        Args:
+            messages: The list of messages
+            tools: The list of tools
+            add_generation_prompt: Whether to add the generation prefix
+
+        Returns:
+            prompt: The final prompt string
+            elements: The list of string *elements* that compose the prompt
+            roles: The corresponding list of *roles* (used by downstream post-processing)
         """
 
         # Step 1 – decide tool placement & clone messages
@@ -173,15 +191,14 @@ class Template:
         """Clone *messages* and compute where (and how) the tool catalogue
         should be injected.
 
-        Returns
-        -------
-        work_messages : List[Dict]
-            A deepcopy of the original *messages* so we never mutate caller data.
-        tools_str : Optional[str]
-            The formatted tool catalogue or *None* if `tools` is falsy.
-        insert_tools_idx : int
-            Index of the *user* message that receives the catalogue, or -1 when
-            no injection is required.
+        Returns:
+            work_messages : List[Dict]
+                A deepcopy of the original *messages* so we never mutate caller data.
+            tools_str : Optional[str]
+                The formatted tool catalogue or *None* if `tools` is falsy.
+            insert_tools_idx : int
+                Index of the *user* message that receives the catalogue, or -1 when
+                no injection is required.
         """
 
         work_messages = deepcopy(messages)
@@ -418,6 +435,19 @@ class Template:
 
 
     def encode(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None) -> str:
+        """Encode the messages to token ids.
+
+        Args:
+            messages: The list of messages
+            tokenizer: The tokenizer
+            return_tensors: The return tensors
+            tools: The list of tools
+            add_generation_prompt: Whether to add the generation prefix
+            processor: The processor for vision templates
+        
+        Returns:
+            inputs: The dictionary of input ids, attention mask, labels, and action mask
+        """
         if processor is None and self.supports_vision():
             raise ValueError(f"Processor is required for vision templates: {self.name}")
         
@@ -587,6 +617,11 @@ class Template:
         return vision_inputs
 
     def jinja_template(self) -> str:
+        """Interface for getting the Jinja template.
+
+        Returns:
+            The Jinja template string
+        """
         if self.chat_template:
             return self.chat_template
         else:
@@ -926,6 +961,13 @@ class Template:
 
 class Chat:
     def __init__(self, template: str, messages: List[List[str]]=None, tools=None, tokenizer: PreTrainedTokenizer = None):
+        """
+        Args:
+            template: The name of the template to use.
+            messages: The messages to use for the chat.
+            tools: The tools to use for the chat.
+            tokenizer: The tokenizer to use for the chat.
+        """
         self.template = get_template(template)
         self.messages = self.convert_to_hf_format_messages(messages)
         self.tokenizer = tokenizer
@@ -967,9 +1009,19 @@ class Chat:
         return hf_messages
 
     def set_messages(self, messages: List[Dict]):
+        """Set the messages for the chat."""
         self.messages = self.convert_to_hf_format_messages(messages)
 
     def prompt(self, add_generation_prompt=False, tools=None) -> str:
+        """Get the prompt for the chat.
+
+        Args:
+            add_generation_prompt: Whether to add the generation prompt.
+            tools: The tools to use for the chat.
+
+        Returns:
+            The prompt for the chat.
+        """
         self.flags['add_generation_prompt'] = add_generation_prompt
         prompt, _, _ = self.template.render(messages=self.messages, tools=tools, add_generation_prompt=add_generation_prompt)
         return prompt
@@ -982,13 +1034,29 @@ class Chat:
         return self.template.get_vision_inputs(self.messages)
 
     def tokenize(self, tokenizer: PreTrainedTokenizer = None, add_generation_prompt=False, tools=None, processor=None) -> List[int]:
+        """Tokenize the messages.
+
+        Args:
+            tokenizer: The tokenizer to use for the chat.
+            add_generation_prompt: Whether to add the generation prompt.
+            tools: The tools to use for the chat.
+            processor: The processor to use for the chat.
+        
+        Returns:
+            The tokenized messages, a dictionary with the following items:
+            - input_ids
+            - attention_mask
+            - labels
+            - action_mask
+            - multi_modal_inputs
+        """
         if tokenizer is None:
             tokenizer = self.tokenizer
         if tools is None:
             tools = self.tools
         return self.template.encode(messages=self.messages, tokenizer=tokenizer, return_tensors="pt", tools=tools, add_generation_prompt=add_generation_prompt, processor=processor)
 
-    def append(self, message: Union[Dict, List[Dict]]):
+    def append(self, message: Union[Dict]):
         self._convert_single_message_to_hf_format(message)
         self.messages.append(message)
 

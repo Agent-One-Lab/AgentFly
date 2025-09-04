@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 import json
 from .utils.messages import MessagesList
-from .templates.templates import get_template
+from ..templates.templates import get_template
 from ..__init__ import AGENT_DATA_DIR
 from .llm_backends import (
     AsyncVLLMBackend,
@@ -15,8 +15,7 @@ from ..utils.logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
-from .templates.utils import tokenize_conversations
-from .templates.vision_processor import is_vision_template
+from ..templates import tokenize_conversations
 from .chain.chain_base import ChainRollout
 import os
 import transformers

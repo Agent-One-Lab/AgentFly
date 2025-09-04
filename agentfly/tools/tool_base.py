@@ -13,6 +13,10 @@ from . import TOOL_REGISTRY, TOOL_FACTORY
 import concurrent.futures
 from ..envs.manager.env_manager import EnvironmentManager
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # current_env = contextvars.ContextVar("current_env")
 
 class Tool:
@@ -271,7 +275,8 @@ def tool(
         func_name = func.__name__
         final_name = name or func_name
         if name and name != func_name:
-            warnings.warn(f"Tool name {func_name!r} overridden by {name!r}")
+            logger.warning(f"Tool name {func_name!r} overridden by {name!r}")
+            # warnings.warn(f"Tool name {func_name!r} overridden by {name!r}")
 
         signature  = extract_signatures(func)
         docs       = parse_docstring(inspect.getdoc(func))

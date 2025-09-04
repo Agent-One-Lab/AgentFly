@@ -8,16 +8,18 @@ The Chat Template System is designed to be highly extensible, allowing you to cr
 
 ### Core Template Fields
 
+
+
 ```python
 from agentfly.agents.templates import Template
 
 template = Template(
     name="my-custom-template",           # Unique identifier
-    system_template="{system_message}",  # System message format
-    system_message="Default system message",
-    user_template="{content}",           # User message format
-    assistant_template="{content}",      # Assistant message format
-    tool_template="{observation}",       # Tool response format
+    system_template="System: {system_message}",  # System message format
+    system_message="You are a helpful assistant.", # Default system message
+    user_template="User: {content}",           # User message format
+    assistant_template="Assistant: {content}</s>",      # Assistant message format
+    tool_template="Tool: {observation}",       # Tool response format
     stop_words=["</s>"]                 # Stop generation tokens
 )
 ```
