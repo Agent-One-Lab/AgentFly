@@ -7,7 +7,7 @@ Finally, we are ready to train the agent.
 
 ----------------
 
-We shw an example of training on GSM8K dataset. First, prepare your training and validation datasets in JSON format. The datasets should follow this structure:
+We show an example of training on GSM8K dataset. First, prepare your training and validation datasets in JSON format. The datasets should follow this structure:
 
 ```
 
@@ -23,7 +23,8 @@ We shw an example of training on GSM8K dataset. First, prepare your training and
     ...
 ]
 ```
-"question" filed is used to put task queries, and will be used to form input messages. While other fileds, in our case, "answer" will be given to the reward function.
+
+We use `question` filed to put task queries, and these "questions" will be used to form input messages. While other fileds, in our case, "answer" will be given to the reward function.
 
 **2. Create Training Script**
 
