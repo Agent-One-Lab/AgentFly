@@ -6,8 +6,8 @@ import asyncio
 from ...tools import answer_qa
 from ...tools.tool_base import tool
 from ..agent_base import BaseAgent
-from ..llm_backend import ClientBackend
-from ..backend_config import ClientConfig
+from ..llm_backends import ClientBackend
+from ..llm_backends.backend_configs import ClientConfig
 from tenacity import retry, wait_random_exponential, stop_after_attempt
 from termcolor import colored
 import json

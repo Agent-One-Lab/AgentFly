@@ -9,7 +9,7 @@ Overview
 
 AgentFly provides a comprehensive agent system with a base class and specialized implementations for different use cases. All agents inherit from :py:class:`BaseAgent` and support tool calling, chain rollout, and various backends.
 
-Base Agent
+Structure
 ==========
 
 .. toctree::
@@ -17,97 +17,8 @@ Base Agent
 
    agent
    llm_backends
+   rollout
 
-Core Classes
-===========
-
-BaseAgent
----------
-
-The foundation class for all agents in AgentFly:
-
-.. autoclass:: agentfly.agents.agent_base.BaseAgent
-   :members:
-   :show-inheritance:
-   :special-members: __init__
-
-AutoAgent
----------
-
-Factory class for automatic agent creation:
-
-.. autoclass:: agentfly.agents.auto.AutoAgent
-   :members:
-   :show-inheritance:
-
-Specialized Agents
-==================
-
-ReactAgent
-----------
-
-ReAct-style agent for reasoning and tool use:
-
-.. autoclass:: agentfly.agents.react.react_agent.ReactAgent
-   :members:
-   :show-inheritance:
-
-CodeAgent
----------
-
-Specialized agent for code generation and execution:
-
-.. autoclass:: agentfly.agents.specialized.code_agent.CodeAgent
-   :members:
-   :show-inheritance:
-
-ThinkAgent
-----------
-
-Agent that uses thinking steps before taking actions:
-
-.. autoclass:: agentfly.agents.specialized.think_agent.ThinkAgent
-   :members:
-   :show-inheritance:
-
-GUIAgent
----------
-
-Agent for GUI automation tasks:
-
-.. autoclass:: agentfly.agents.specialized.gui_agent.GUIAgent
-   :members:
-   :show-inheritance:
-
-HFAgent
---------
-
-Hugging Face model-based agent:
-
-.. autoclass:: agentfly.agents.specialized.hf_agent.HFAgent
-   :members:
-   :show-inheritance:
-
-OpenAIAgent
------------
-
-OpenAI API-based agent:
-
-.. autoclass:: agentfly.agents.specialized.openai_agent.OpenAIAgent
-   :members:
-   :show-inheritance:
-
-Chain Generation
-===============
-
-ChainRollout
-------------
-
-Base class for chain-based generation:
-
-.. autoclass:: agentfly.agents.chain.chain_base.ChainRollout
-   :members:
-   :show-inheritance:
 
 Usage Examples
 =============

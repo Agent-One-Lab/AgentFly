@@ -1,27 +1,19 @@
 LLM Backends
-============
+============================
 
 Overview
---------
+-----------------------------
 
 AgentFly supports multiple LLM backends for text generation, each with their own configuration options.
-This module provides configuration classes for different backend types including Transformers, vLLM, Verl, and OpenAI-compatible clients.
+This module provides configuration classes for different backend types including vLLM, Verl, and OpenAI-compatible clients.
+Among them, Verl backend is designed for internal training usage. The Verl backend is the core design that **decouples agent system and rl training**.
 
 Configuration Classes
---------------------
-
-Transformers Backend
-~~~~~~~~~~~~~~~~~~~
-
-Configuration for the Transformers backend using Hugging Face models:
-
-.. autoclass:: agentfly.agents.llm_backends.backend_configs.TransformersConfig
-   :show-inheritance:
-   :special-members: !__init__
+-----------------------------
 
 
 Async VLLM Backend
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configuration for asynchronous vLLM backend with engine arguments:
 
@@ -31,7 +23,7 @@ Configuration for asynchronous vLLM backend with engine arguments:
 
 
 Async Verl Backend
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configuration for asynchronous Verl backend:
 
@@ -40,7 +32,7 @@ Configuration for asynchronous Verl backend:
    :special-members: !__init__
 
 Client Backend
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configuration for OpenAI-compatible client backends:
 
@@ -49,10 +41,10 @@ Configuration for OpenAI-compatible client backends:
    :special-members: !__init__
 
 Backend Implementations
-----------------------
+------------------------------
 
 Base Backend
-~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Abstract base class for all LLM backends:
 
@@ -60,26 +52,9 @@ Abstract base class for all LLM backends:
    :members:
    :show-inheritance:
 
-Transformers Backend
-~~~~~~~~~~~~~~~~~~~
-
-HuggingFace Transformers implementation for local model inference:
-
-.. autoclass:: agentfly.agents.llm_backends.llm_backends.TransformersBackend
-   :members:
-   :show-inheritance:
-
-VLLM Backend
-~~~~~~~~~~~~
-
-vLLM implementation for high-performance model inference:
-
-.. autoclass:: agentfly.agents.llm_backends.llm_backends.VLLMBackend
-   :members:
-   :show-inheritance:
 
 Async VLLM Backend
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Asynchronous vLLM implementation for high-performance model inference:
 
@@ -97,7 +72,7 @@ Asynchronous Verl implementation for distributed model inference:
    :show-inheritance:
 
 Client Backend
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 OpenAI-compatible client backend for remote API inference:
 
@@ -107,13 +82,13 @@ OpenAI-compatible client backend for remote API inference:
 
 
 Usage Examples
---------------
+------------------------------
 
 Backends are designed to work together with agents. Here are examples showing how to configure different backends when creating agents:
 
 
 Async VLLM Backend
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
