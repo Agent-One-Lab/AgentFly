@@ -11,17 +11,45 @@ The Chat Template System is designed to be highly extensible, allowing you to cr
 
 
 ```python
-from agentfly.agents.templates import Template
+from agentfly.templates import Template, register_template, Chat
 
-template = Template(
-    name="my-custom-template",           # Unique identifier
-    system_template="System: {system_message}",  # System message format
-    system_message="You are a helpful assistant.", # Default system message
-    user_template="User: {content}",           # User message format
-    assistant_template="Assistant: {content}</s>",      # Assistant message format
-    tool_template="Tool: {observation}",       # Tool response format
-    stop_words=["</s>"]                 # Stop generation tokens
+register_template(
+    Template(
+        name="my-custom-template",           # Unique identifier
+        system_template="System: {system_message}",  # System message format
+        system_message="You are a helpful assistant.", # Default system message
+        user_template="User: {content}",           # User message format
+        assistant_template="Assistant: {content}</s>",      # Assistant message format
+        tool_template="Tool: {observation}",       # Tool response format
+        stop_words=["</s>"]                 # Stop generation tokens
+    )
 )
+
+messages = [
+    {"role": "user", "content": "What is the capital of France?"},
+    {"role": "assistant", "content": "The capital of France is Paris."},
+    {"role": "user", "content": "Tell me more about Paris."}
+]
+
+tools = [
+    {
+        "function": {
+            "name": "get_weather",
+            "description": "Get weather information for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "City name"}
+                },
+                "required": ["city"]
+            }
+        }
+    }
+]
+
+chat = Chat(template="my-custom-template", messages=messages, tools=tools)
+prompt = chat.prompt()
+print(prompt)
 ```
 
 ### Advanced Template Fields
@@ -32,7 +60,6 @@ template = Template(
     
     # Tool support
     system_template_with_tools="System: {system_message}\n\nTools: {tools}",
-    user_template_with_tools="User: {content}\n\nAvailable tools: {tools}",
     
     # Vision support
     vision_start="<vision>",
@@ -50,73 +77,139 @@ template = Template(
 ### 1. Simple Chat Template
 
 ```python
-simple_template = Template(
-    name="simple-chat",
-    system_template="You are a helpful assistant.\n",
-    system_message="You are a helpful assistant.",
-    user_template="User: {content}\n",
-    assistant_template="Assistant: {content}\n",
-    stop_words=["\n"]
+register_template(
+    Template(
+        name="simple-chat",
+        system_template="You are a helpful assistant.\n",
+        system_message="You are a helpful assistant.",
+        user_template="User: {content}\n",
+        assistant_template="Assistant: {content}\n",
+        stop_words=["\n"]
+    )
 )
+chat = Chat(template="simple-chat", messages=messages, tools=tools)
+print(chat.prompt())
 ```
 
 ### 2. XML-Style Template
 
 ```python
-xml_template = Template(
-    name="xml-style",
-    system_template="<system>{system_message}</system>\n",
-    system_message="You are an AI assistant.",
-    user_template="<user>{content}</user>\n",
-    assistant_template="<assistant>{content}</assistant>\n",
-    stop_words=["</assistant>"]
+register_template(
+    Template(
+        name="xml-style",
+        system_template="<system>{system_message}</system>\n",
+        system_message="You are an AI assistant.",
+        user_template="<user>{content}</user>\n",
+        assistant_template="<assistant>{content}</assistant>\n",
+        stop_words=["</assistant>"]
+    )
 )
+chat = Chat(template="xml-style", messages=messages, tools=tools)
+print(chat.prompt())
 ```
 
 ### 3. Markdown-Style Template
 
 ```python
-markdown_template = Template(
-    name="markdown-style",
-    system_template="# System\n{system_message}\n\n",
-    system_message="You are a helpful AI assistant.",
-    user_template="## User\n{content}\n\n",
-    assistant_template="## Assistant\n{content}\n\n",
-    stop_words=["\n\n"]
+register_template(
+    Template(
+        name="markdown-style",
+        system_template="# System\n{system_message}\n\n",
+        system_message="You are a helpful AI assistant.",
+        user_template="## User\n{content}\n\n",
+        assistant_template="## Assistant\n{content}\n\n",
+        stop_words=["\n\n"]
+    )
 )
+chat = Chat(template="markdown-style", messages=messages, tools=tools)
+print(chat.prompt())
 ```
 
 ### 4. Tool-Enabled Template
 
 ```python
-tool_template = Template(
-    name="tool-enabled",
-    system_template="System: {system_message}\n",
-    system_template_with_tools="System: {system_message}\n\nAvailable Tools:\n{tools}\n",
-    system_message="You are an AI assistant with access to tools.",
-    user_template="User: {content}\n",
-    user_template_with_tools="User: {content}\n\nTools: {tools}\n",
-    assistant_template="Assistant: {content}\n",
-    tool_template="Tool Response: {observation}\n",
-    stop_words=["\n"]
+register_template(
+    Template(
+        name="tool-enabled",
+        system_template="System: {system_message}\n",
+        system_template_with_tools="System: {system_message}\n\nAvailable Tools:\n{tools}\n",
+        system_message="You are an AI assistant with access to tools.",
+        user_template="User: {content}\n",
+        user_template_with_tools="User: {content}\n\nTools: {tools}\n",
+        assistant_template="Assistant: {content}\n",
+        tool_template="Tool Response: {observation}\n",
+        stop_words=["\n"]
+    )
 )
+messages = [
+    {"role": "user", "content": "Find me the weather of Paris"},
+    {"role": "assistant", "content": "Tool: get_weather Arguments: {'city': 'Paris'}"},
+    {"role": "Tool", "content": "24 degrees, raining."}
+]
+tools = [
+    {
+        "function": {
+            "name": "get_weather",
+            "description": "Get weather information for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "City name"}
+                },
+                "required": ["city"]
+            }
+        }
+    }
+]
+chat = Chat(template="tool-enabled", messages=messages, tools=tools)
+print(chat.prompt())
 ```
 
 ### 5. Vision-Enabled Template
 
 ```python
-vision_template = Template(
-    name="vision-enabled",
-    system_template="You are a vision-capable AI assistant.\n",
-    system_message="You are a vision-capable AI assistant.",
-    user_template="User: {content}\n",
-    assistant_template="Assistant: {content}\n",
-    vision_start="<vision>",
-    vision_end="</vision>",
-    image_token="<image>",
-    video_token="<video>",
-    stop_words=["\n"]
+register_template(
+    Template(
+        name="vision-enabled",
+        system_template="You are a vision-capable AI assistant.\n",
+        system_message="You are a vision-capable AI assistant.",
+        user_template="User: {content}\n",
+        assistant_template="Assistant: {content}\n",
+        vision_start="<vision>",
+        vision_end="</vision>",
+        image_token="<image>",
+        video_token="<video>",
+        stop_words=["\n"]
+    )
 )
+
+messages =    [
+    {
+        "role": "system",
+        "content": "You are a multi-modal assistant that can answer questions about images.",
+    },
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
+            },
+            {"type": "text", "text": "Describe this image."},
+        ],
+    },
+    {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "text",
+                "text": "The image is a cat.",
+            },
+        ],
+    }
+]
+chat = Chat(template="vision-enabled", messages=messages)
+print(chat.prompt())
 ```
 
 ## Policy Configuration

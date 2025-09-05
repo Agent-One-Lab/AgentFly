@@ -9,7 +9,7 @@ This section provides comprehensive examples of how to use the Chat Template Sys
 ### Example 1: Simple Chat Template
 
 ```python
-from agentfly.agents.templates import Chat, get_template
+from agentfly.templates import Chat, get_template
 
 # Get a pre-built template
 template = get_template("qwen2.5")
@@ -159,9 +159,9 @@ print(f"First 20 action mask: {inputs['action_mask'][0][:20]}")
 ### Example 4: Custom Template Creation
 
 ```python
-from agentfly.agents.templates import Template, register_template
-from agentfly.agents.templates.tool_policy import ToolPolicy, JsonIndentedFormatter
-from agentfly.agents.templates.constants import ToolPlacement
+from agentfly.templates import Template, register_template
+from agentfly.templates.tool_policy import ToolPolicy, JsonIndentedFormatter
+from agentfly.templates.constants import ToolPlacement
 
 # Create a custom coding assistant template
 coding_template = Template(

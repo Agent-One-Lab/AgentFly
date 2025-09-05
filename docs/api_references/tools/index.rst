@@ -4,10 +4,16 @@ Tools
 
 AgentFly provides a comprehensive tool system that enables agents to interact with external systems and APIs. Tools can be stateful (with environment management) or stateless, and support both synchronous and asynchronous execution.
 
+
+Structure
+-------------------------------
+
 .. toctree::
    :maxdepth: 2
 
-    tool
+   tool
+   predefined_tools
+
 
 Basic Tool Definition
 -------------------------------
