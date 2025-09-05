@@ -117,7 +117,7 @@ class ImageEditingAgent(BaseAgent):
         **kwargs
     ):
         self._image_database = {}
-        tools = [self.detect_objects_tool, self.inpaint_image_tool, self.auto_inpaint_image_tool]
+        tools = [self.qwen_edit_image_tool]
         super().__init__(
             model_name_or_path=model_name_or_path,
             system_prompt=IMAGE_AGENT_SYSTEM_PROMPT,

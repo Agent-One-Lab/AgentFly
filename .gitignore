@@ -131,6 +131,10 @@ log
 outputs
 *.out
 
+# Ignore all images in current folder
+/*.jpg
+/*.png
+
 # Notebooks, images, and temp files
 agentfly/tests/*.ipynb
 agentfly/tests/*.jpg
@@ -142,7 +146,3 @@ temp/
 test_outputs/
 agentfly/data/
 *.ipynb
-
-
-# Ignore all images in current folder
-/*.jpg

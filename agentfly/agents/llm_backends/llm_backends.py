@@ -26,7 +26,6 @@ import PIL
 
 
 LOGGER = logging.getLogger(__name__)
-LOGGER.setLevel(logging.DEBUG)
 
 try:
     from verl.protocol import DataProto
@@ -578,8 +577,8 @@ class ClientBackend(LLMBackend):
         for message in messages:
             if is_openai_model:
                 if message['role'] == 'assistant':
-                    if 'tool_calls' in message and len(message['tool_calls']) > 1:
-                        if 'content' in message and message['content'] is None:
+                    if 'tool_calls' in message:
+                        if 'content' in message and message['content'][0]['text'] is None:
                             del message['content']
             else:
                 if "tool_calls" in message:
@@ -589,7 +588,7 @@ class ClientBackend(LLMBackend):
                 if "tool_choice" in message:
                     del message["tool_choice"]
 
-            if isinstance(message["content"], list):
+            if 'content' in message and isinstance(message["content"], list):
                 new_content = []
                 for item in message["content"]:
                     if item["type"] in ["image"]:

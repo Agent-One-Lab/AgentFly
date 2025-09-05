@@ -75,6 +75,10 @@ def image_to_data_uri(img: Union[Image.Image, str, dict], fmt=None) -> str:
         b64 = base64.b64encode(buf.getvalue()).decode()
         return f"data:image/{detected_fmt.lower()};base64,{b64}"
     elif isinstance(img, str):
+        # Check if it's already a data URI
+        if img.startswith("data:image/"):
+            return img
+        
         # Check if it's a URL
         parsed = urlparse(img)
         if parsed.scheme in {"http", "https"}:
@@ -86,8 +90,18 @@ def image_to_data_uri(img: Union[Image.Image, str, dict], fmt=None) -> str:
             detected_fmt = fmt or detect_image_format_from_bytes(img_bytes)
             return f"data:image/{detected_fmt.lower()};base64,{base64.b64encode(img_bytes).decode('utf-8')}"
         else:
-            # Not a URL, return as is (could be a file path or base64 string)
-            return img
+            # Could be a file path or base64 string - use open_image_from_any to handle both
+            try:
+                pil_image = open_image_from_any(img)
+                # Convert PIL image to data URI
+                detected_fmt = pil_image.format or fmt or "PNG"
+                buf = io.BytesIO()
+                pil_image.save(buf, format=detected_fmt)
+                b64 = base64.b64encode(buf.getvalue()).decode()
+                return f"data:image/{detected_fmt.lower()};base64,{b64}"
+            except Exception as e:
+                # If open_image_from_any fails, return as is (might be raw base64)
+                return img
     elif isinstance(img, bytes):
         # Try to detect format from magic bytes
         detected_fmt = fmt or detect_image_format_from_bytes(img)

@@ -3,3 +3,4 @@ from .specialized.code_agent import CodeAgent
 from .specialized.think_agent import ThinkAgent
 from .specialized.gui_agent import GUIAgent
 from .specialized.hf_agent import HFAgent
+from .specialized.image_agent.image_agent import ImageEditingAgent

@@ -8,7 +8,7 @@ import warnings
 import logging
 import torch
 from transformers import PreTrainedTokenizer
-from ...utils.vision import open_image_from_any
+from ..utils.vision import open_image_from_any
 from .vision_processor import is_vision_template
 import re
 from typing import Protocol
