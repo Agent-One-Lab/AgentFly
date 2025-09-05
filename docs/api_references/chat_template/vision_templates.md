@@ -30,46 +30,81 @@ Messages → Template Processing → Vision Processor → LLM-Ready Inputs
 ### Basic Vision Template
 
 ```python
-from agentfly.agents.templates import Template
+from agentfly.templates import Template, register_template
 
-vision_template = Template(
-    name="vision-enabled",
-    system_template="You are a vision-capable AI assistant.\n",
-    system_message="You are a vision-capable AI assistant.",
-    user_template="User: {content}\n",
-    assistant_template="Assistant: {content}\n",
-    
-    # Vision configuration
-    vision_start="<|vision_start|>",
-    vision_end="<|vision_end|>",
-    image_token="<|image_pad|>",
-    video_token="<|video_pad|>",
-    
-    stop_words=["\n"]
+vision_template = register_template(
+    Template(
+        name="vision-enabled",
+        system_template="You are a vision-capable AI assistant.\n",
+        system_message="You are a vision-capable AI assistant.",
+        user_template="User: {content}\n",
+        assistant_template="Assistant: {content}\n",
+        
+        # Vision configuration
+        vision_start="<|vision_start|>",
+        vision_end="<|vision_end|>",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        
+        stop_words=["\n"]
+    )
 )
+
 ```
 
 ### Vision Template with Tools
 
 ```python
-vision_tool_template = Template(
-    name="vision-tool-enabled",
-    system_template="You are a vision-capable AI assistant.\n",
-    system_template_with_tools="You are a vision-capable AI assistant with tools.\n\nTools: {tools}\n",
-    system_message="You are a vision-capable AI assistant with tools.",
-    user_template="User: {content}\n",
-    user_template_with_tools="User: {content}\n\nTools: {tools}\n",
-    assistant_template="Assistant: {content}\n",
-    tool_template="Tool: {observation}\n",
-    
-    # Vision configuration
-    vision_start="<|vision_start|>",
-    vision_end="<|vision_end|>",
-    image_token="<|image_pad|>",
-    video_token="<|video_pad|>",
-    
-    stop_words=["\n"]
+vision_tool_template = register_template(
+    Template(
+        name="vision-tool-enabled",
+        system_template="You are a vision-capable AI assistant.\n",
+        system_template_with_tools="You are a vision-capable AI assistant with tools.\n\nTools: {tools}\n",
+        system_message="You are a vision-capable AI assistant with tools.",
+        user_template="User: {content}\n",
+        user_template_with_tools="User: {content}\n\nTools: {tools}\n",
+        assistant_template="Assistant: {content}\n",
+        tool_template="Tool: {observation}\n",
+        
+        # Vision configuration
+        vision_start="<|vision_start|>",
+        vision_end="<|vision_end|>",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        
+        stop_words=["\n"]
+    )
 )
+```
+
+### Use the template
+```python
+messages =    [
+    {
+        "role": "system",
+        "content": "You are a multi-modal assistant that can answer questions about images.",
+    },
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
+            },
+            {"type": "text", "text": "Describe this image."},
+        ],
+    }
+]
+chat = Chat(template="vision-enabled", messages=messages)
+print(chat.prompt())
+
+# Tokenize the prompt
+from transformers import AutoTokenizer, AutoProcessor
+model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+processor = AutoProcessor.from_pretrained(model_name)
+inputs = chat.tokenize(tokenizer=tokenizer, processor=processor)
+print(inputs.keys())
 ```
 
 ## Vision Processor Configuration
@@ -558,9 +593,9 @@ config = VisionProcessorConfig(
 Here's a complete example of creating and using a vision template:
 
 ```python
-from agentfly.agents.templates import Template, register_template, Chat
-from agentfly.agents.templates.tool_policy import ToolPolicy, JsonFormatter
-from agentfly.agents.templates.constants import ToolPlacement
+from agentfly.templates import Template, register_template, Chat
+from agentfly.templates.tool_policy import ToolPolicy, JsonFormatter
+from agentfly.templates.constants import ToolPlacement
 
 # Create a comprehensive vision template
 vision_template = Template(

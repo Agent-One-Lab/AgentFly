@@ -70,4 +70,6 @@ docs = [
     "myst-parser",
     "sphinx-markdown-tables",
     "sphinx-rtd-theme",
+    "sphinx-book-theme",
+    "sphinx-design",
 ]

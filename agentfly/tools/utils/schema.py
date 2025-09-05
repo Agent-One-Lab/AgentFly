@@ -2,6 +2,9 @@ import re
 import inspect
 import warnings
 from copy import deepcopy
+import logging
+
+logger = logging.getLogger(__name__)
 
 def extract_signatures(func):
     sig = inspect.signature(func)
@@ -151,7 +154,7 @@ def validate_schema(name, description, signature, docs):
         else:
             # May be should raise an error
             properties[param]['type'] = "unknown"
-            warnings.warn(f"Parameter {param} has no type in signature or docstring.")
+            logger.warning(f"Parameter {param} has no type in signature or docstring.")
         
         if "default" in signature[param]:
             properties[param]['default'] = signature[param]['default']

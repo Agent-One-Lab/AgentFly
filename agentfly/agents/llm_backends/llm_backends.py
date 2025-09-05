@@ -20,8 +20,7 @@ from ...utils.vision import image_to_data_uri
 from ...utils.verl import pad_tensor_to_rank_size
 from vllm import LLM, AsyncLLMEngine, SamplingParams, AsyncEngineArgs
 import openai
-from ..templates.templates import Chat
-from ..templates.vision_processor import get_processor
+from ...templates import Chat
 import logging
 import PIL
 

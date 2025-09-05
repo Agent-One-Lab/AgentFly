@@ -11,7 +11,7 @@ The Chat Template System provides advanced features for fine-grained control ove
 The system supports multiple strategies for where and how tools are integrated into prompts:
 
 ```python
-from agentfly.agents.templates.constants import ToolPlacement
+from agentfly.templates.constants import ToolPlacement
 
 # 1. SYSTEM placement - tools appear in system message
 system_placement = ToolPlacement.SYSTEM
@@ -31,7 +31,7 @@ Different strategies for formatting tool definitions:
 #### JSON Formatters
 
 ```python
-from agentfly.agents.templates.tool_policy import (
+from agentfly.templates.tool_policy import (
     JsonFormatter, JsonMinifiedFormatter, JsonIndentedFormatter, JsonCompactFormatter
 )
 
@@ -65,7 +65,7 @@ yaml_formatter = YamlFormatter()
 #### Custom Formatters
 
 ```python
-from agentfly.agents.templates.tool_policy import ToolFormatter
+from agentfly.templates.tool_policy import ToolFormatter
 
 class CustomToolFormatter(ToolFormatter):
     def format(self, tools):
@@ -101,7 +101,7 @@ custom_tool_policy = ToolPolicy(
 Process tool content before formatting:
 
 ```python
-from agentfly.agents.templates.tool_policy import ToolContentProcessor
+from agentfly.templates.tool_policy import ToolContentProcessor
 
 class ToolFilterProcessor(ToolContentProcessor):
     """Filter tools based on certain criteria"""
@@ -139,7 +139,7 @@ filtered_tool_policy = ToolPolicy(
 Fine-grained control over system message behavior:
 
 ```python
-from agentfly.agents.templates.system_policy import SystemPolicy
+from agentfly.templates.system_policy import SystemPolicy
 
 # Basic system policy
 basic_policy = SystemPolicy(
@@ -170,7 +170,7 @@ Transform system messages before rendering:
 #### Built-in Processors
 
 ```python
-from agentfly.agents.templates.system_policy import Llama32DateProcessor
+from agentfly.templates.system_policy import Llama32DateProcessor
 
 # Llama 3.2 date processor (adds current date)
 llama_date_policy = SystemPolicy(
@@ -183,7 +183,7 @@ llama_date_policy = SystemPolicy(
 #### Custom Content Processors
 
 ```python
-from agentfly.agents.templates.system_policy import SystemContentProcessor
+from agentfly.templates.system_policy import SystemContentProcessor
 
 class EnvironmentAwareProcessor(SystemContentProcessor):
     """Add environment information to system messages"""

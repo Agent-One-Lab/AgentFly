@@ -7,9 +7,7 @@ The Chat Template System provides a simple yet powerful interface for creating a
 ## Importing the System
 
 ```python
-from agentfly.agents.templates import Chat, get_template, Template
-from agentfly.agents.templates.tool_policy import ToolPolicy, JsonFormatter
-from agentfly.agents.templates.system_policy import SystemPolicy
+from agentfly.templates import Chat, get_template, Template, ToolPolicy, JsonFormatter, SystemPolicy
 ```
 
 ## Using Pre-built Templates
@@ -27,6 +25,8 @@ The system comes with several pre-built templates:
 - **nemotron**: Nemotron format
 
 ### Basic Template Usage
+
+`Template` is the basic template class, consists of different components and responsible for forming the prompt. While `Chat` is the class we recommand for users to obtain prompts.
 
 ```python
 # Get a pre-built template
@@ -91,12 +91,13 @@ messages_with_image = [
         "role": "user", 
         "content": [
             {"type": "text", "text": "What's in this image?"},
-            {"type": "image", "image": "/path/to/image.jpg"}
+            {"type": "image", "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"}
         ]
     }
 ]
 
 chat = Chat(template="qwen2.5-vl", messages=messages_with_image)
+prompt = chat.prompt()
 ```
 
 ## Template Operations
@@ -116,13 +117,21 @@ prompt_with_tools = chat.prompt(tools=tools)
 
 ### Tokenization
 
+Use `Chat.tokenize` method to tokenize the messages with the specified chat template.
+
 ```python
+from transformers import AutoTokenizer, AutoProcessor
+
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
+processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 # Tokenize the conversation
 inputs = chat.tokenize(
     tokenizer=tokenizer,
     add_generation_prompt=True,
+    processor=processor,
     tools=tools
 )
+print(inputs.keys())
 
 # The result includes:
 # - input_ids: Token IDs
@@ -136,12 +145,6 @@ inputs = chat.tokenize(
 ```python
 # Add a single message
 chat.append({"role": "user", "content": "Another question"})
-
-# Add multiple messages
-chat.append([
-    {"role": "user", "content": "Question 1"},
-    {"role": "assistant", "content": "Answer 1"}
-])
 ```
 
 ## Template Configuration
@@ -269,57 +272,3 @@ tools = [
     "content": "Search results: [results here]"
 }
 ```
-
-## Error Handling
-
-### Common Issues
-
-```python
-try:
-    # Get a template that doesn't exist
-    template = get_template("nonexistent")
-except KeyError as e:
-    print(f"Template not found: {e}")
-
-try:
-    # Create chat with invalid template
-    chat = Chat(template="invalid", messages=messages)
-except KeyError as e:
-    print(f"Invalid template: {e}")
-```
-
-### Validation
-
-```python
-# Check if template supports vision
-if template.supports_vision():
-    print("Template supports vision processing")
-
-# Check if template supports tool calls
-if template._supports_tool_call():
-    print("Template supports tool calls")
-```
-
-## Best Practices
-
-### 1. **Template Naming**
-- Use descriptive names that indicate the model and capabilities
-- Include version information when appropriate
-- Use consistent naming conventions
-
-### 2. **Message Structure**
-- Always use the standard role/content format
-- For multi-modal content, use the list format with type specifications
-- Ensure content types match the template's capabilities
-
-### 3. **Tool Integration**
-- Define tools with clear, descriptive names and parameters
-- Use appropriate tool placement strategies for your use case
-- Test tool integration thoroughly before deployment
-
-### 4. **Vision Processing**
-- Use vision-enabled templates for image/video content
-- Ensure proper image formats and sizes
-- Handle vision token expansion appropriately
-
-This basic usage guide should get you started with the Chat Template System. For more advanced features, see the [Advanced Features](./advanced_features.md) and [Vision Templates](./vision_templates.md) sections.

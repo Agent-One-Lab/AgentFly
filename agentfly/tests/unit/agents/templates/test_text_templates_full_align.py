@@ -8,7 +8,7 @@
 """
 
 
-from .....agents.templates.utils import compare_hf_template
+from .....templates import compare_hf_template
 from transformers import AutoTokenizer
 import pytest
 
