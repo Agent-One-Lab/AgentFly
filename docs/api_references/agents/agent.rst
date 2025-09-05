@@ -11,10 +11,4 @@ The foundation class for all agents in AgentFly:
     :members:
     :show-inheritance:
 
-Chain Generation
-----------------
 
-Base class for chain-based generation:
-
-.. autoclass:: agentfly.agents.chain.chain_base.ChainRollout
-    :members:

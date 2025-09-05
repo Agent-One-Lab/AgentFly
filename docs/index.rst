@@ -176,6 +176,7 @@ Welcome to join our community!
     api_references/tools/index
     api_references/rewards/index
     api_references/environments/index
+    api_references/chat_template/index
 
 .. toctree::
     :maxdepth: 2

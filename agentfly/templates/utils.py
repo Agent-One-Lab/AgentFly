@@ -10,10 +10,10 @@ from qwen_vl_utils import process_vision_info
 import re
 import logging
 from .templates import Chat, get_template
-from ... import AGENT_DATA_DIR
+from .. import AGENT_DATA_DIR
 from typing import Any
 from .vision_processor import get_processor
-# Set up logging that won't be overridden by other modules
+
 LOGGER = logging.getLogger(__name__)
 
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')   # matches any ANSI color/style code
@@ -269,7 +269,8 @@ def tokenize_conversations(
     concatenated_mm_inputs = {}
     if concatenate_mm_inputs:
         for key in batch_mm_inputs[0].keys():
-            concatenated_mm_inputs[key] = torch.cat([mm_inputs[key] for mm_inputs in batch_mm_inputs if mm_inputs[key] is not None], dim=0)
+            if mm_inputs[key]:
+                concatenated_mm_inputs[key] = torch.cat([mm_inputs[key] for mm_inputs in batch_mm_inputs if mm_inputs[key] is not None], dim=0)
 
     inputs = dict(
         input_ids=batch_input_ids,

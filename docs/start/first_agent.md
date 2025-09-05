@@ -71,4 +71,14 @@ It is in ShareGPT/OpenAI's input messages, and will look like something to this:
     ]
 }
 ```
+
+To help the training, we can obtain the tokenized trajectories by calling `tokenize_trajectories` method
+```python
+inputs = agent.tokenize_trajectories()
+>>> # 'input_ids': tokenized ids of trajectories
+    # 'attention_mask': attention_mask of ids
+    # 'labels': used for supervised finetuning
+    # 'action_mask': mask where llm generated response are set '1', otherwise '0'
+```
+
 Now we have this built and run the agent. However, to run agent reinforcement learning, we still need several steps: define and get the tool to use, define reward functions, and finally, run the training.

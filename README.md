@@ -54,11 +54,11 @@ Please refer to [installation.md](docs/start/installation.md) for custmoized ins
 ```python
 # Really small example to build an agent and run
 from agentfly.agents import HFAgent
-from agentfly.tools import calculate
+from agentfly.tools import calculator
 messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]
 agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
-    tools=[calculate],
+    tools=[calculator],
     template="qwen2.5",
     backend="async_vllm",
 )

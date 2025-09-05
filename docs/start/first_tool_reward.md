@@ -34,6 +34,8 @@ Now we have the tool, we can then define the reward function, which also simply 
 
 ```python
 from agentfly.rewards import reward
+from typing import List, Dict
+import re
 
 @reward(name="math_reward_string_equal")
 def math_reward_string_equal(prediction: str, answer: str, trajectory: List[Dict]) -> float:
@@ -62,7 +64,7 @@ Now we can use the agent with the reward function we just defined.
 
 ```python
 from agentfly.agents import HFAgent
-from agentfly.tools import calculate
+from agentfly.tools import calculator
 agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
     tools=[calculator],
@@ -84,7 +86,7 @@ messages = {
 await agent.run(
     messages=messages,
     max_turns=3,
-    num_chains=1
+    num_chains=5 # Generate 5 trajectories for the query
 )
 ```
 
