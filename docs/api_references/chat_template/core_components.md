@@ -32,7 +32,7 @@
 
 The Chat Template System is inspired by the art of building block toys - where complex structures are created by combining simple, standardized components. We identify some basic components from LLM's chat templates, and use them to form prompts from conversation messages. Below are some basic core compoenents:
 
-`system_template`: Specify system prompt is formatted in chat template.
+`system_template`: Specify how system prompt is formatted in chat template.
 
 `system_template_with_tools`: Specify how tools along with system prompt is formatted in chat template
 
@@ -72,9 +72,9 @@ tools = [
 
 <span class="system">System: You are a helpful assistant.</span>
 
-<span class="user">User: Hi, how are you today.</span>
+<span class="user">User: Hi, Can you help me search the information.</span>
 
-<span class="assistant">Assistant: I am good. How can I help you?</span>
+<span class="assistant">Assistant: tool call: search\ntool arguments: related query</span>
 
 <span class="tool">Tool: Searched inforamtion...</span>
 
@@ -120,7 +120,7 @@ The central class that manages:
 #### Chat
 Recommended class for user usage:
 - Store and format messages
-- Get formatted prompt
+- Get formatted prompts
 - Tokenize formatted prompt
 
 ### Advanced Features
@@ -170,6 +170,6 @@ def _register_vision_processor(self):
 **4. Jinja Template Generation**
 
 Templates can generate HuggingFace-compatible Jinja templates:
-- Enables use with external systems (vLLM, etc.)
+- Enables use with external systems (vLLM, transformers tokenizers, etc.)
 - Maintains consistency between Python and Jinja rendering
 - Supports complex logic through Jinja macros

@@ -91,12 +91,13 @@ messages_with_image = [
         "role": "user", 
         "content": [
             {"type": "text", "text": "What's in this image?"},
-            {"type": "image", "image": "/path/to/image.jpg"}
+            {"type": "image", "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"}
         ]
     }
 ]
 
 chat = Chat(template="qwen2.5-vl", messages=messages_with_image)
+prompt = chat.prompt()
 ```
 
 ## Template Operations
@@ -119,12 +120,18 @@ prompt_with_tools = chat.prompt(tools=tools)
 Use `Chat.tokenize` method to tokenize the messages with the specified chat template.
 
 ```python
+from transformers import AutoTokenizer, AutoProcessor
+
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
+processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 # Tokenize the conversation
 inputs = chat.tokenize(
     tokenizer=tokenizer,
     add_generation_prompt=True,
+    processor=processor,
     tools=tools
 )
+print(inputs.keys())
 
 # The result includes:
 # - input_ids: Token IDs

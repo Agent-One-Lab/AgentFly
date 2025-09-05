@@ -1023,6 +1023,7 @@ class Chat:
             The prompt for the chat.
         """
         self.flags['add_generation_prompt'] = add_generation_prompt
+        tools = tools or self.tools
         prompt, _, _ = self.template.render(messages=self.messages, tools=tools, add_generation_prompt=add_generation_prompt)
         return prompt
 
@@ -1043,15 +1044,18 @@ class Chat:
             processor: The processor to use for the chat.
         
         Returns:
-            The tokenized messages, a dictionary with the following items:
-            - input_ids
-            - attention_mask
-            - labels
-            - action_mask
-            - multi_modal_inputs
+            inputs (dict): Inputs for helping training.
+                - input_ids
+                - attention_mask
+                - labels
+                - action_mask
+                - multi_modal_inputs
         """
         if tokenizer is None:
+            if self.tokenizer is None:
+                raise ValueError("Tokenizer is not set. Set it when initializing the chat or pass it as an argument.")
             tokenizer = self.tokenizer
+
         if tools is None:
             tools = self.tools
         return self.template.encode(messages=self.messages, tokenizer=tokenizer, return_tensors="pt", tools=tools, add_generation_prompt=add_generation_prompt, processor=processor)
