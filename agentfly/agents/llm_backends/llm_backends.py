@@ -26,6 +26,7 @@ import PIL
 
 
 LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.DEBUG)
 
 try:
     from verl.protocol import DataProto
@@ -343,13 +344,13 @@ class AsyncVLLMBackend(LLMBackend):
         inputs = self._process_inputs(prompts, vision_inputs)
         if n > 1:
             inputs = [_input for _input in inputs for _ in range(n)]
-        LOGGER.debug(f"[AsyncVLLMBackend] inputs: {inputs}")
+        # LOGGER.debug(f"[AsyncVLLMBackend] inputs: {inputs}")
         tasks = [self._generate_single(_input, sampling_params) for _input in inputs]
         outputs = await asyncio.gather(*tasks)
         # Flatten the outputs
         outputs = [output for output_list in outputs for output in output_list]
         response_texts = [output.text for output in outputs]
-        LOGGER.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
+        # LOGGER.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
 
         return response_texts
     
@@ -518,7 +519,7 @@ class ClientBackend(LLMBackend):
     # --------------------------------------------------------------------- #
     @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
     def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
-        LOGGER.debug(f"[ClientBackend] _blocking_call kwargs: {kwargs}")
+        # LOGGER.debug(f"[ClientBackend] _blocking_call kwargs: {kwargs}")
         if "num_return_sequences" in kwargs:
             n = kwargs.pop("num_return_sequences")
         else:
@@ -540,6 +541,7 @@ class ClientBackend(LLMBackend):
             **kwargs,
         )
         resp_json = resp.dict()
+        LOGGER.debug(f"[ClientBackend] resp_json: {resp_json}")
         response_texts = [choice["message"]["content"] for choice in resp_json["choices"]]
         tool_calls = [choice["message"]["tool_calls"] for choice in resp_json["choices"]]
 
@@ -639,7 +641,7 @@ class ClientBackend(LLMBackend):
             messages_list = messages     # batch
 
         messages_list, kwargs = self._preprocess_messages_and_args(messages_list, **kwargs)
-        LOGGER.debug(f"[ClientBackend] messages_list: {messages_list}")
+        # LOGGER.debug(f"[ClientBackend] messages_list: {messages_list}")
 
         async def _runner():
             tasks = [asyncio.create_task(self._call(_input, **kwargs)) for _input in messages_list]

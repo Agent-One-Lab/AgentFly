@@ -389,17 +389,24 @@ class BaseAgent(ChainRollout, ABC):
         for message in messages[index]["messages"]:
             role = message["role"]
             text = f"{role}: "
-            content = message["content"]
-            if isinstance(content, str):
-                text += content
-            elif isinstance(content, list):
-                for item in content: 
-                    if item["type"] == "text":
-                        text += item["text"]
-                    elif item["type"] == "image":
-                        text += colored("ImagePlaceholder", "red")
-            else:
-                raise ValueError(f"Invalid content type: {type(content)}")
+            if 'content' in message:
+                content = message["content"]
+                if isinstance(content, str):
+                    text += content
+                elif isinstance(content, list):
+                    for item in content: 
+                        if item["type"] == "text":
+                            text += item["text"]
+                        elif item["type"] == "image":
+                            text += colored("ImagePlaceholder", "red")
+                elif content is None:
+                    assert role == "assistant", f"Invalid content type: {type(content)} for role {role}"
+                    if "tool_calls" in message:
+                        tool_calls = message["tool_calls"]
+                        for tool_call in tool_calls:
+                            text += f"Tool call: {tool_call['name']} Arguments: {tool_call['arguments']}"
+                    else:
+                        raise ValueError(f"Invalid message: {message} must have content or tool_calls.")
             print(text)
     
     def get_verl_data_proto(self):

@@ -114,13 +114,14 @@ class ImageEditingAgent(BaseAgent):
     def __init__(
         self,
         model_name_or_path: str,
+        system_prompt: str = IMAGE_AGENT_SYSTEM_PROMPT,
         **kwargs
     ):
         self._image_database = {}
         tools = [self.qwen_edit_image_tool]
         super().__init__(
             model_name_or_path=model_name_or_path,
-            system_prompt=IMAGE_AGENT_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             tools=tools,
             **kwargs
         )
@@ -406,7 +407,7 @@ class ImageEditingAgent(BaseAgent):
     
     @tool(
         name="qwen_edit_image",
-        description="Edit an image using Qwen-Image-Edit model with natural language instructions. Useful for tasks like changing colors, adding/removing elements, or style transfer."
+        description="Edit an image using Qwen-Image-Edit model with natural language instructions, return the image id and the edited image. Useful for tasks like changing colors, adding/removing elements, or style transfer."
     )
     async def qwen_edit_image_tool(
         self,
