@@ -326,9 +326,9 @@ def visualize_jinja_template(tokenizer, messages=None, tools=None, **kwargs):
     prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, **kwargs)
     print(prompt)
 
-def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add_generation_prompt=False):
-    official_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt)
-    chat = Chat(template_name, messages, tokenizer)
+def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add_generation_prompt=False, **kwargs):
+    official_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt, **kwargs)
+    chat = Chat(template_name, messages=messages, tokenizer=tokenizer)
     implemented_prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools)
     is_equal = official_prompt == implemented_prompt
     highlighted_prompt = chat.prompt_with_mask(add_generation_prompt=add_generation_prompt, tools=tools)
@@ -336,9 +336,11 @@ def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add
     is_equal_between_implemented_prompts = implemented_prompt == plain_highlighted_prompt
     jinja_template = chat.template.jinja_template()
     
+    official_jinja_prompt = tokenizer.chat_template
     tokenizer.chat_template = jinja_template
     implemented_jinja_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt)
     is_equal_between_jinja_prompts = implemented_jinja_prompt == implemented_prompt
+    tokenizer.chat_template = official_jinja_prompt
     return is_equal, is_equal_between_implemented_prompts, is_equal_between_jinja_prompts, official_prompt, implemented_prompt, implemented_jinja_prompt, highlighted_prompt
 
 
