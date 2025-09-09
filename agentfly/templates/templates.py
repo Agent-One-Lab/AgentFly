@@ -64,8 +64,6 @@ class Template:
     system_template_with_tools: str = None
     # The system message
     system_message: str = ""
-    # Stop criteria (the default one is EOS token)
-    stop_words: Union[str, List[str]] = None
     # Behaviors
     # The tool template
     tool_template: str = None
@@ -74,6 +72,12 @@ class Template:
     user_template_with_tools: str = None
     # The assistant template
     assistant_template: str = None
+
+
+    # Stop criteria (the default one is EOS token)
+    stop_words: Union[str, List[str]] = None
+    # Generation prompt
+    generation_prompt: str = None
     # Global policy
     global_policy: "GlobalPolicy" = None
     # System message policy
@@ -283,7 +287,7 @@ class Template:
         """Append the generation prefix so the model knows to continue
         generating an assistant response."""
 
-        generation_prefix = self._encode_generation_prompt()
+        generation_prefix, prefix = self._encode_generation_prompt()
         elements.append(generation_prefix)
         roles.append(Role.ASSISTANT_PREFIX)
 
@@ -414,24 +418,33 @@ class Template:
         return tool_message
     
     def _encode_generation_prompt(self) -> str:
+        # Use generation prompt if it is set
         if "{content}" in self.assistant_template:
             prefix = self.assistant_template.split("{content}")[0]
-            return prefix
+            if self.generation_prompt:
+                generation_prompt = self.generation_prompt
+            else:
+                generation_prompt = prefix
         else:
             raise ValueError(f"Assistant template {self.assistant_template} does not contain {{content}}")
 
+        return generation_prompt, prefix
+
+
     def _split_assistant_message(self, assistant_message: str) -> List[str]:
         # Split the assistant message into generation prefix, content, and generation suffix
-        generation_prefix = self._encode_generation_prompt()
-        assert assistant_message.startswith(generation_prefix), f"Assistant message {assistant_message} does not start with {generation_prefix}"
-        content_suffix = assistant_message[len(generation_prefix):]
+        _, prefix = self._encode_generation_prompt()
+        assert assistant_message.startswith(prefix), f"Assistant message {assistant_message} does not start with {generation_prefix}"
+        content_suffix = assistant_message[len(prefix):]
+        content = content_suffix
+        suffix = ""
         for stop_word in self.stop_words:
             if stop_word in content_suffix:
                 stop_word_index = content_suffix.index(stop_word)
                 content = content_suffix[:stop_word_index+len(stop_word)]
                 suffix = content_suffix[stop_word_index+len(stop_word):]
                 break
-        return generation_prefix, content, suffix
+        return prefix, content, suffix
 
 
     def encode(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None) -> str:
@@ -937,6 +950,7 @@ class Template:
             assistant_template=self.assistant_template,
             tool_template=self.tool_template,
             stop_words=self.stop_words,
+            generation_prompt=self.generation_prompt,
             vision_start=self.vision_start,
             vision_end=self.vision_end,
             image_token=self.image_token,
@@ -1147,6 +1161,21 @@ register_template(
 
 register_template(
     Template(
+        name="qwen3",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        stop_words=["<|im_end|>"],
+        generation_prompt="<|im_start|>assistant\n",
+        system_policy=SystemPolicy(
+            use_system=True,
+            use_system_without_system_message=False,
+        ),
+    )
+)
+
+register_template(
+    Template(
         name="deepseek-prover",
         system_template="{system_message}\n",
         system_message="You are an AI programming assistant, utilizing the Deepseek Coder model, developed by Deepseek Company, and you only answer questions related to computer science. For politically sensitive questions, security and privacy issues, and other non-computer science questions, you will refuse to answer.",
@@ -1246,6 +1275,23 @@ register_template(
             content_processor=ToolMainContentProcessor(),
             formatter=JsonCompactFormatter(),
         )
+    )
+)
+
+register_template(
+    Template(
+        name="deepseek-r1-distill-qwen",
+        user_template="<｜User｜>{content}",
+        assistant_template="<｜Assistant｜>{content}<｜end▁of▁sentence｜>",
+        stop_words=["<｜end▁of▁sentence｜>"],
+        generation_prompt="<｜Assistant｜><think>\n",
+        global_policy=GlobalPolicy(
+            prefix="<｜begin▁of▁sentence｜>"
+        ),
+        system_policy=SystemPolicy(
+            use_system=False,
+            use_system_without_system_message=False,
+        ),
     )
 )
 
