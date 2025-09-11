@@ -106,6 +106,7 @@ def tokenize_conversation(
     processor=None,
     return_tensors="pt",
     add_generation_prompt=False,
+    **kwargs, # Additional kwargs for the chat template, e.g. enable_thinking
 ):
     """
     We want to tokenize the whole conversation. But we can't just simply
@@ -122,7 +123,7 @@ def tokenize_conversation(
     :return: input_ids, attention_mask, labels, action_mask
     """
     chat = Chat(template=template, messages=messages, tokenizer=tokenizer)
-    inputs = chat.tokenize(tokenizer, add_generation_prompt=add_generation_prompt, tools=tools, processor=processor)
+    inputs = chat.tokenize(tokenizer, add_generation_prompt=add_generation_prompt, tools=tools, processor=processor, **kwargs)
     
     if max_length is not None:
         inputs['input_ids'] = inputs['input_ids'][:, :max_length]
@@ -329,16 +330,16 @@ def visualize_jinja_template(tokenizer, messages=None, tools=None, **kwargs):
 def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add_generation_prompt=False, **kwargs):
     official_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt, **kwargs)
     chat = Chat(template_name, messages=messages, tokenizer=tokenizer)
-    implemented_prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools)
+    implemented_prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools, **kwargs)
     is_equal = official_prompt == implemented_prompt
-    highlighted_prompt = chat.prompt_with_mask(add_generation_prompt=add_generation_prompt, tools=tools)
+    highlighted_prompt = chat.prompt_with_mask(add_generation_prompt=add_generation_prompt, tools=tools, **kwargs)
     plain_highlighted_prompt = strip_ansi(highlighted_prompt)
     is_equal_between_implemented_prompts = implemented_prompt == plain_highlighted_prompt
     jinja_template = chat.template.jinja_template()
     
     official_jinja_prompt = tokenizer.chat_template
     tokenizer.chat_template = jinja_template
-    implemented_jinja_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt)
+    implemented_jinja_prompt = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools, add_generation_prompt=add_generation_prompt, **kwargs)
     is_equal_between_jinja_prompts = implemented_jinja_prompt == implemented_prompt
     tokenizer.chat_template = official_jinja_prompt
     return is_equal, is_equal_between_implemented_prompts, is_equal_between_jinja_prompts, official_prompt, implemented_prompt, implemented_jinja_prompt, highlighted_prompt
