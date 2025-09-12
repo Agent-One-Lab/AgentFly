@@ -323,6 +323,7 @@ class Template:
         return "\n".join([json.dumps(tool) for tool in tools])
 
     def _encode_system_message_default(self, tools=None) -> str:
+        Logger.debug(f"[Template] Encoding system message default for template: {self.name}")
         if not self.system_policy.use_system_without_system_message:
             if tools is None:
                 return ""
@@ -345,6 +346,7 @@ class Template:
 
     def _encode_system_message(self, content, tools=None) -> str:
         # Handle both string content and list content formats
+        Logger.debug(f"[Template] Encoding system message for template: {self.name}")
         if isinstance(content, str):
             system_message = content
         else:
@@ -1485,6 +1487,7 @@ register_template(
 register_template(
     Template(
         name="deepseek-r1-distill-qwen",
+        system_template="{system_message}",
         user_template="<｜User｜>{content}",
         assistant_template="<｜Assistant｜>{content}<｜end▁of▁sentence｜>",
         stop_words=["<｜end▁of▁sentence｜>"],
@@ -1493,7 +1496,7 @@ register_template(
             prefix="<｜begin▁of▁sentence｜>"
         ),
         system_policy=SystemPolicy(
-            use_system=False,
+            use_system=True,
             use_system_without_system_message=False,
         ),
     )
