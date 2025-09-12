@@ -130,8 +130,8 @@ log
 outputs
 *.out
 
-/*.png
 /*.jpg
+/*.png
 
 # Notebooks
 agentfly/tests/*.ipynb
@@ -145,4 +145,3 @@ test_outputs/
 agentfly/data/
 *.ipynb
 
-./*.jpg
