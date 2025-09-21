@@ -129,7 +129,8 @@ logs
 log
 outputs
 *.out
-
+data/
+test_cache/
 /*.jpg
 /*.png
 
