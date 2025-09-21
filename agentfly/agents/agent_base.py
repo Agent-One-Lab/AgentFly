@@ -46,7 +46,7 @@ class BaseAgent(ChainRollout, ABC):
         template: str=None,
         system_prompt: str = None,
         tools: List = None,
-        max_length: int=8192,
+        max_length: int=None,
         backend: str = "async_vllm",
         backend_config: Any = None,
         reward_fn: Callable = None,
@@ -72,6 +72,7 @@ class BaseAgent(ChainRollout, ABC):
         self.debug = debug
         self.backend = backend
         self.template = template
+        # TODO: Make max_length aligned with training
         self.max_length = max_length
         self.tools = tools
         self.tool_names = [tool.name for tool in tools]
