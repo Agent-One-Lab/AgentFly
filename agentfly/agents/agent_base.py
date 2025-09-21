@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from datetime import datetime
 import json
 from .utils.messages import MessagesList
 from ..templates.templates import get_template
@@ -23,6 +24,7 @@ import warnings
 import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 from .utils.tokenizer import create_processor, create_tokenizer
+from ..utils.monitor import JsonlSink, Monitor, WandbSink
 try:
     from verl.protocol import DataProto
 except ImportError:
@@ -51,10 +53,12 @@ class BaseAgent(ChainRollout, ABC):
         backend_config: Any = None,
         reward_fn: Callable = None,
         log_file: str = "agent",
-        project_name: str = None,
-        run_name: str = None,
         streaming: str = "console",
         debug: bool = False,
+        monitors: List[str] = ["local", "wandb"],
+        wandb_project_name: str = None,
+        wandb_run_name: str = None,
+        local_cache_dir: str = None,
         **kwargs # To pass other unused arguments
     ):
         """
@@ -93,7 +97,6 @@ class BaseAgent(ChainRollout, ABC):
         
         # Create appropriate tokenizer for trajectory processing
         self.tokenizer = create_tokenizer(model_name_or_path)
-
         self.processor = create_processor(model_name_or_path)
         
         self._reward_fn = reward_fn
@@ -103,8 +106,12 @@ class BaseAgent(ChainRollout, ABC):
         else:
             self.jinja_template = get_template(self.template).jinja_template()
 
-        self.project_name = project_name
-        self.run_name = run_name
+        self.wandb_project_name = wandb_project_name
+        self.wandb_run_name = wandb_run_name
+        self.local_cache_dir = local_cache_dir
+        self.local_run_cache_dir = None
+        self._initialize_monitor(monitors)
+
         self.streaming_manager = StreamingManager()
         if streaming == "console":
             self.streaming_manager.add_observer(ConsoleStreamObserver())
@@ -175,6 +182,17 @@ class BaseAgent(ChainRollout, ABC):
                 messages.set_system_prompt(self.system_prompt, enforce=False)
 
         return messages_list.to_list()
+
+    def _initialize_monitor(self, monitors: List[str]) -> None:
+        for monitor in monitors:
+            if monitor == "local":
+                assert self.local_cache_dir is not None, "local_cache_dir must be set when using local monitor."
+                self.local_run_cache_dir = f"{os.path.join(self.local_cache_dir, os.path.basename(self.model_name_or_path), datetime.now().strftime('%Y%m%d_%H%M%S'))}"
+                Monitor.add_sink("jsonl", JsonlSink(f"{self.local_run_cache_dir}/"))
+            elif monitor == "wandb":
+                Monitor.add_sink("wandb", WandbSink(project=self.wandb_project_name, run_name=self.wandb_run_name))
+            else:
+                raise ValueError(f"Monitor {monitor} is not supported.")
 
     async def run(self,
         messages: Union[List[dict], np.ndarray, Dict],

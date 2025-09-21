@@ -22,7 +22,7 @@ import logging
 import PIL
 
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 try:
     from verl.protocol import DataProto
@@ -340,13 +340,13 @@ class AsyncVLLMBackend(LLMBackend):
         inputs = self._process_inputs(prompts, vision_inputs)
         if n > 1:
             inputs = [_input for _input in inputs for _ in range(n)]
-        LOGGER.debug(f"[AsyncVLLMBackend] inputs: {inputs}")
+        logger.debug(f"[AsyncVLLMBackend] inputs: {inputs}")
         tasks = [self._generate_single(_input, sampling_params) for _input in inputs]
         outputs = await asyncio.gather(*tasks)
         # Flatten the outputs
         outputs = [output for output_list in outputs for output in output_list]
         response_texts = [output.text for output in outputs]
-        LOGGER.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
+        logger.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
 
         return response_texts
     
@@ -513,7 +513,7 @@ class ClientBackend(LLMBackend):
     # --------------------------------------------------------------------- #
     # Low‑level single request (runs in threadpool so it doesn't block loop)
     # --------------------------------------------------------------------- #
-    @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=15))
     def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
         if "num_return_sequences" in kwargs:
             n = kwargs.pop("num_return_sequences")
@@ -525,7 +525,7 @@ class ClientBackend(LLMBackend):
         else:
             tool_choice = "none"
 
-        print(f"[ClientBackend] messages: {messages}")
+        logger.debug(f"[ClientBackend] messages: {messages}")
         resp = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
@@ -588,7 +588,7 @@ class ClientBackend(LLMBackend):
             messages_list = [messages]  # single
         else:
             messages_list = messages     # batch
-        print(f"[ClientBackend] messages_list: {messages_list}")
+        logger.debug(f"[ClientBackend] messages_list: {messages_list}")
         messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
 
         async def _runner():

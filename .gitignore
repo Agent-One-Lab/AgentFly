@@ -121,8 +121,10 @@ tests/e2e/toy_examples/deepspeed/synchronous/output.txt
 *.lock
 
 # data
+data/
 *.parquet
 agentfly/agents/data/*
+test_cache/
 
 # local logs
 logs
