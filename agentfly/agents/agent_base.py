@@ -72,6 +72,7 @@ class BaseAgent(ChainRollout, ABC):
         self.debug = debug
         self.backend = backend
         self.template = template
+        # TODO: Make max_length aligned with training
         self.max_length = max_length
         self.tools = tools
         self.tool_names = [tool.name for tool in tools]
