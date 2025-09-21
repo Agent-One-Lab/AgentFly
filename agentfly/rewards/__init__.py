@@ -17,4 +17,5 @@ from .webshop_reward import webshop_reward
 from .alfworld_reward import alfworld_episode_reward
 from .scienceworld_reward import scienceworld_reward
 from .gui_reward import gui_reward
+from .vlm_as_judge.vlm_as_judge_reward import vlm_as_judge_reward
 
