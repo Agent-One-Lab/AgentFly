@@ -133,7 +133,7 @@ data/
 test_cache/
 /*.jpg
 /*.png
-slurm
+slurm/
 
 
 # Notebooks
