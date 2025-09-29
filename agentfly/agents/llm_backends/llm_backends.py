@@ -22,7 +22,11 @@ import logging
 import PIL
 
 
+<<<<<<< HEAD
 logger = logging.getLogger(__name__)
+=======
+LOGGER = logging.getLogger(__name__)
+>>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
 
 try:
     from verl.protocol import DataProto
@@ -66,12 +70,21 @@ class LLMBackend:
 
 class TransformersBackend(LLMBackend):
     """HuggingFace Transformers implementation for local model inference.
+<<<<<<< HEAD
     
     This backend uses the Hugging Face Transformers library to load and run models locally.
     It supports both synchronous and asynchronous text generation with streaming capabilities.
     """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+=======
+    
+    This backend uses the Hugging Face Transformers library to load and run models locally.
+    It supports both synchronous and asynchronous text generation with streaming capabilities.
+    """
+    
+    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+>>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         """Initialize TransformersBackend.
         
         Args:
@@ -170,12 +183,21 @@ class TransformersBackend(LLMBackend):
 
 class VLLMBackend(LLMBackend):
     """vLLM implementation for high-performance model inference.
+<<<<<<< HEAD
     
     This backend uses the vLLM library for optimized inference of large language models.
     vLLM provides efficient memory management and high throughput for model serving.
     """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+=======
+    
+    This backend uses the vLLM library for optimized inference of large language models.
+    vLLM provides efficient memory management and high throughput for model serving.
+    """
+    
+    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+>>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         """Initialize VLLMBackend.
         
         Args:
@@ -267,12 +289,21 @@ class VLLMBackend(LLMBackend):
 
 class AsyncVLLMBackend(LLMBackend):
     """Asynchronous vLLM implementation for high-performance model inference.
+<<<<<<< HEAD
     
     This backend uses the vLLM AsyncLLMEngine for asynchronous inference, providing
     better resource utilization and scalability for concurrent requests.
     """
     
     def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+=======
+    
+    This backend uses the vLLM AsyncLLMEngine for asynchronous inference, providing
+    better resource utilization and scalability for concurrent requests.
+    """
+    
+    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+>>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         """Initialize AsyncVLLMBackend.
         
         Args:
@@ -380,6 +411,7 @@ class AsyncVLLMBackend(LLMBackend):
 
 class AsyncVerlBackend(LLMBackend):
     """Asynchronous Verl implementation for distributed model inference.
+<<<<<<< HEAD
     
     This backend uses the Verl framework for distributed and asynchronous model inference.
     Verl provides capabilities for running models across multiple workers and handling
@@ -387,6 +419,15 @@ class AsyncVerlBackend(LLMBackend):
     """
     
     def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=8192, **kwargs):
+=======
+    
+    This backend uses the Verl framework for distributed and asynchronous model inference.
+    Verl provides capabilities for running models across multiple workers and handling
+    complex inference pipelines.
+    """
+    
+    def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=None, **kwargs):
+>>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         """Initialize AsyncVerlBackend.
         
         Args:
@@ -475,7 +516,7 @@ class ClientBackend(LLMBackend):
         max_requests_per_minute: int = 100,
         timeout: int = 600,
         api_key: str = "EMPTY",
-        max_length: int = 8192,
+        max_length: int = None,
         max_new_tokens: int = 1024,
         **kwargs,
     ):
