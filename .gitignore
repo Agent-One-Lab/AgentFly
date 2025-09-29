@@ -135,6 +135,12 @@ test_cache/
 /*.png
 slurm/
 
+slurm/
+*.err
+*.out
+*.log
+
+
 
 # Notebooks
 agentfly/tests/*.ipynb
