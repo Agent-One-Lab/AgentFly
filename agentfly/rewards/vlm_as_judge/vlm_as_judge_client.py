@@ -42,11 +42,6 @@ def _resolve_server_status_dir() -> str:
     if os.path.isdir(candidate):
         return candidate
 
-    # 4) user-provided absolute path - CORRECTED PATH
-    hardcoded = "/mnt/weka/home/renxi.wang/yxwang/data-process/src/server_status"
-    if os.path.isdir(hardcoded):
-        return hardcoded
-
     # Last resort: return the AGENT_HOME-based path even if missing (caller errors out)
     return candidate
 
@@ -190,8 +185,8 @@ class VLMClient:
                  port: int = 8000,
                  api_key: str = "token-abc123"):
         self.timeout_seconds = timeout_seconds
-        # server_ips = get_server_ips(model)
-        server_ips = ["10.24.3.24"]
+        server_ips = get_server_ips(model)
+        # server_ips = ["10.24.3.24"]
         rate_limiters = [RateLimiter(max_window_size_per_instance) for _ in server_ips]
         self.client_manager = RoundRobinClient(server_ips, port, api_key, timeout_seconds, rate_limiters)
 
@@ -268,8 +263,7 @@ class VLMClient:
         return availability['has_available_slots']
 
 
-def create_vlm_prompt(summarize: str, all_questions: str) -> str:
-    return f"""You are given a set of visual verification questions and a description of objects and motion observed in an input medium (e.g., image or video).
+DEFAULT_VLM_PROMPT_TEMPLATE = """You are given a set of visual verification questions and a description of objects and motion observed in an input medium (e.g., image or video).
 
 Your task is to **evaluate each question** based on whether it is **correctly reflected in the visual content**, considering visual cues, shape changes from viewpoint, and possible symbolic representations.
 
@@ -343,6 +337,120 @@ Return a JSON list like this:
 """
 
 
+def _format_keywords(text: str,
+                     keywords: Optional[List[str]] = None,
+                     style: str = "bold",
+                     case_sensitive: bool = False) -> str:
+    """Format given keywords in text.
+
+    Args:
+        text: The input text to process.
+        keywords: List of keywords to highlight/format.
+        style: One of "bold" (default), "bracket", or "caps".
+        case_sensitive: Whether to match case-sensitively.
+
+    Returns:
+        Formatted text with keywords highlighted.
+    """
+    if not keywords:
+        return text
+
+    # Deduplicate and sort by length (longest first) to avoid partial overlapping matches
+    unique_keywords = [k for k in sorted(set(keywords), key=lambda s: len(s or ""), reverse=True) if k]
+    if not unique_keywords:
+        return text
+
+    flags = 0 if case_sensitive else re.IGNORECASE
+    pattern = re.compile("|".join(re.escape(k) for k in unique_keywords), flags)
+
+    def repl(match: re.Match) -> str:
+        start, end = match.start(), match.end()
+        # Avoid double-formatting if already bolded ("**word**")
+        if style == "bold":
+            prev2 = text[max(0, start - 2):start]
+            next2 = text[end:end + 2]
+            if prev2 == "**" and next2 == "**":
+                return match.group(0)
+            return f"**{match.group(0)}**"
+        elif style == "bracket":
+            return f"[{match.group(0)}]"
+        elif style == "caps":
+            return match.group(0).upper()
+        else:
+            return f"**{match.group(0)}**"
+
+    return pattern.sub(repl, text)
+
+
+class _SafeDict(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def create_vlm_prompt_from_template(
+    prompt_template: str,
+    variables: Optional[Dict[str, Any]] = None,
+    keywords: Optional[List[str]] = None,
+    style: str = "bold",
+    case_sensitive: bool = False,
+) -> str:
+    """Create a VLM prompt from a template with optional keyword formatting.
+
+    Args:
+        prompt_template: Template string containing placeholders like {summarize}, {all_questions}.
+        variables: Mapping used to format the template.
+        keywords: Keywords to highlight after formatting.
+        style: Keyword highlight style: "bold" (default), "bracket", or "caps".
+        case_sensitive: Whether keyword matching is case-sensitive.
+
+    Returns:
+        Final prompt string.
+    """
+    text = prompt_template
+    if variables:
+        try:
+            text = prompt_template.format_map(_SafeDict(variables))
+        except Exception:
+            # Fall back to the original template if formatting fails
+            text = prompt_template
+    return _format_keywords(text, keywords=keywords, style=style, case_sensitive=case_sensitive)
+
+
+def create_vlm_prompt_custom(
+    prompt: str,
+    keywords: Optional[List[str]] = None,
+    style: str = "bold",
+    case_sensitive: bool = False,
+) -> str:
+    """Create a VLM prompt from a raw prompt string and optional keywords.
+
+    This function does not inject any default template; it only formats
+    the provided prompt and highlights keywords as requested.
+
+    Args:
+        prompt: The prompt content to send to the VLM.
+        keywords: List of keywords to format/highlight.
+        style: Highlight style: "bold" (default), "bracket", or "caps".
+        case_sensitive: Whether keyword matching is case-sensitive.
+
+    Returns:
+        Final prompt string.
+    """
+    return _format_keywords(prompt, keywords=keywords, style=style, case_sensitive=case_sensitive)
+
+
+def create_vlm_prompt(summarize: str, all_questions: str) -> str:
+    """Create the default VLM prompt (backward-compatible).
+
+    Existing call sites expect (summarize, all_questions). This delegates to
+    a template-based builder to enable future customization.
+    """
+    return create_vlm_prompt_from_template(
+        DEFAULT_VLM_PROMPT_TEMPLATE,
+        variables={"summarize": summarize, "all_questions": all_questions},
+    )
+
+
 def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
     """Extract the VLM JSON list from the model output.
 
@@ -368,128 +476,3 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
             pass
     raise ValueError("Failed to parse VLM JSON list from output")
 
-
-async def run_vlm_as_judge(
-    *,
-    question: str,
-    prediction: str,
-    video_path: str,
-    model: str = "Qwen/Qwen2.5-VL-72B-Instruct",
-    fps: int = 5,
-    summarize: Optional[str] = None,
-    resized_width: Optional[int] = None,
-    resized_height: Optional[int] = None,
-    temperature: float = 0.0,
-    timeout_seconds: int = 120,
-) -> float:
-    """Run VLM-as-judge once and return a binary score 0.0/1.0.
-
-    Args:
-        question: The question to evaluate against the video.
-        prediction: The proposed answer to be judged.
-        video_path: Absolute path accessible by the vLLM server(s).
-        model: VLM model name registered by the server.
-        fps: Frame sampling rate for the server-side video loader.
-        resized_width/resized_height: Optional hints; if None, omitted.
-        temperature: Generation temperature (kept low for judging determinism).
-        timeout_seconds: Request timeout.
-    Returns:
-        1.0 if correct; 0.0 otherwise.
-    """
-    client = VLMClient(model=model, timeout_seconds=timeout_seconds)
-
-    # Best-effort small wait for capacity
-    for _ in range(10):
-        if client.is_available():
-            break
-        time.sleep(1)
-
-    # Align with get_vlm_result.py prompt: single-question variant
-    if not summarize:
-        summarize = "No additional description provided. Base your judgment solely on the video."
-    all_questions = f"1. {question} (Proposed answer: {prediction})"
-    text = create_vlm_prompt(summarize, all_questions)
-
-    # Build message using <video> tag embedded in text content
-    # This aligns with the server's parsing logic observed in tests.
-    video_tag = f"<video>{video_path}</video>"
-    # Note: resized_width/height and fps are not standard in text tag; server-side
-    # may ignore or infer these. If needed, extend the tag format later.
-    user_text = f"{video_tag}\n\n{text}"
-
-    messages = [{
-        "role": "user",
-        "content": user_text,
-    }]
-
-    responses = await client.process_all_inputs([messages], model=model, temperature=temperature)
-
-    if responses and responses[0] and responses[0][0]:
-        output_text = responses[0][0]
-        try:
-            parsed_list = _extract_json_list(output_text)
-            if not parsed_list:
-                return 0.0
-            # Expect first item corresponds to our only question
-            first = parsed_list[0]
-            result = str(first.get("result", "")).strip().lower()
-            if result == "true":
-                return 1.0
-            else:
-                return 0.0
-        except Exception as e:
-            logger.error(f"Error parsing VLM output: {e}")
-            return 0.0
-    return 0.0
-
-
-if __name__ == "__main__":
-    """Test VLM client functionality"""
-    import asyncio
-    
-    async def test_client():
-        print("="*70)
-        print("Testing VLM Client")
-        print("="*70)
-        
-        # Test data
-        test_questions = {
-            "vlm_questions": {
-                "summarize": "A ball rolls down a ramp",
-                "vlm_questions": [
-                    {"index": "1", "question": "A ball is visible", "weight": 1.0},
-                    {"index": "2", "question": "The ball moves downward", "weight": 1.0}
-                ]
-            }
-        }
-        
-        try:
-            # Test client initialization
-            client = VLMClient(
-                model="Qwen/Qwen2.5-VL-72B-Instruct",
-                timeout_seconds=60
-            )
-            print(f"✓ Client initialized")
-            
-            # Check availability
-            is_available = client.is_available()
-            print(f"✓ Client available: {is_available}")
-            
-            # Test prompt creation
-            all_q = "1. A ball is visible\n2. The ball moves downward"
-            prompt = create_vlm_prompt("A ball rolls down a ramp", all_q)
-            print(f"✓ Prompt created ({len(prompt)} chars)")
-            
-            # Test JSON extraction
-            test_response = '''[{"index": "1", "result": "True", "confidence_score": "5"}]'''
-            results = _extract_json_list(test_response)
-            print(f"✓ JSON extraction works: {len(results)} results")
-            
-            print("\nAll tests passed!")
-            
-        except Exception as e:
-            print(f"✗ Test failed: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    asyncio.run(test_client())

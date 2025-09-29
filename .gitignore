@@ -133,6 +133,8 @@ data/
 test_cache/
 /*.jpg
 /*.png
+slurm
+
 
 # Notebooks
 agentfly/tests/*.ipynb
@@ -146,3 +148,9 @@ test_outputs/
 agentfly/data/
 *.ipynb
 
+# training scripts
+training_scripts/
+verl/training_scripts/
+
+# llm as judge
+agentfly/rewards/llm_as_judge/llm_as_judge_video_reward.py
