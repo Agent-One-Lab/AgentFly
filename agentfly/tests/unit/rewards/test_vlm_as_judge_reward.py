@@ -1,13 +1,9 @@
 import sys
 import os
-
-# Add repo root to sys.path so absolute imports work when invoked directly
-sys.path.append(str(Path(__file__).resolve().parents[2]))
-from agentfly.rewards.vlm_as_judge.vlm_as_judge_client import VLMClient, create_vlm_prompt, _extract_json_list
-from agentfly.rewards.vlm_as_judge.vlm_as_judge_reward import VideoGenerator, extract_vlm_questions_from_data, calculate_weighted_reward, pass_fail_reward
-from agentfly.rewards.vlm_as_judge.vlm_as_judge_reward import vlm_as_judge_pass_reward
+from ....rewards.vlm_as_judge.vlm_as_judge_client import VLMClient, create_vlm_prompt, _extract_json_list
+from ....rewards.vlm_as_judge.vlm_as_judge_reward import VideoGenerator, extract_vlm_questions_from_data, calculate_weighted_reward, pass_fail_reward
+from ....rewards.vlm_as_judge.vlm_as_judge_reward import vlm_as_judge_pass_reward
 from pathlib import Path
-
 import asyncio
 import sys
 from pathlib import Path
