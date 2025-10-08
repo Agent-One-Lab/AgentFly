@@ -11,6 +11,10 @@ from transformers import AutoTokenizer
         {"role": "assistant", "content": "<think> This is test thinking content. </think> Sure, what game?"},
     ],
     [
+        {"role": "user", "content": "Hello, how are you?"},
+        {"role": "assistant", "content": "<think> This is test thinking content. </think> I am fine, thank you."},
+    ],
+    [
         {"role": "user", "content": "Help me to calculate 3 times 5."},
         {"role": "assistant", "content": '''{"name": "multiply", "arguments": {"x": 3, "y": 5}}'''},
         {"role": "tool", "content": "15"},
