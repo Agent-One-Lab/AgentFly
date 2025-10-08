@@ -1,8 +1,8 @@
-from .....templates.utils import tokenize_conversation
+from ....templates.utils import tokenize_conversation
 import pytest
 from transformers import AutoTokenizer
 import torch
-from .....templates.templates import Chat
+from ....templates.templates import Chat
 
 @pytest.mark.parametrize("template", ["deepseek-r1-distill-qwen"])
 @pytest.mark.parametrize("messages", [

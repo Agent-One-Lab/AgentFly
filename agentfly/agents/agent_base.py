@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 from .utils.messages import MessagesList
 from ..templates.templates import get_template
-from ..__init__ import AGENT_DATA_DIR
+from .. import AGENT_DATA_DIR
 from .llm_backends import (
     AsyncVLLMBackend,
     AsyncVerlBackend,
@@ -55,7 +55,7 @@ class BaseAgent(ChainRollout, ABC):
         log_file: str = "agent",
         streaming: str = "console",
         debug: bool = False,
-        monitors: List[str] = ["local", "wandb"],
+        monitors: List[str] = [],
         wandb_project_name: str = None,
         wandb_run_name: str = None,
         local_cache_dir: str = None,

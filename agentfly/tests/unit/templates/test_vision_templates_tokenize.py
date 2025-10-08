@@ -8,8 +8,8 @@
 """
 
 
-from .....agents.templates.templates import Chat
-from .....agents.templates.utils import compare_hf_template, tokenize_conversation
+from ....templates.templates import Chat
+from ....templates.utils import compare_hf_template, tokenize_conversation
 from transformers import AutoTokenizer
 import pytest
 import torch

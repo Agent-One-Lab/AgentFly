@@ -7,13 +7,13 @@
 Since the align for textual prompt is already tested in other files, we only need to test the tokenization of the templates.
 """
 
-from .....templates.utils import tokenize_conversation
+from ....templates.utils import tokenize_conversation
 import pytest
 from transformers import AutoTokenizer
 import torch
-from .....templates.templates import Chat
+from ....templates.templates import Chat
 
-@pytest.mark.parametrize("template", ["qwen3"])
+@pytest.mark.parametrize("template", ["llama-3.2", "qwen2.5"])
 @pytest.mark.parametrize("messages", [
     [
         {"role": "user", "content": "Hello, how are you?"},
@@ -33,7 +33,7 @@ from .....templates.templates import Chat
         {"role": "user", "content": "What is 3 times 5?"},
         {"role": "assistant", "content": "15"},
         {"role": "user", "content": "OK, what is 3 times 6?"},
-        {"role": "assistant", "content": "<think> This is test thinking content. </think> 18"},
+        {"role": "assistant", "content": "18"},
     ],
 ])
 @pytest.mark.parametrize("tools", [
@@ -44,26 +44,18 @@ from .....templates.templates import Chat
     ]
 ])
 @pytest.mark.parametrize("add_generation_prompt", [False, True])
-@pytest.mark.parametrize("enable_thinking", [True, False])
-def test_template_tokenize(template, messages, tools, add_generation_prompt, enable_thinking):
+def test_template_tokenize(template, messages, tools, add_generation_prompt):
     template_tokenizer_mapping = {
-        "qwen3": "Qwen/Qwen3-32B",
+        "qwen2.5": "Qwen/Qwen2.5-3B-Instruct",
+        "llama-3.2": "meta-llama/Llama-3.2-3B-Instruct",
     }
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template], trust_remote_code=True)
 
     chat = Chat(template, messages, tools=tools)
-    prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools, enable_thinking=enable_thinking)
+    prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools)
 
     hf_inputs = tokenizer(prompt, return_tensors="pt")
 
-    implemented_inputs = tokenize_conversation(messages, tokenizer, template, max_length=4096, tools=tools, add_generation_prompt=add_generation_prompt, return_tensors="pt", enable_thinking=enable_thinking)
+    implemented_inputs = tokenize_conversation(messages, tokenizer, template, max_length=2048, tools=tools, add_generation_prompt=add_generation_prompt, return_tensors="pt")
 
-    assert torch.equal(hf_inputs["input_ids"], implemented_inputs["input_ids"]), f"""template: {template}
-messages: {messages}
-tools: {tools}
-add_generation_prompt: {add_generation_prompt}
-enable_thinking: {enable_thinking}
-prompt: {prompt}
-implemented_prompt: shape: {implemented_inputs['input_ids'].shape} {tokenizer.decode(implemented_inputs['input_ids'][0], skip_special_tokens=False)}
-hf_inputs: shape: {hf_inputs['input_ids'].shape} {tokenizer.decode(hf_inputs['input_ids'][0], skip_special_tokens=False)}
-implemented_inputs: {implemented_inputs}"""
+    assert torch.equal(hf_inputs["input_ids"], implemented_inputs["input_ids"]), f"template: {template}\n\nmessages: {messages}\n\ntools: {tools}\n\nadd_generation_prompt: {add_generation_prompt}\n\nprompt: {prompt}\n\nimplemented_prompt: {tokenizer.decode(implemented_inputs['input_ids'][0])}\n\nhf_inputs: {hf_inputs}\n\nimplemented_inputs: {implemented_inputs}"

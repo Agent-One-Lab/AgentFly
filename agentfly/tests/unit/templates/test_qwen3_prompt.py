@@ -1,4 +1,4 @@
-from .....templates.utils import compare_hf_template
+from ....templates.utils import compare_hf_template
 import pytest
 from transformers import AutoTokenizer
 
