@@ -124,13 +124,7 @@ tests/e2e/toy_examples/deepspeed/synchronous/output.txt
 data/
 *.parquet
 agentfly/agents/data/*
-<<<<<<< HEAD
-<<<<<<< HEAD
 test_cache/
-=======
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
-=======
->>>>>>> origin/agents
 
 # local logs
 logs
@@ -149,15 +143,10 @@ slurm/
 *.log
 
 
-<<<<<<< HEAD
-<<<<<<< HEAD
+
 
 /*.jpg
 /*.png
-=======
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
-=======
->>>>>>> origin/agents
 
 # Notebooks
 agentfly/tests/*.ipynb
@@ -170,17 +159,12 @@ temp/
 test_outputs/
 agentfly/data/
 *.ipynb
-<<<<<<< HEAD
-
-# training scripts
-training_scripts/
-verl/training_scripts/
-=======
->>>>>>> origin/agents
 
 # training scripts
 training_scripts/
 verl/training_scripts/
 
-# llm as judge
-agentfly/rewards/llm_as_judge/llm_as_judge_video_reward.py
+# training scripts
+training_scripts/
+verl/training_scripts/
+
