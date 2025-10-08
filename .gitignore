@@ -162,6 +162,3 @@ agentfly/data/
 # training scripts
 training_scripts/
 verl/training_scripts/
-
-# llm as judge
-agentfly/rewards/llm_as_judge/llm_as_judge_video_reward.py

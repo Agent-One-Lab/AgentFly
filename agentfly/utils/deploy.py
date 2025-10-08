@@ -47,6 +47,5 @@ def main(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization):
 if __name__=="__main__":
     "python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen2.5-3B-Instruct --template qwen2.5 --tp 2 --dp 2"
     "python -m agentfly.utils.deploy --model_name_or_path openai/gpt-oss-20b --tp 1 --dp 1"
-    "python -m agentfly.utils.deploy --model_name_or_path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --tp 1 --dp 8"
-    "python -m agentfly.utils.deploy --model_name_or_path /mnt/weka/home/renxi.wang/models/viphy/deepseek-r1-distill-qwen-7b_openthought --tp 1 --dp 8"
+    "python -m agentfly.utils.deploy --model_name_or_path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --tp 1 --dp 1"
     main()

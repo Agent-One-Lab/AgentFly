@@ -24,10 +24,7 @@ import warnings
 import logging
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 from .utils.tokenizer import create_processor, create_tokenizer
-<<<<<<< HEAD
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
-=======
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
 try:
     from verl.protocol import DataProto
 except ImportError:
@@ -51,28 +48,17 @@ class BaseAgent(ChainRollout, ABC):
         template: str=None,
         system_prompt: str = None,
         tools: List = None,
-<<<<<<< HEAD
-        max_length: int=8192,
-=======
         max_length: int=None,
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         backend: str = "async_vllm",
         backend_config: Any = None,
         reward_fn: Callable = None,
         log_file: str = "agent",
-<<<<<<< HEAD
         streaming: str = "console",
         debug: bool = False,
         monitors: List[str] = ["local", "wandb"],
         wandb_project_name: str = None,
         wandb_run_name: str = None,
         local_cache_dir: str = None,
-=======
-        project_name: str = None,
-        run_name: str = None,
-        streaming: str = "console",
-        debug: bool = False,
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         **kwargs # To pass other unused arguments
     ):
         """
@@ -112,10 +98,6 @@ class BaseAgent(ChainRollout, ABC):
         
         # Create appropriate tokenizer for trajectory processing
         self.tokenizer = create_tokenizer(model_name_or_path)
-<<<<<<< HEAD
-=======
-
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         self.processor = create_processor(model_name_or_path)
         
         self._reward_fn = reward_fn
@@ -125,17 +107,12 @@ class BaseAgent(ChainRollout, ABC):
         else:
             self.jinja_template = get_template(self.template).jinja_template()
 
-<<<<<<< HEAD
         self.wandb_project_name = wandb_project_name
         self.wandb_run_name = wandb_run_name
         self.local_cache_dir = local_cache_dir
         self.local_run_cache_dir = None
         self._initialize_monitor(monitors)
 
-=======
-        self.project_name = project_name
-        self.run_name = run_name
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         self.streaming_manager = StreamingManager()
         if streaming == "console":
             self.streaming_manager.add_observer(ConsoleStreamObserver())

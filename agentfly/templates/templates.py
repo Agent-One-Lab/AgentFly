@@ -1503,6 +1503,16 @@ register_template(
     )
 )
 
+register_template(
+    Template(
+        name="llemma",
+        system_template="{system_message}",
+        user_template="Input:{content}\n\n",
+        assistant_template="Response:{content}</s>",
+        stop_words=["</s>"]
+    )
+)
+
 
 if __name__ == "__main__":
     pass
