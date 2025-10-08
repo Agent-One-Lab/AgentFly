@@ -21,12 +21,7 @@ from ...templates import Chat
 import logging
 import PIL
 
-
-<<<<<<< HEAD
 logger = logging.getLogger(__name__)
-=======
-LOGGER = logging.getLogger(__name__)
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
 
 try:
     from verl.protocol import DataProto
@@ -517,11 +512,7 @@ class ClientBackend(LLMBackend):
     # --------------------------------------------------------------------- #
     # Low‑level single request (runs in threadpool so it doesn't block loop)
     # --------------------------------------------------------------------- #
-<<<<<<< HEAD
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=15))
-=======
-    @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
     def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
         if "num_return_sequences" in kwargs:
             n = kwargs.pop("num_return_sequences")
@@ -533,11 +524,6 @@ class ClientBackend(LLMBackend):
         else:
             tool_choice = "none"
 
-<<<<<<< HEAD
-        logger.debug(f"[ClientBackend] messages: {messages}")
-=======
-        print(f"[ClientBackend] messages: {messages}")
->>>>>>> c1331fce222cbe9e1c59b8b3efca17d10db38531
         resp = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
