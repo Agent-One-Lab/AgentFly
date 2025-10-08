@@ -589,7 +589,9 @@ class ChainRollout:
             if tool.is_stateful and tool.pool_size > 0:
                 self.monitor_info[f"Agent/Tool/{tool.name}/used_env_size"].append(tool.used_env_size)
         
+         # We only log the trajectory to local jsonl file, for wandb much bandwidth is needed
         evt = MetricEvent(
+            sinks=["jsonl"],
             kind="text",
             name="Agent/rollout/trajectory",
             value=json.dumps(serialize_for_json(trajectory), indent=2),

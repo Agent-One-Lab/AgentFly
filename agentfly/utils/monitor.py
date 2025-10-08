@@ -38,12 +38,13 @@ class MetricEvent:
     step        Integer training step or episode counter.
     timestamp   Unix seconds (auto‑filled if omitted).
     tags        Arbitrary key/value pairs for filtering (e.g. run_id, module).
+    sinks       List of sink names to send this event to. If None, sends to all sinks.
     """
 
     kind: Literal["scalar", "hist", "text", "resource", "list"]
     name: str
     value: Any
-    sink: str = None
+    sinks: Optional[List[str]] = None
     step: Optional[int] = None
     x: Optional[int] = None
     x_name: Optional[str] = "x_axis"
@@ -150,11 +151,8 @@ class WandbSink(BaseSink):
 
     async def log(self, evt: MetricEvent) -> None:  # pragma: no cover
         """
-        Log the event to wandb. Only log if sink is not specified or is set to "wandb".
+        Log the event to wandb.
         """
-        if evt.sink != "wandb" and evt.sink is not None:
-            return
-
         if wandb.run is not None:
             payload = {evt.name: evt.value, **evt.tags}
             if evt.x is not None:
@@ -274,7 +272,10 @@ class Monitor:
             evt = await cls._queue.get()
             if evt is None:  # sentinel
                 break
-            for sink in list(cls._sinks.values()):
+            for sink_name, sink in list(cls._sinks.items()):
+                # Check if this sink should receive this event
+                if evt.sinks is not None and sink_name not in evt.sinks:
+                    continue
                 try:
                     await sink.log(evt)
                 except Exception as exc:
