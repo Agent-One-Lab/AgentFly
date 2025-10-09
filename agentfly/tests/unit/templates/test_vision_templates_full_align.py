@@ -9,7 +9,7 @@ To test vision part, the messages should contain at least one image.
 """
 
 
-from .....agents.templates.utils import compare_hf_template
+from ....templates.utils import compare_hf_template
 from transformers import AutoTokenizer
 import pytest
 # "qwen2.5-think", "qwen2.5", "qwen2.5-no-tool",

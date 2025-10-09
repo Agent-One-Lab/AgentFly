@@ -1,5 +1,5 @@
-from .....agents.templates.templates import get_template, register_template, Template
-from .....agents.templates.vision_processor import get_processor
+from ....templates.templates import get_template, register_template, Template
+from ....templates.vision_processor import get_processor
 
 def test_template_registration():
     register_template(

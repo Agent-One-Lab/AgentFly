@@ -1,7 +1,7 @@
 import pytest
 from transformers import AutoTokenizer
-from agentfly.agents.templates.templates import get_template
-from agentfly.agents.templates.utils import compare_hf_template
+from ....templates.templates import get_template
+from ....templates.utils import compare_hf_template
 
 # nemotron, phi-4, glm-4
 @pytest.mark.parametrize("template_name", ["qwen2.5-think", "qwen2.5-no-system-tool",])
