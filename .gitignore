@@ -122,8 +122,10 @@ tests/e2e/toy_examples/deepspeed/synchronous/output.txt
 *.lock
 
 # data
+data/
 *.parquet
 agentfly/agents/data/*
+test_cache/
 
 # local logs
 logs
@@ -134,6 +136,10 @@ data/
 test_cache/
 /*.jpg
 /*.png
+slurm/
+*.err
+*.out
+*.log
 
 # Ignore all images in current folder
 /*.jpg
@@ -150,4 +156,12 @@ temp/
 test_outputs/
 agentfly/data/
 *.ipynb
+
+# training scripts
+training_scripts/
+verl/training_scripts/
+
+# training scripts
+training_scripts/
+verl/training_scripts/
 

@@ -22,9 +22,7 @@ from ...templates import Chat
 import logging
 import PIL
 
-
-LOGGER = logging.getLogger(__name__)
-LOGGER.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 try:
     from verl.protocol import DataProto
@@ -342,13 +340,13 @@ class AsyncVLLMBackend(LLMBackend):
         inputs = self._process_inputs(prompts, vision_inputs)
         if n > 1:
             inputs = [_input for _input in inputs for _ in range(n)]
-        # LOGGER.debug(f"[AsyncVLLMBackend] inputs: {inputs}")
+        logger.debug(f"[AsyncVLLMBackend] inputs: {inputs}")
         tasks = [self._generate_single(_input, sampling_params) for _input in inputs]
         outputs = await asyncio.gather(*tasks)
         # Flatten the outputs
         outputs = [output for output_list in outputs for output in output_list]
         response_texts = [output.text for output in outputs]
-        # LOGGER.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
+        logger.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
 
         return response_texts
     
@@ -515,7 +513,7 @@ class ClientBackend(LLMBackend):
     # --------------------------------------------------------------------- #
     # Low‑level single request (runs in threadpool so it doesn't block loop)
     # --------------------------------------------------------------------- #
-    @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=15))
     def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
         # LOGGER.debug(f"[ClientBackend] _blocking_call kwargs: {kwargs}")
         if "num_return_sequences" in kwargs:
@@ -523,7 +521,7 @@ class ClientBackend(LLMBackend):
         else:
             n = 1
 
-        LOGGER.debug(f"[ClientBackend] messages: {messages}")
+        logger.debug(f"[ClientBackend] messages: {messages}")
 
         with open(f"{AGENT_DATA_DIR}/debug/messages_{len(messages)}.json", "w") as f:
             json.dump(messages, f, indent=4)
@@ -539,7 +537,7 @@ class ClientBackend(LLMBackend):
             **kwargs,
         )
         resp_json = resp.dict()
-        LOGGER.debug(f"[ClientBackend] resp_json: {resp_json}")
+        logger.debug(f"[ClientBackend] resp_json: {resp_json}")
         response_texts = [choice["message"]["content"] for choice in resp_json["choices"]]
         tool_calls = [choice["message"]["tool_calls"] for choice in resp_json["choices"]]
 
@@ -555,7 +553,7 @@ class ClientBackend(LLMBackend):
         """
         This is actually the not streaming. We simply return the generated text.
         """
-        LOGGER.debug(f"[ClientBackend] generate_streaming kwargs: {kwargs}")
+        logger.debug(f"[ClientBackend] generate_streaming kwargs: {kwargs}")
         response_texts_dicts = await self.async_generate(messages, **kwargs)
         for response in response_texts_dicts:
             yield response
@@ -619,7 +617,7 @@ class ClientBackend(LLMBackend):
 
 
     # Public API ‑‑ sync or async depending on caller's context
-    def async_generate(
+    def generate(
         self,
         messages: List[List[Dict]] | List[Dict],
         **kwargs,
@@ -637,11 +635,12 @@ class ClientBackend(LLMBackend):
             messages_list = [messages]  # single
         else:
             messages_list = messages     # batch
-
-        messages_list, kwargs = self._preprocess_messages_and_args(messages_list, **kwargs)
-        # LOGGER.debug(f"[ClientBackend] messages_list: {messages_list}")
+        logger.debug(f"[ClientBackend] messages_list: {messages_list}")
+        messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
 
         async def _runner():
+            # Ensure refiller is running in this event loop
+            self._ensure_refiller_running()
             tasks = [asyncio.create_task(self._call(_input, **kwargs)) for _input in messages_list]
             # Flatten the response list
             response_texts_list_or_dict = await asyncio.gather(*tasks)
@@ -671,7 +670,7 @@ class ClientBackend(LLMBackend):
     async def generate_async(self,
             messages: List[List[Dict]] | List[Dict],
             **kwargs) -> List[str]:
-        return await self.async_generate(messages, **kwargs)
+        return await self.generate(messages, **kwargs)
 
     # Background token‑bucket refill (one token each 60/max_rpm seconds)
     async def _refill_tokens(self):
@@ -683,11 +682,11 @@ class ClientBackend(LLMBackend):
 
     def _ensure_refiller_running(self):
         if self._refill_task is None or self._refill_task.done():
-            loop = asyncio.get_event_loop()
-            self._refill_task = loop.create_task(self._refill_tokens())
-
-    # Automatically start the refiller at first public use
-    def __getattribute__(self, name):
-        if name == "generate":
-            self._ensure_refiller_running()
-        return super().__getattribute__(name)
+            try:
+                # Try to get running loop first
+                loop = asyncio.get_running_loop()
+                self._refill_task = loop.create_task(self._refill_tokens())
+            except RuntimeError:
+                # No event loop running, this will be handled by the caller
+                # The refiller will be started when we're in an event loop
+                pass

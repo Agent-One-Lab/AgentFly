@@ -270,7 +270,7 @@ def tokenize_conversations(
     concatenated_mm_inputs = {}
     if concatenate_mm_inputs:
         for key in batch_mm_inputs[0].keys():
-            if mm_inputs[key]:
+            if isinstance(mm_inputs[key], torch.Tensor):
                 concatenated_mm_inputs[key] = torch.cat([mm_inputs[key] for mm_inputs in batch_mm_inputs if mm_inputs[key] is not None], dim=0)
 
     inputs = dict(

@@ -38,11 +38,13 @@ class MetricEvent:
     step        Integer training step or episode counter.
     timestamp   Unix seconds (auto‑filled if omitted).
     tags        Arbitrary key/value pairs for filtering (e.g. run_id, module).
+    sinks       List of sink names to send this event to. If None, sends to all sinks.
     """
 
     kind: Literal["scalar", "hist", "text", "resource", "list"]
     name: str
     value: Any
+    sinks: Optional[List[str]] = None
     step: Optional[int] = None
     x: Optional[int] = None
     x_name: Optional[str] = "x_axis"
@@ -53,7 +55,6 @@ class MetricEvent:
     def __post_init__(self) -> None:
         if self.timestamp is None:
             self.timestamp = time.time()
-
 
 
 class BaseSink(abc.ABC):
@@ -100,21 +101,40 @@ def serialize_for_json(obj):
 class JsonlSink(BaseSink):
     """Append events as JSON-Lines - human & machine friendly."""
 
-    def __init__(self, path: str) -> None:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self._f = open(path, "a", buffering=1, encoding="utf-8")
+    def __init__(self, directory: str) -> None:
+        os.makedirs(os.path.dirname(directory) or ".", exist_ok=True)
+        self.directory = directory
+        if os.path.isdir(directory):
+            default_file = os.path.join(directory, "default.jsonl")
+            with open(default_file, 'w') as f:
+                pass
+
+            self.log_files = {"default": open(default_file, "a", buffering=1, encoding="utf-8")}
+        else:
+            self.log_files = {}
+
         self._lock = asyncio.Lock()
 
     async def log(self, evt: MetricEvent) -> None:
+        evt_name = evt.name.replace("/", "-")
+        if evt_name not in self.log_files:
+            file_name = os.path.join(self.directory, f"{evt_name}.jsonl")
+            with open(file_name, 'w') as f:
+                pass
+            self.log_files[evt_name] = open(file_name, "a", buffering=1, encoding="utf-8")
+        file_obj = self.log_files[evt_name]
+
         async with self._lock:
-            self._f.write(json.dumps(serialize_for_json(asdict(evt)), ensure_ascii=False) + "\n")
+            file_obj.write(json.dumps(serialize_for_json(asdict(evt)), ensure_ascii=False) + "\n")
 
     async def flush(self) -> None:
-        self._f.flush()
+        for file_obj in self.log_files.values():
+            file_obj.flush()
 
     async def close(self) -> None:
         await super().close()
-        self._f.close()
+        for file_obj in self.log_files.values():
+            file_obj.close()
 
 
 class WandbSink(BaseSink):
@@ -130,6 +150,9 @@ class WandbSink(BaseSink):
         self.tables: Dict[str, wandb.Table] = {}
 
     async def log(self, evt: MetricEvent) -> None:  # pragma: no cover
+        """
+        Log the event to wandb.
+        """
         if wandb.run is not None:
             payload = {evt.name: evt.value, **evt.tags}
             if evt.x is not None:
@@ -249,7 +272,10 @@ class Monitor:
             evt = await cls._queue.get()
             if evt is None:  # sentinel
                 break
-            for sink in list(cls._sinks.values()):
+            for sink_name, sink in list(cls._sinks.items()):
+                # Check if this sink should receive this event
+                if evt.sinks is not None and sink_name not in evt.sinks:
+                    continue
                 try:
                     await sink.log(evt)
                 except Exception as exc:
