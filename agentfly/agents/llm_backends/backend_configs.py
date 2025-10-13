@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 
 from vllm import AsyncEngineArgs
@@ -53,7 +53,7 @@ class AsyncVLLMConfig:
         data_parallel_size (int): Data parallel size.
         tensor_parallel_size (int): Tensor parallel size.
     """
-    engine_args: AsyncEngineArgs = AsyncEngineArgs()
+    engine_args: AsyncEngineArgs = field(default_factory=AsyncEngineArgs)
 
     def __init__(self, **kwargs):
         self.engine_args = AsyncEngineArgs(**kwargs)

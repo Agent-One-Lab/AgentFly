@@ -13,7 +13,7 @@ from .....agents.templates.utils import compare_hf_template
 from transformers import AutoTokenizer
 import pytest
 # "qwen2.5-think", "qwen2.5", "qwen2.5-no-tool",
-@pytest.mark.parametrize("template", ["qwen2.5-vl"])
+@pytest.mark.parametrize("template", ["qwen3-vl-instruct"])
 @pytest.mark.parametrize("messages", [
     [
         {

@@ -5,8 +5,9 @@ from typing import Callable
 
 @dataclasses.dataclass
 class SystemPolicy:
-    use_system: bool = True
-    use_system_without_system_message: bool = True
+    use_system: bool = True # Global control
+    use_system_without_system_message: bool = True # When no system message is provided, use the system message even it is empty (will use the default one if provided)
+    use_system_with_tools_provided: bool = True # When tools are provided, use the system message with tools even no system message is provided
     content_processor: Callable[[str], str] = None
 
 
@@ -32,7 +33,7 @@ class Llama32DateProcessor(SystemContentProcessor):
         - Format should be 'dd MMM yyyy' (e.g., '15 Dec 2024')
         - No external context variables required
     """
-    def __call__(self, system_message: str) -> str:
+    def __call__(self, system_message: str, tools: str) -> str:
         return f"Cutting Knowledge Date: December 2023\nToday Date: {datetime.datetime.now().strftime('%d %b %Y')}\n\n{system_message}"
     
     def jinja(self) -> str:

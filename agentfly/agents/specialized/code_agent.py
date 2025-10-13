@@ -50,7 +50,6 @@ class CodeAgent(BaseAgent):
             template=template,
             system_prompt=CodeAgentSystemPrompt,
             tools=tools,
-            max_length=8192,
             **kwargs
         )
 

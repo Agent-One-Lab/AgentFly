@@ -1,7 +1,7 @@
 
 
 import os
-from ..agents.templates.templates import get_template
+from ..templates import get_template
 from .. import AGENT_DATA_DIR
 import click
 
@@ -39,5 +39,5 @@ def main(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization):
 
 
 if __name__=="__main__":
-    "python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct --template qwen2.5-vl-system-tool --tp 2 --dp 2"
+    "python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen2.5-VL-72B-Instruct --template qwen2.5-vl-system-tool --tp 2 --dp 2"
     main()

@@ -64,8 +64,6 @@ class Template:
     system_template_with_tools: str = None
     # The system message
     system_message: str = ""
-    # Stop criteria (the default one is EOS token)
-    stop_words: Union[str, List[str]] = None
     # Behaviors
     # The tool template
     tool_template: str = None
@@ -74,6 +72,12 @@ class Template:
     user_template_with_tools: str = None
     # The assistant template
     assistant_template: str = None
+
+
+    # Stop criteria (the default one is EOS token)
+    stop_words: Union[str, List[str]] = None
+    # Generation prompt
+    generation_prompt: str = None
     # Global policy
     global_policy: "GlobalPolicy" = None
     # System message policy
@@ -283,7 +287,7 @@ class Template:
         """Append the generation prefix so the model knows to continue
         generating an assistant response."""
 
-        generation_prefix = self._encode_generation_prompt()
+        generation_prefix, prefix = self._encode_generation_prompt()
         elements.append(generation_prefix)
         roles.append(Role.ASSISTANT_PREFIX)
 
@@ -319,11 +323,16 @@ class Template:
         return "\n".join([json.dumps(tool) for tool in tools])
 
     def _encode_system_message_default(self, tools=None) -> str:
+        Logger.debug(f"[Template] Encoding system message default for template: {self.name}")
         if not self.system_policy.use_system_without_system_message:
-            return ""
+            if tools is None:
+                return ""
+            else:
+                # If tools are provided, use the system message with tools
+                pass
         
         if self.system_policy.content_processor is not None:
-            system_message = self.system_policy.content_processor(self.system_message)
+            system_message = self.system_policy.content_processor(self.system_message, tools=tools)
         else:
             system_message = self.system_message
 
@@ -337,13 +346,14 @@ class Template:
 
     def _encode_system_message(self, content, tools=None) -> str:
         # Handle both string content and list content formats
+        Logger.debug(f"[Template] Encoding system message for template: {self.name}")
         if isinstance(content, str):
             system_message = content
         else:
             system_message = content[0]['text']
             
         if self.system_policy.content_processor is not None:
-            system_message = self.system_policy.content_processor(system_message)
+            system_message = self.system_policy.content_processor(system_message, tools=tools)
 
         if tools is None:
             return self.system_template.format(system_message=system_message)
@@ -425,27 +435,36 @@ class Template:
         return tool_message
     
     def _encode_generation_prompt(self) -> str:
+        # Use generation prompt if it is set
         if "{content}" in self.assistant_template:
             prefix = self.assistant_template.split("{content}")[0]
-            return prefix
+            if self.generation_prompt:
+                generation_prompt = self.generation_prompt
+            else:
+                generation_prompt = prefix
         else:
             raise ValueError(f"Assistant template {self.assistant_template} does not contain {{content}}")
 
+        return generation_prompt, prefix
+
+
     def _split_assistant_message(self, assistant_message: str) -> List[str]:
         # Split the assistant message into generation prefix, content, and generation suffix
-        generation_prefix = self._encode_generation_prompt()
-        assert assistant_message.startswith(generation_prefix), f"Assistant message {assistant_message} does not start with {generation_prefix}"
-        content_suffix = assistant_message[len(generation_prefix):]
+        generation_prefix, prefix = self._encode_generation_prompt()
+        assert assistant_message.startswith(prefix), f"Assistant message {assistant_message} does not start with {prefix}"
+        content_suffix = assistant_message[len(prefix):]
+        content = content_suffix
+        suffix = ""
         for stop_word in self.stop_words:
             if stop_word in content_suffix:
                 stop_word_index = content_suffix.index(stop_word)
                 content = content_suffix[:stop_word_index+len(stop_word)]
                 suffix = content_suffix[stop_word_index+len(stop_word):]
                 break
-        return generation_prefix, content, suffix
+        return prefix, content, suffix
 
 
-    def encode(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None) -> str:
+    def encode(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None, **kwargs) -> str:
         """Encode the messages to token ids.
 
         Args:
@@ -464,15 +483,15 @@ class Template:
         
         if self.supports_vision():
             # Use vision-aware encoding with proper alignment
-            return self._encode_with_vision_processor(messages, tokenizer, return_tensors, tools, add_generation_prompt=add_generation_prompt, processor=processor)
+            return self._encode_with_vision_processor(messages, tokenizer, return_tensors, tools, add_generation_prompt=add_generation_prompt, processor=processor, **kwargs)
         else:
             # Use standard encoding
-            return self._encode_standard(messages, tokenizer, return_tensors, tools, add_generation_prompt=add_generation_prompt)
+            return self._encode_standard(messages, tokenizer, return_tensors, tools, add_generation_prompt=add_generation_prompt, **kwargs)
 
-    def _encode_standard(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False) -> str:
+    def _encode_standard(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, **kwargs) -> str:
         Logger.debug(f"[Template] Encoding standard for template: {self.name}")
         """Standard encoding without vision support"""
-        prompt, elements, roles = self.render(messages, tools=tools, add_generation_prompt=add_generation_prompt)
+        prompt, elements, roles = self.render(messages, tools=tools, add_generation_prompt=add_generation_prompt, **kwargs)
         elements, mask_flags = self._postprocess_elements(elements, roles)
         input_ids = []
         attention_mask = []
@@ -509,7 +528,7 @@ class Template:
             inputs = {k: torch.tensor([v]) for k, v in inputs.items()}
         return inputs
 
-    def _encode_with_vision_processor(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None) -> str:
+    def _encode_with_vision_processor(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None, **kwargs) -> str:
         Logger.debug(f"[Template] Encoding with vision processor for template: {self.name}")
         """Encode with vision processor handling proper alignment"""
         from .vision_processor import get_processor
@@ -521,7 +540,7 @@ class Template:
             raise ValueError(f"No vision processor registered for template: {self.name}")
         
         # Get base prompt and mask information
-        prompt, elements, roles = self.render(messages, tools=tools, add_generation_prompt=add_generation_prompt)
+        prompt, elements, roles = self.render(messages, tools=tools, add_generation_prompt=add_generation_prompt, **kwargs)
         elements, mask_flags = self._postprocess_elements(elements, roles)
         
         # Extract vision inputs
@@ -687,7 +706,7 @@ class Template:
         # Compute default system message considering content processor
         if self.system_policy.content_processor is not None:
             # Apply content processor to system message
-            processed_system_message = self.system_policy.content_processor(self.system_message)
+            processed_system_message = self.system_policy.content_processor(self.system_message, tools=None) # TODO: tools is not used here, but we need to pass it for consistency
             default_system = self.system_template.format(system_message=processed_system_message)
         else:
             default_system = self.system_template.format(system_message=self.system_message)
@@ -930,9 +949,9 @@ class Template:
         ]
 
 
-    def render_with_mask(self, messages: List[Dict], add_generation_prompt: bool = False, tools=None):
+    def render_with_mask(self, messages: List[Dict], add_generation_prompt: bool = False, tools=None, **kwargs):
         from termcolor import colored
-        prompt, elements, roles = self.render(messages, add_generation_prompt=add_generation_prompt, tools=tools)
+        prompt, elements, roles = self.render(messages, add_generation_prompt=add_generation_prompt, tools=tools, **kwargs)
         elements, mask_flags = self._postprocess_elements(elements, roles)
 
 
@@ -941,7 +960,7 @@ class Template:
             if mask_flag:
                 prompt += colored(element, "red")
             else:
-                prompt += element
+                prompt += colored(element, "green")
         return prompt, elements, mask_flags
 
     def set_system_message(self, system_message: str):
@@ -950,7 +969,7 @@ class Template:
 
 
     def copy(self):
-        return Template(
+        return self.__class__(
             name=self.name,
             system_template=self.system_template,
             system_template_with_tools=self.system_template_with_tools,
@@ -960,6 +979,7 @@ class Template:
             assistant_template=self.assistant_template,
             tool_template=self.tool_template,
             stop_words=self.stop_words,
+            generation_prompt=self.generation_prompt,
             vision_start=self.vision_start,
             vision_end=self.vision_end,
             image_token=self.image_token,
@@ -981,6 +1001,203 @@ class Template:
             "image_token": self.image_token,
             "video_token": self.video_token,
         }
+
+class Qwen3Template(Template):
+    def render(self, messages: List[Dict], tools=None, add_generation_prompt: bool = False, enable_thinking: bool = False) -> str:
+        """Render the Qwen3 template with special thinking logic.
+        
+        Args:
+            messages: The list of messages
+            tools: The list of tools
+            add_generation_prompt: Whether to add the generation prefix
+            enable_thinking: Whether to enable thinking mode
+            
+        Returns:
+            prompt: The final prompt string
+            elements: The list of string *elements* that compose the prompt
+            roles: The corresponding list of *roles* (used by downstream post-processing)
+        """
+        
+        # Step 1 – decide tool placement & clone messages
+        work_messages, tools_str, insert_tools_idx = self._insert_tools(messages, tools)
+        
+        # Step 2 – clean think content from all assistant messages except the last one
+        work_messages = self._clean_think_content(work_messages)
+        
+        # Step 2.5 – reformat think content in the last assistant message if it exists
+        if work_messages and work_messages[-1].get("role") == "assistant":
+            work_messages = self._reformat_last_assistant_think_content(work_messages)
+        
+        # Step 3 – encode each conversation turn to text tokens
+        elements, roles = self._encode_turns(work_messages, tools_str, insert_tools_idx)
+        
+        # Step 4 – handle special generation prompt logic for Qwen3
+        if add_generation_prompt:
+            self._maybe_add_generation_prompt_qwen3(elements, roles, enable_thinking, work_messages)
+        elif work_messages and work_messages[-1].get("role") == "assistant":
+            # Add empty think tokens to the last assistant message if it doesn't already have think tags
+            self._add_empty_think_to_last_assistant(elements, roles, work_messages)
+        
+        # Concatenate the prompt
+        prompt = "".join(elements)
+        return prompt, elements, roles
+    
+    def _clean_think_content(self, messages: List[Dict]) -> List[Dict]:
+        """Remove all think content (<think>...</think>) from assistant messages and reformat existing think content."""
+        cleaned_messages = []
+        for i, message in enumerate(messages):
+            if message.get("role") == "assistant" and i != len(messages) - 1:
+                cleaned_message = message.copy()
+                content = message["content"]
+                
+                if isinstance(content, str):
+                    # Remove think content from string
+                    cleaned_content = self._remove_think_tags(content)
+                else:
+                    # Handle list content format
+                    cleaned_content = []
+                    for item in content:
+                        if item["type"] == "text":
+                            cleaned_text = self._remove_think_tags(item["text"])
+                            cleaned_content.append({"type": "text", "text": cleaned_text})
+                        else:
+                            cleaned_content.append(item)
+                
+                cleaned_message["content"] = cleaned_content
+                cleaned_messages.append(cleaned_message)
+            else:
+                cleaned_messages.append(message)
+        
+        return cleaned_messages
+    
+    def _remove_think_tags(self, text: str) -> str:
+        """Remove <think>...</think> tags from text."""
+        import re
+        # Remove <think>...</think> tags and their content
+        pattern = r'<think>.*?</think>'
+        return re.sub(pattern, '', text, flags=re.DOTALL)
+    
+    def _has_think_tags(self, text: str) -> bool:
+        """Check if text contains <think> and </think> tags."""
+        return '<think>' in text and '</think>' in text
+    
+    def _reformat_think_content(self, text: str) -> str:
+        """Reformat think content to ensure each think token ends with two newlines."""
+        import re
+        
+        def replace_think_content(match):
+            think_content = match.group(1)
+            # Ensure the think content ends with exactly two newlines
+            think_content = think_content.rstrip('\n')
+            return f'<think>\n{think_content}\n</think>\n\n'
+        
+        # Find and replace think tags, ensuring proper formatting
+        pattern = r'<think>(.*?)</think>'
+        return re.sub(pattern, replace_think_content, text, flags=re.DOTALL)
+    
+    def _reformat_last_assistant_think_content(self, messages: List[Dict]) -> List[Dict]:
+        """Reformat think content in the last assistant message."""
+        if not messages or messages[-1].get("role") != "assistant":
+            return messages
+        
+        messages = messages.copy()
+        last_message = messages[-1].copy()
+        content = last_message["content"]
+        
+        if isinstance(content, str):
+            # Reformat think content in string
+            last_message["content"] = self._reformat_think_content(content)
+        else:
+            # Handle list content format
+            reformed_content = []
+            for item in content:
+                if item["type"] == "text":
+                    reformed_text = self._reformat_think_content(item["text"])
+                    reformed_content.append({"type": "text", "text": reformed_text})
+                else:
+                    reformed_content.append(item)
+            last_message["content"] = reformed_content
+        
+        messages[-1] = last_message
+        return messages
+    
+    def _maybe_add_generation_prompt_qwen3(self, elements: List[str], roles: List[Role], enable_thinking: bool, work_messages: List[Dict]):
+        """Append the generation prefix with special Qwen3 thinking logic."""
+        if enable_thinking:
+            # Use standard generation prompt
+            generation_prefix, prefix = self._encode_generation_prompt()
+            elements.append(generation_prefix)
+            roles.append(Role.ASSISTANT_PREFIX)
+        else:
+            # Check if the last message has think tags
+            has_existing_think = False
+            if work_messages and work_messages[-1].get("role") == "assistant":
+                content = work_messages[-1]["content"]
+                if isinstance(content, str):
+                    has_existing_think = self._has_think_tags(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        if item.get("type") == "text" and self._has_think_tags(item["text"]):
+                            has_existing_think = True
+                            break
+            
+            generation_prefix, prefix = self._encode_generation_prompt()
+            if has_existing_think:
+                # Don't add empty think tokens if think tags already exist
+                elements.append(generation_prefix)
+            else:
+                # Add empty think tokens after the generation prefix
+                elements.append(generation_prefix + "<think>\n\n</think>\n\n")
+            roles.append(Role.ASSISTANT_PREFIX)
+    
+    def _add_empty_think_to_last_assistant(self, elements: List[str], roles: List[Role], work_messages: List[Dict]):
+        """Add empty think tokens to the last assistant message if it doesn't already have think tags."""
+        if not elements or not roles or not work_messages:
+            return
+        
+        # Check if the last message has think tags
+        has_existing_think = False
+        if work_messages[-1].get("role") == "assistant":
+            content = work_messages[-1]["content"]
+            if isinstance(content, str):
+                has_existing_think = self._has_think_tags(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if item.get("type") == "text" and self._has_think_tags(item["text"]):
+                        has_existing_think = True
+                        break
+        
+        # Only add empty think tokens if no existing think tags
+        if not has_existing_think:
+            generation_prefix, prefix = self._encode_generation_prompt()
+            
+            # Find the last assistant element
+            for i in range(len(elements) - 1, -1, -1):
+                if roles[i] == Role.ASSISTANT:
+                    # Add empty think tokens at the start of the assistant message
+                    elements[i] = prefix + "<think>\n\n</think>\n\n" + elements[i][len(prefix):]
+                    break
+
+    def _split_assistant_message(self, assistant_message: str) -> List[str]:
+        # Split the assistant message into generation prefix, content, and generation suffix
+        generation_prefix, prefix = self._encode_generation_prompt()
+        assert assistant_message.startswith(prefix), f"Assistant message {assistant_message} does not start with {prefix}"
+
+        # We need to detect whether the assistant message starts with empty think tokens
+        # If so, we need to set empty think tokens as non-assistant message
+        if assistant_message.startswith(prefix + "<think>\n\n</think>\n\n"):
+            prefix = prefix + "<think>\n\n</think>\n\n"
+
+        content_suffix = assistant_message[len(prefix):]
+        content = content_suffix
+        suffix = ""
+        for stop_word in self.stop_words:
+            if stop_word in content_suffix:
+                stop_word_index = content_suffix.index(stop_word)
+                content = content_suffix[:stop_word_index+len(stop_word)]
+                suffix = content_suffix[stop_word_index+len(stop_word):]
+                break
+        return prefix, content, suffix
 
 class Chat:
     def __init__(self, template: str, messages: List[List[str]]=None, tools=None, tokenizer: PreTrainedTokenizer = None):
@@ -1037,29 +1254,30 @@ class Chat:
         """Set the messages for the chat."""
         self.messages = self.convert_to_hf_format_messages(messages)
 
-    def prompt(self, add_generation_prompt=False, tools=None) -> str:
+    def prompt(self, add_generation_prompt=False, tools=None, **kwargs) -> str:
         """Get the prompt for the chat.
 
         Args:
             add_generation_prompt: Whether to add the generation prompt.
             tools: The tools to use for the chat.
+            **kwargs: Additional keyword arguments to pass to the template render method.
 
         Returns:
             The prompt for the chat.
         """
         self.flags['add_generation_prompt'] = add_generation_prompt
         tools = tools or self.tools
-        prompt, _, _ = self.template.render(messages=self.messages, tools=tools, add_generation_prompt=add_generation_prompt)
+        prompt, _, _ = self.template.render(messages=self.messages, tools=tools, add_generation_prompt=add_generation_prompt, **kwargs)
         return prompt
 
-    def prompt_with_mask(self, add_generation_prompt=False, tools=None) -> str:
-        prompt_with_mask, _, _ = self.template.render_with_mask(messages=self.messages, add_generation_prompt=add_generation_prompt, tools=tools)
+    def prompt_with_mask(self, add_generation_prompt=False, tools=None, **kwargs) -> str:
+        prompt_with_mask, _, _ = self.template.render_with_mask(messages=self.messages, add_generation_prompt=add_generation_prompt, tools=tools, **kwargs)
         return prompt_with_mask
 
     def vision_inputs(self) -> List[Any]:
         return self.template.get_vision_inputs(self.messages)
 
-    def tokenize(self, tokenizer: PreTrainedTokenizer = None, add_generation_prompt=False, tools=None, processor=None) -> List[int]:
+    def tokenize(self, tokenizer: PreTrainedTokenizer = None, add_generation_prompt=False, tools=None, processor=None, **kwargs) -> List[int]:
         """Tokenize the messages.
 
         Args:
@@ -1083,7 +1301,7 @@ class Chat:
 
         if tools is None:
             tools = self.tools
-        return self.template.encode(messages=self.messages, tokenizer=tokenizer, return_tensors="pt", tools=tools, add_generation_prompt=add_generation_prompt, processor=processor)
+        return self.template.encode(messages=self.messages, tokenizer=tokenizer, return_tensors="pt", tools=tools, add_generation_prompt=add_generation_prompt, processor=processor, **kwargs)
 
     def append(self, message: Union[Dict]):
         self._convert_single_message_to_hf_format(message)
@@ -1154,6 +1372,22 @@ register_template(
     )
 )
 
+register_template(
+    Template(
+        name="qwen3-vl-instruct",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        system_message="You are a helpful assistant.",
+        system_template_with_tools="""<|im_start|>system\n{system_message}\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",
+        vision_start="<|vision_start|>",
+        vision_end="<|vision_end|>",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        stop_words=["<|im_end|>"],
+    )
+)
 
 register_template(
     Template(
@@ -1184,6 +1418,23 @@ register_template(
         vision_end="<|vision_end|>",
         image_token="<|image_pad|>",
         video_token="<|video_pad|>",
+    )
+)
+
+register_template(
+    Qwen3Template(
+        name="qwen3",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        system_template_with_tools="""<|im_start|>system\n{system_message}# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        stop_words=["<|im_end|>"],
+        system_policy=SystemPolicy(
+            use_system_without_system_message=False,
+            content_processor=lambda system, tools: f"{system}\n\n" if (system != "" and tools) else system,
+        ),
+        chat_template="{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0].role == 'system' %}\n        {{- messages[0].content + '\\n\\n' }}\n    {%- endif %}\n    {{- \"# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0].role == 'system' %}\n        {{- '<|im_start|>system\\n' + messages[0].content + '<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}\n{%- for message in messages[::-1] %}\n    {%- set index = (messages|length - 1) - loop.index0 %}\n    {%- if ns.multi_step_tool and message.role == \"user\" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}\n        {%- set ns.multi_step_tool = false %}\n        {%- set ns.last_query_index = index %}\n    {%- endif %}\n{%- endfor %}\n{%- for message in messages %}\n    {%- if message.content is string %}\n        {%- set content = message.content %}\n    {%- else %}\n        {%- set content = '' %}\n    {%- endif %}\n    {%- if (message.role == \"user\") or (message.role == \"system\" and not loop.first) %}\n        {{- '<|im_start|>' + message.role + '\\n' + content + '<|im_end|>' + '\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {%- set reasoning_content = '' %}\n        {%- if message.reasoning_content is string %}\n            {%- set reasoning_content = message.reasoning_content %}\n        {%- else %}\n            {%- if '</think>' in content %}\n                {%- set reasoning_content = content.split('</think>')[0].rstrip('\\n').split('<think>')[-1].lstrip('\\n') %}\n                {%- set content = content.split('</think>')[-1].lstrip('\\n') %}\n            {%- endif %}\n        {%- endif %}\n        {%- if loop.index0 > ns.last_query_index %}\n            {%- if loop.last or (not loop.last and reasoning_content) %}\n                {{- '<|im_start|>' + message.role + '\\n<think>\\n' + reasoning_content.strip('\\n') + '\\n</think>\\n\\n' + content.lstrip('\\n') }}\n            {%- else %}\n                {{- '<|im_start|>' + message.role + '\\n' + content }}\n            {%- endif %}\n        {%- else %}\n            {{- '<|im_start|>' + message.role + '\\n' + content }}\n        {%- endif %}\n        {%- if message.tool_calls %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if (loop.first and content) or (not loop.first) %}\n                    {{- '\\n' }}\n                {%- endif %}\n                {%- if tool_call.function %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {{- '<tool_call>\\n{\"name\": \"' }}\n                {{- tool_call.name }}\n                {{- '\", \"arguments\": ' }}\n                {%- if tool_call.arguments is string %}\n                    {{- tool_call.arguments }}\n                {%- else %}\n                    {{- tool_call.arguments | tojson }}\n                {%- endif %}\n                {{- '}\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- content }}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n    {%- if enable_thinking is defined and enable_thinking is false %}\n        {{- '<think>\\n\\n</think>\\n\\n' }}\n    {%- endif %}\n{%- endif %}",
     )
 )
 
@@ -1281,13 +1532,31 @@ register_template(
         stop_words=["<|eot_id|>"],
         system_policy=SystemPolicy(
             use_system=True,
-            content_processor=lambda x: f"\n{x}",
+            content_processor=lambda system_message, tools: f"\n{system_message}",
         ),
         tool_policy=ToolPolicy(
             placement=ToolPlacement.SYSTEM,
             content_processor=ToolMainContentProcessor(),
             formatter=JsonCompactFormatter(),
         )
+    )
+)
+
+register_template(
+    Template(
+        name="deepseek-r1-distill-qwen",
+        system_template="{system_message}",
+        user_template="<｜User｜>{content}",
+        assistant_template="<｜Assistant｜>{content}<｜end▁of▁sentence｜>",
+        stop_words=["<｜end▁of▁sentence｜>"],
+        generation_prompt="<｜Assistant｜><think>\n",
+        global_policy=GlobalPolicy(
+            prefix="<｜begin▁of▁sentence｜>"
+        ),
+        system_policy=SystemPolicy(
+            use_system=True,
+            use_system_without_system_message=False,
+        ),
     )
 )
 

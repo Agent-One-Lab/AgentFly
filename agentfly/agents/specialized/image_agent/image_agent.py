@@ -453,3 +453,21 @@ class ImageEditingAgent(BaseAgent):
             "image": image_base64
         }
         return result
+
+    @tool(name="give_answer", description="Give the final answer and finish the task.", status="finish")
+    async def give_answer(self, final_image_id: str, description: str) -> str:
+        """
+        Give the final answer.
+        
+        Args:
+            final_image_id: ID of the final image
+            description: Description of the final result
+        """
+        result = {
+            "image_id": final_image_id,
+            "description": description
+        }
+        result_json = json.dumps(result)
+        return {
+            "observation": result_json
+        }

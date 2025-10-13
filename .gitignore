@@ -130,6 +130,10 @@ logs
 log
 outputs
 *.out
+data/
+test_cache/
+/*.jpg
+/*.png
 
 # Ignore all images in current folder
 /*.jpg
@@ -146,3 +150,4 @@ temp/
 test_outputs/
 agentfly/data/
 *.ipynb
+

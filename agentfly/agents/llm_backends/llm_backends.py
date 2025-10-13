@@ -3,12 +3,10 @@ LLM Backend module for reward functions.
 This module provides a unified interface to different LLM implementations.
 """
 import asyncio
-from asyncore import loop
 from collections import deque
 import copy
 from functools import partial
 import json
-import time
 from typing import Dict, Any, List, Optional, Callable, AsyncGenerator
 import uuid
 import numpy as np
@@ -75,7 +73,7 @@ class TransformersBackend(LLMBackend):
     It supports both synchronous and asynchronous text generation with streaming capabilities.
     """
     
-    def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
         """Initialize TransformersBackend.
         
         Args:
@@ -179,7 +177,7 @@ class VLLMBackend(LLMBackend):
     vLLM provides efficient memory management and high throughput for model serving.
     """
     
-    def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
         """Initialize VLLMBackend.
         
         Args:
@@ -276,7 +274,7 @@ class AsyncVLLMBackend(LLMBackend):
     better resource utilization and scalability for concurrent requests.
     """
     
-    def __init__(self, model_name_or_path: str, template: str, max_length: int=8192, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
         """Initialize AsyncVLLMBackend.
         
         Args:
@@ -390,7 +388,7 @@ class AsyncVerlBackend(LLMBackend):
     complex inference pipelines.
     """
     
-    def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=8192, **kwargs):
+    def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=None, **kwargs):
         """Initialize AsyncVerlBackend.
         
         Args:
@@ -479,7 +477,7 @@ class ClientBackend(LLMBackend):
         max_requests_per_minute: int = 100,
         timeout: int = 600,
         api_key: str = "EMPTY",
-        max_length: int = 8192,
+        max_length: int = None,
         max_new_tokens: int = 1024,
         **kwargs,
     ):

@@ -10,6 +10,10 @@
 <a href="https://github.com/Agent-One-Lab/AgentFly" target="_blank"><img alt="Static Badge" src="https://img.shields.io/github/stars/Agent-One-Lab/AgentFly?style=for-the-badge&logo=github&color=a2d2ff"></a>
 </p>
 <p align="center">
+<a href="./assets/images/wechat.jpg" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/WeChat-%23e9edc9?style=for-the-badge&logo=wechat"></a>
+<a href="https://discord.gg/AyeWXgsB" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/discord-%23dedbd2?style=for-the-badge&logo=discord"></a>
+</p>
+<p align="center">
 <img alt="Static Badge" src="https://img.shields.io/badge/Agent%20RL--%23000000?style=social">
 <img alt="Static Badge" src="https://img.shields.io/badge/Multi%20Turn--%23000000?style=social">
 <img alt="Static Badge" src="https://img.shields.io/badge/Multi%20Modal--%23000000?style=social">

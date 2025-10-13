@@ -48,7 +48,7 @@ verl = [
     "liger-kernel",
     "numpy",
     "pandas",
-    "peft==0.13.0",
+    "peft",
     "pyarrow>=15.0.0",
     "pybind11",
     "pylatexenc",
