@@ -26,9 +26,11 @@ from .utils import (
     dilate_mask,
     feather_mask,
     visualize_boxes,
-    fetch_image
+    fetch_image,
+    ImageEditRequest
 )
-from ....utils.vision import image_to_data_uri, image_to_pil
+from .utils.diffuser_client import DiffuserClient
+from ....utils.vision import image_to_data_uri, image_to_pil, open_image_from_any
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +117,23 @@ class ImageEditingAgent(BaseAgent):
         self,
         model_name_or_path: str,
         system_prompt: str = IMAGE_AGENT_SYSTEM_PROMPT,
+        client_config: Dict = None,
         **kwargs
     ):
         self._image_database = {}
-        tools = [self.qwen_edit_image_tool]
+        
+        # Initialize client if nodes are provided
+        if client_config:
+            self._client = DiffuserClient(
+                nodes=client_config.get('nodes', []),
+                max_requests_per_minute=client_config.get('max_requests_per_minute', 60),
+                timeout=client_config.get('timeout', 6000)
+            )
+            tools = [self.qwen_image_edit_tool_client]
+        else:
+            self._client = None
+            tools = [self.qwen_image_edit_tool]
+            
         super().__init__(
             model_name_or_path=model_name_or_path,
             system_prompt=system_prompt,
@@ -196,7 +211,7 @@ class ImageEditingAgent(BaseAgent):
             if message["role"] == "user":
                 for content in message["content"]:
                     if content["type"] == "image":
-                        image = fetch_image(content["image"])
+                        image = open_image_from_any(content["image"])
                         image_id = self._store_image(image)
                 message["content"].insert(0, {"type": "text", "text": f"Image id: {image_id}"})
                 break
@@ -406,10 +421,10 @@ class ImageEditingAgent(BaseAgent):
         return result
     
     @tool(
-        name="qwen_edit_image",
+        name="qwen_image_edit",
         description="Edit an image using Qwen-Image-Edit model with natural language instructions, return the image id and the edited image. Useful for tasks like changing colors, adding/removing elements, or style transfer."
     )
-    async def qwen_edit_image_tool(
+    async def qwen_image_edit_tool(
         self,
         image_id: str,
         prompt: str,
@@ -451,6 +466,71 @@ class ImageEditingAgent(BaseAgent):
         result = {
             "observation": f"Image Id: {new_image_id}",
             "image": image_base64
+        }
+        return result
+
+    @tool(
+        name="qwen_image_edit",
+        description="Edit an image using a remote image editing service via client. Useful for tasks like changing colors, adding/removing elements, or style transfer."
+    )
+    async def qwen_image_edit_tool_client(
+        self,
+        image_id: str,
+        prompt: str,
+        negative_prompt: str = " ",
+        true_cfg_scale: float = 4.0,
+        num_inference_steps: int = 50,
+        seed: int = 0
+    ) -> str:
+        """
+        Edit an image using a remote image editing service.
+        
+        Args:
+            image_id: ID of the image to edit
+            prompt: Natural language instruction for editing
+            negative_prompt: Negative prompt (default: " ")
+            true_cfg_scale: CFG scale (default: 4.0)
+            num_inference_steps: Number of steps (default: 50)
+            seed: Random seed (default: 0)
+            
+        Returns:
+            JSON string with observation and edited image data
+        """
+        if self._client is None:
+            raise RuntimeError("Client not initialized. Please provide client_nodes when creating the agent.")
+        
+        image = self._get_image(image_id)
+        
+        # Convert image to base64
+        image_base64 = image_to_data_uri(image)
+        
+        # Create request
+        request = ImageEditRequest(
+            image=image_base64,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            true_cfg_scale=true_cfg_scale,
+            num_inference_steps=num_inference_steps,
+            seed=seed,
+        )
+        
+        # Send request via client
+        result = await self._client.edit_image_async(request)
+        
+        if result["status"] != "success":
+            error_msg = result.get("error", "Unknown error occurred")
+            raise RuntimeError(f"Image editing failed: {error_msg}")
+        
+        # Get the edited image from the response
+        edited_image_b64 = result["result"]["image"]
+        
+        # Convert base64 back to PIL Image and store it
+        edited_image = image_to_pil(edited_image_b64)
+        new_image_id = self._store_image(edited_image)
+        
+        result = {
+            "observation": f"Image Id: {new_image_id}",
+            "image": edited_image_b64
         }
         return result
 

@@ -12,6 +12,51 @@ pip install git+https://github.com/huggingface/diffusers.git
 
 The ImageEditingAgent supports multiple backend configurations for different use cases:
 
+#### Using Client-Based Image Editing (Remote Service)
+
+Instead of loading image editing models locally, you can use a remote image editing service:
+
+```python
+from agentfly.agents import ImageEditingAgent
+
+# Create an agent with client-based image editing
+agent = ImageEditingAgent(
+    model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
+    client_nodes=[("localhost", 8000), ("localhost", 8001)],  # Remote image editing servers
+    max_requests_per_minute=50,  # Rate limiting
+    timeout=600  # Request timeout
+)
+```
+
+This approach:
+- **Reduces memory usage** - No need to load image editing models locally
+- **Enables scaling** - Use multiple remote servers for load balancing
+- **Improves performance** - Dedicated GPU resources for image editing
+- **Supports multiple models** - Different servers can run different image editing models
+
+**Setting up the remote image editing service:**
+
+```bash
+# Start the image editing API server
+python -m agentfly.agents.specialized.image_agent.utils.diffuser_apis \
+    --model-type qwen \
+    --model-path Qwen/Qwen-Image-Edit \
+    --gpu-ids 0 1 \
+    --use-fast \
+    --host 0.0.0.0 \
+    --port 8000
+```
+
+The service provides:
+- Multi-GPU support with automatic load balancing
+- OpenAI-compatible API endpoints
+- Rate limiting and timeout handling
+- Health monitoring and statistics
+
+#### Using Local Image Editing (Traditional)
+
+The traditional approach loads models locally:
+
 #### Using AsyncVLLM Backend (Local)
 
 ```python

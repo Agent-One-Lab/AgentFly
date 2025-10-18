@@ -7,7 +7,7 @@ import random
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Sequence, Callable
-
+from pydantic import BaseModel
 import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFilter
@@ -33,6 +33,24 @@ from transformers import SamProcessor, SamModel
 # -----------------------------
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("edit_agent")
+
+
+# Pydantic models for request/response
+class ImageEditRequest(BaseModel):
+    image: str  # base64 encoded image
+    prompt: str
+    negative_prompt: Optional[str] = None
+    true_cfg_scale: Optional[float] = None
+    num_inference_steps: Optional[int] = None
+    seed: Optional[int] = None
+    timeout: Optional[int] = None  # Timeout in seconds
+
+class ImageEditResponse(BaseModel):
+    image: str  # base64 encoded image
+
+class ErrorResponse(BaseModel):
+    error: Dict[str, Any]
+
 
 # -----------------------------
 # Helpers

@@ -1,6 +1,6 @@
 import pytest
 from transformers import AutoTokenizer
-from .....agents.templates.templates import Chat, get_template  
+from ....templates.templates import Chat, get_template  
 
 
 @pytest.mark.parametrize("template_name", ["qwen2.5-vl-system-tool"])

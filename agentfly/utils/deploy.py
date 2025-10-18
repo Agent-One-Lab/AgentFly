@@ -9,7 +9,6 @@ import click
 def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization):
     port = 8000
     
-    
     if template is None:
         template_option = ""
     else:
@@ -48,4 +47,5 @@ if __name__=="__main__":
     "python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen2.5-3B-Instruct --template qwen2.5 --tp 2 --dp 2"
     "python -m agentfly.utils.deploy --model_name_or_path openai/gpt-oss-20b --tp 1 --dp 1"
     "python -m agentfly.utils.deploy --model_name_or_path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --tp 1 --dp 1"
+    "python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen3-VL-235B-A22B-Instruct --template qwen3-vl-instruct --tp 8 --dp 1"
     main()

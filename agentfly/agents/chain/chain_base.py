@@ -344,7 +344,8 @@ class ChainRollout:
         await done_queue.put((chain_id, chain, current_node))
 
         self.finished_chains_count += 1
-        self.monitor_chain(trajectory=current_node.messages.messages)
+        message_info = chain.info
+        self.monitor_chain(trajectory=current_node.messages.messages, info=message_info)
 
     async def _generate_response(self, current_node, tools, depth, chain_id, enable_streaming):
         """Generate response with optional streaming support."""
@@ -597,7 +598,7 @@ class ChainRollout:
                 emit(evt)
 
 
-    def monitor_chain(self, trajectory) -> None:
+    def monitor_chain(self, trajectory, info) -> None:
         self.monitor_info['Agent/chains'].append(self.finished_chains_count)
         for tool in self.tools:
             if tool.is_stateful and tool.pool_size > 0:
@@ -609,6 +610,15 @@ class ChainRollout:
             kind="text",
             name="Agent/rollout/trajectory",
             value=json.dumps(serialize_for_json(trajectory), indent=2),
+            x=self.global_step,
+            x_name="Agent/rollout/step"
+        )
+        emit(evt)
+
+        evt = MetricEvent(
+            kind="text",
+            name="Agent/rollout/info",
+            value=json.dumps(serialize_for_json(info), indent=2),
             x=self.global_step,
             x_name="Agent/rollout/step"
         )

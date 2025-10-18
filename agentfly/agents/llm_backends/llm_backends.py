@@ -554,7 +554,7 @@ class ClientBackend(LLMBackend):
         This is actually the not streaming. We simply return the generated text.
         """
         logger.debug(f"[ClientBackend] generate_streaming kwargs: {kwargs}")
-        response_texts_dicts = await self.async_generate(messages, **kwargs)
+        response_texts_dicts = await self.generate(messages, **kwargs)
         for response in response_texts_dicts:
             yield response
 
@@ -636,8 +636,9 @@ class ClientBackend(LLMBackend):
         else:
             messages_list = messages     # batch
         logger.debug(f"[ClientBackend] messages_list: {messages_list}")
-        messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
-
+        # messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
+        messages_list, kwargs = self._preprocess_messages_and_args(messages_list, **kwargs)
+        
         async def _runner():
             # Ensure refiller is running in this event loop
             self._ensure_refiller_running()

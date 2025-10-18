@@ -95,6 +95,7 @@ def test_chat_template_equal(template, messages, tools, add_generation_prompt):
     
     template_tokenizer_mapping = {
         "qwen2.5-vl": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen3-vl-instruct": "Qwen/Qwen3-VL-30B-A3B-Instruct",
     }
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template])
 
