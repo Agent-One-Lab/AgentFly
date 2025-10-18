@@ -191,7 +191,7 @@ https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
 ## Contribute & Discussion
 [WeChat|微信](assets/images/wechat.jpg)
 
-[Discord](https://discord.com/invite/ekrKVg8Y)
+[Discord](https://discord.gg/Ze5Z9QhhJ3)
 
 
 ## Cite
