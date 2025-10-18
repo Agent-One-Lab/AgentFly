@@ -11,7 +11,7 @@
 </p>
 <p align="center">
 <a href="./assets/images/wechat.jpg" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/WeChat-%23e9edc9?style=for-the-badge&logo=wechat"></a>
-<a href="https://discord.gg/AyeWXgsB" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/discord-%23dedbd2?style=for-the-badge&logo=discord"></a>
+<a href="https://discord.gg/Ze5Z9QhhJ3" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/discord-%23dedbd2?style=for-the-badge&logo=discord"></a>
 </p>
 <p align="center">
 <img alt="Static Badge" src="https://img.shields.io/badge/Agent%20RL--%23000000?style=social">
