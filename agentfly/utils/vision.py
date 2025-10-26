@@ -5,8 +5,10 @@ import io
 from PIL import Image
 import requests
 from typing import Union
+import os
+from typing import Optional
 
-def open_image_from_any(src: str, *, timeout: int = 10) -> Image.Image:
+def open_image_from_any(src: str | Image.Image, *, timeout: int = 10) -> Image.Image:
     """
     Open an image from a file path, URL, or base-64 string with Pillow.
 
@@ -24,6 +26,9 @@ def open_image_from_any(src: str, *, timeout: int = 10) -> Image.Image:
     -------
     PIL.Image.Image
     """
+    if isinstance(src, Image.Image):
+        return src
+
     parsed = urlparse(src)
 
     # 1) Detect a URL ----------------------------------------------------------------
@@ -135,3 +140,81 @@ def image_to_pil(img: Union[Image.Image, str, dict]) -> Image.Image:
         return open_image_from_any(img["bytes"])
     else:
         return img
+
+
+
+
+def _is_jupyter() -> bool:
+    try:
+        from IPython import get_ipython
+        shell = get_ipython()
+        if not shell:
+            return False
+        if "IPKernelApp" in shell.config:
+            return True  # Jupyter Notebook or JupyterLab
+        if shell.__class__.__name__ == "ZMQInteractiveShell":
+            return True
+        return False
+    except Exception:
+        return False
+
+def _unicode_half_block(image: Image.Image, width: int):
+
+    # if columns is None:
+    #     try:
+    #         columns = shutil.get_terminal_size((80, 24)).columns
+    #     except Exception:
+    #         columns = 80
+
+    img = image.convert("RGB")
+    target_w = min(width, img.width)
+    aspect = img.height / img.width if img.width else 1.0
+    target_h = int(round((aspect * target_w) * 2))
+    img = img.resize((target_w, target_h), Image.BICUBIC)
+    print(f"Image resized to {target_w}x{target_h}")
+
+    reset = "\033[0m"
+    for y in range(0, img.height, 2):
+        line = ""
+        for x in range(img.width):
+            top = img.getpixel((x, y))
+            bottom = img.getpixel((x, y + 1)) if y + 1 < img.height else (0, 0, 0)
+            line += f"\033[38;2;{top[0]};{top[1]};{top[2]}m\033[48;2;{bottom[0]};{bottom[1]};{bottom[2]}m▀"
+        print(line + reset)
+
+def _jupyter_display(image: Image.Image):
+    from IPython.display import display
+    display(image)
+
+def display_image(
+    path_or_image: str | Image.Image,
+    method: str = "auto",
+    width: Optional[str] = 80,
+):
+    """
+    Display an image intelligently depending on environment.
+    Supports: Jupyter, Kitty, iTerm2, WezTerm, or plain terminals (Unicode fallback).
+    """
+    image = open_image_from_any(path_or_image)
+
+    chosen = method
+    if method == "auto":
+        if _is_jupyter():
+            chosen = "jupyter"
+        else:
+            chosen = "unicode"
+
+    try:
+        if chosen == "jupyter":
+            _jupyter_display(image)
+        elif chosen == "unicode":
+            _unicode_half_block(image, width=width)
+        else:
+            raise ValueError(f"Unknown method: {chosen}")
+    except Exception:
+        if chosen != "unicode":
+            try:
+                _unicode_half_block(image, width=width)
+            except Exception:
+                pass
+        raise

@@ -471,15 +471,18 @@ class ChainRollout:
         
         if enable_streaming:
             # Emit tool observation event
+            tool_data = {
+                "tool_name": tool_name,
+                "observation": result["observation"],
+                "status": result["status"]
+            }
+            if "image" in result:
+                tool_data["image"] = result["image"]
             await self.streaming_manager.emit_event(StreamEvent(
                 event_type=StreamEventType.TOOL_OBSERVATION,
                 chain_id=chain_id,
                 timestamp=time.time(),
-                data={
-                    "tool_name": tool_name,
-                    "observation": result["observation"],
-                    "status": result["status"]
-                },
+                data=tool_data,
                 step=depth,
                 depth=depth
             ))

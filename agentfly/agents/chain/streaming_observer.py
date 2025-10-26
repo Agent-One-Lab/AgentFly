@@ -7,7 +7,8 @@ from enum import Enum
 import json
 import time
 from termcolor import colored
-
+from agentfly.utils.vision import open_image_from_any
+from ...utils.vision import display_image
 
 class StreamEventType(Enum):
     """Types of streaming events"""
@@ -165,6 +166,9 @@ class ConsoleStreamObserver(StreamObserver):
             tool_name = event.data.get("tool_name", "")
             print(colored(f"Tool: [{tool_name}] {observation[:1024]}{'...' if len(observation) > 200 else ''}", color=chain_color))
             print(f"".center(80, "="), flush=True)
+            if "image" in event.data:
+                image = open_image_from_any(event.data["image"])
+                display_image(image)
             self.chain_id_data[event.chain_id]["event_type"] = StreamEventType.TOOL_OBSERVATION
         elif event.event_type == StreamEventType.ERROR:
             error_msg = event.data.get("error", "")

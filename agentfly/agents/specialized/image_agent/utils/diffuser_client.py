@@ -25,8 +25,6 @@ from .utils import ImageEditRequest, ImageEditResponse, ErrorResponse
 # Configure logging
 logging.basicConfig()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
 
 @dataclass
 class NodeInfo:
@@ -90,8 +88,8 @@ class DiffuserClient:
         self.failed_requests = 0
         self.response_times = []
         
-        logger.info(f"Initialized multi-node client with {len(self.nodes)} nodes")
-        logger.info(f"Max requests per minute: {max_requests_per_minute}")
+        logger.debug(f"Initialized multi-node client with {len(self.nodes)} nodes")
+        logger.debug(f"Max requests per minute: {max_requests_per_minute}")
     
     def load_image_as_base64(self, image_path: str) -> str:
         """Load a local image file and convert to base64."""

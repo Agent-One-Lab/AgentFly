@@ -15,7 +15,6 @@ from .llm_backends import (
 )
 from termcolor import colored
 from .llm_backends.backend_configs import BACKEND_CONFIGS
-from ..utils.logging import get_logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
@@ -55,7 +54,6 @@ class BaseAgent(ChainRollout, ABC):
         backend: str = "async_vllm",
         backend_config: Any = None,
         reward_fn: Callable = None,
-        log_file: str = "agent",
         streaming: str = "console",
         debug: bool = False,
         monitors: List[str] = [],
@@ -74,8 +72,24 @@ class BaseAgent(ChainRollout, ABC):
             debug: Whether to enable debug mode.
             backend: The backend to use for the agent.
         """
+        self._validate_init_args(
+            model_name_or_path,
+            template,
+            system_prompt,
+            tools,
+            max_length,
+            backend,
+            backend_config,
+            reward_fn,
+            streaming,
+            debug,
+            monitors,
+            wandb_project_name,
+            wandb_run_name,
+            local_cache_dir,
+            **kwargs
+        )
         torch.set_printoptions(threshold=10_000)
-        self.logger = get_logger(directory=os.path.join(AGENT_DATA_DIR, "debug"), filename=log_file, level="DEBUG" if debug else "INFO")
         self.debug = debug
         self.backend = backend
         self.template = template
@@ -134,6 +148,12 @@ class BaseAgent(ChainRollout, ABC):
         super().__init__()
         if kwargs:
             warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
+
+    def _validate_init_args(self, model_name_or_path, template, system_prompt, tools, max_length, backend, backend_config, reward_fn, streaming, debug, monitors, wandb_project_name, wandb_run_name, local_cache_dir, **kwargs):
+        if backend == "client":
+            assert template is None, "For client backend, we do not support chat template. Set the template when deploying the model."
+        if backend == "async_vllm":
+            assert template is not None, "For async vllm backend, chat template is required."
     
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         assert not (self.template and backend == "client"), "For client backend, we do not support template. Set the template when deploying the model."
@@ -257,7 +277,6 @@ class BaseAgent(ChainRollout, ABC):
         return await self.llm_engine.generate_async(messages_list_or_inputs, **args)
     
     async def generate_streaming(self, messages_list_or_inputs: List[List[Dict]], **kwargs):
-        Logger.debug(f"[BaseAgent] generate_streaming kwargs: {kwargs}")
         """
         Generate responses with streaming support. This method yields response chunks as they are generated.
 
@@ -292,8 +311,6 @@ class BaseAgent(ChainRollout, ABC):
             tokenizer = self.tokenizer
             
         trajectories = self.trajectories
-        self.logger.info("================ Trajectory ================")
-        self.logger.info(trajectories[0])
         messages_list = []
         other_info_list = []
         for trajectory in trajectories:
@@ -434,7 +451,6 @@ class BaseAgent(ChainRollout, ABC):
         # Do evaluation here
         reward_values, other_values = self.rewards
         inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(reward_values).unsqueeze(dim=-1) # BS x L
-        self.logger.info(f"reward_values: {reward_values}")
         # Handle other values as np.array
         for key, values in other_values.items():
             inputs[f"rm_{key}"] = np.array(values)
