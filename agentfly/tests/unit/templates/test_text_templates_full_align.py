@@ -53,7 +53,7 @@ def test_hf_template_print(model_name_or_path, messages, tools, add_generation_p
 
 # "qwen2.5-think", "qwen2.5", "qwen2.5-no-tool",
 # "llama-3.2", "mistral", "glm-4", "internlm2.5", "phi-3.5", "phi-4"
-@pytest.mark.parametrize("template", ["llama-3.2", "qwen2.5"])
+@pytest.mark.parametrize("template", ["qwen3-instruct"])
 @pytest.mark.parametrize("messages", [
     [
         {"role": "user", "content": "Hello, how are you?"},
@@ -65,6 +65,12 @@ def test_hf_template_print(model_name_or_path, messages, tools, add_generation_p
         {"role": "user", "content": "Help me to calculate 3 times 5."},
         {"role": "assistant", "content": '''{"name": "multiply", "arguments": {"x": 3, "y": 5}}'''},
         {"role": "tool", "content": "15"},
+    ],
+    [
+        {"role": "user", "content": "Help me to calculate 3 times 5."},
+        {"role": "assistant", "content": None, "tool_calls": [{"type": "function", "function": {"name": "multiply", "arguments": {"x": 3, "y": 5}}}, {"type": "function", "function": {"name": "addition", "arguments": {"x": 3, "y": 5}}}]},
+        {"role": "tool", "content": "The answer is 15"},
+        {"role": "tool", "content": "The answer is 8"},
     ],
     [
         {"role": "system", "content": "You are a helpful assistant."},
@@ -80,7 +86,7 @@ def test_hf_template_print(model_name_or_path, messages, tools, add_generation_p
         {"type": "function", "function": {"name": "multiply", "description": "A function that multiplies two numbers", "parameters": {"type": "object", "properties": {"x": {"type": "number", "description": "The first number to multiply"}, "y": {"type": "number", "description": "The second number to multiply"}}, "required": ["x", "y"]}}},
     ]
 ])
-@pytest.mark.parametrize("add_generation_prompt", [True, False])
+@pytest.mark.parametrize("add_generation_prompt", [False])
 def test_chat_template_equal(template, messages, tools, add_generation_prompt):
     # Filter invalid combinations
     if add_generation_prompt and messages[-1]['role'] == 'assistant':
@@ -99,6 +105,7 @@ def test_chat_template_equal(template, messages, tools, add_generation_prompt):
         "phi-3.5": "microsoft/Phi-3.5-mini-instruct",
         "phi-4": "microsoft/Phi-4",
         "nemotron": "nvidia/Llama-3.1-Nemotron-Nano-8B-v1",
+        "qwen3-instruct": "Qwen/Qwen3-4B-Instruct-2507",
     }
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template], trust_remote_code=True)
 

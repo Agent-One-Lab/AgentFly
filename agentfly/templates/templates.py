@@ -6,6 +6,7 @@ import json
 from typing import Callable, List, Any, Dict, Union, Tuple
 import warnings
 import logging
+from regex import L
 import torch
 from transformers import PreTrainedTokenizer
 from ..utils.vision import open_image_from_any
@@ -27,15 +28,9 @@ from .tool_policy import ToolPolicy
 from .constants import ToolPlacement, Role
 from .global_policy import GlobalPolicy
 
-Logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
-# Add console handler if no handlers exist
-if not Logger.handlers:
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    Logger.addHandler(console_handler)
 
 
 @dataclasses.dataclass
@@ -67,11 +62,15 @@ class Template:
     # Behaviors
     # The tool template
     tool_template: str = None
+    # The single tool observation template
+    tool_observation_template: str = "{observation}"
     # The user template
     user_template: str = None
     user_template_with_tools: str = None
     # The assistant template
     assistant_template: str = None
+    # The tool call template
+    tool_call_template: str = "{tool_call}"
 
 
     # Stop criteria (the default one is EOS token)
@@ -156,6 +155,78 @@ class Template:
         else:
             return False
 
+    def _render_tool_calls(self, tool_calls: List[Dict]) -> str:
+        tool_calls_str = []
+        for tool_call in tool_calls:
+            if 'type' in tool_call and tool_call['type'] == 'function':
+                tool_call = tool_call['function']
+            tool_calls_str.append(self.tool_call_template.format(tool_call=json.dumps(tool_call)))
+        return "".join(tool_calls_str).strip()
+
+    def _render_tool_observation(self, tool_observation_content: Union[str, List[Dict]]) -> str:
+        """
+        Render parallel tool call observations into a single string. For example, for qwen3 with
+        following tool observations: obs1, obs2, obs3, the rendered string should be:
+        <tool_response>obs1</tool_response>\n<tool_response>obs2</tool_response>\n<tool_response>obs3</tool_response>
+        """
+
+        # If there is no single tool response template, probably model does not support
+        # parallel tool calls and don't need to differentiate between single and multiple
+        # tool calls, so we just return the content as is.
+        if self.tool_observation_template is None:
+            if isinstance(tool_observation_content, str):
+                return tool_observation_content
+            elif isinstance(tool_observation_content, list):
+                return "\n".join([item["text"] for item in tool_observation_content])
+            else:
+                raise ValueError(f"Invalid tool observation content type: {type(tool_observation_content)}")
+
+        if isinstance(tool_observation_content, str):
+            text = tool_observation_content
+        elif isinstance(tool_observation_content, list):
+            # assert len(content) == 1, "Tool message must be a single message"
+            # text = content[0]["text"]
+            text = ""
+            for item in tool_observation_content:
+                if item["type"] == "text":
+                    text += item["text"]
+                elif item["type"] == "image":
+                    text += self.vision_start + self.image_token + self.vision_end
+                # This is for openai format, since chat completion API only supports image_url
+                elif item["type"] == "image_url":
+                    text += self.vision_start + self.image_token + self.vision_end
+                else:
+                    raise ValueError(f"Invalid message type: {item['type']}")
+        else:
+            raise ValueError(f"Invalid tool observation content type: {type(tool_observation_content)}")
+
+        return self.tool_observation_template.format(observation=text)
+
+    def _preprocess_messages(self, messages: List[Dict]) -> List[Dict]:
+        """Preprocess the messages to remove nested structures in messages
+           e.g. multi (parallel) tool calls, multiple tool observations. We need to insert them into message, however, if there are multiple 
+           tool calls or observations, we will have to know previous or later messages to insert them correctly. This is not we want for our
+           Template class.
+        """
+        preprocessed_messages = []
+        tool_observations_str = []
+        for i, message in enumerate(messages):
+            if message["role"] == "assistant" and "tool_calls" in message:
+                tool_calls_str = self._render_tool_calls(message["tool_calls"])
+                message["tool_calls_str"] = tool_calls_str
+                if "content" in message and message["content"] is None:
+                    message["content"] = ""
+                preprocessed_messages.append(message)
+            elif message["role"] == "tool" and "content" in message:
+                tool_observations_str.append(self._render_tool_observation(message["content"]))
+                if i == len(messages) - 1 or messages[i+1]["role"] != "tool":
+                    preprocessed_messages.append({"role": "tool", "content": "".join(tool_observations_str).strip()})
+                    tool_observations_str = []
+            else:
+                preprocessed_messages.append(message)
+            
+        return preprocessed_messages
+
     def render(self, messages: List[Dict], tools=None, add_generation_prompt: bool = False) -> str:
         """Render the template.
 
@@ -178,7 +249,9 @@ class Template:
         """
 
         # Step 1 – decide tool placement & clone messages
-        work_messages, tools_str, insert_tools_idx = self._insert_tools(messages, tools)
+        work_messages = self._preprocess_messages(messages)
+        logger.debug(f"[Template] work_messages: {work_messages}")
+        work_messages, tools_str, insert_tools_idx = self._insert_tools(work_messages, tools)
 
         # Step 2 – encode each conversation turn to text tokens
         elements, roles = self._encode_turns(work_messages, tools_str, insert_tools_idx)
@@ -205,15 +278,14 @@ class Template:
                 no injection is required.
         """
 
-        work_messages = deepcopy(messages)
         if tools:
             tools_str = self.tool_policy.format_tools(tools)
             placement = self.tool_policy.placement
-            insert_tools_idx = self._find_insert_tools_index(work_messages, placement)
+            insert_tools_idx = self._find_insert_tools_index(messages, placement)
         else:
             tools_str = None
             insert_tools_idx = -1
-        return work_messages, tools_str, insert_tools_idx
+        return messages, tools_str, insert_tools_idx
 
     def _encode_turns(
         self,
@@ -269,7 +341,10 @@ class Template:
                 roles.append(Role.USER)
 
             elif current_role == Role.ASSISTANT:
-                assistant_message = self._encode_assistant_message(message["content"])
+                assistant_message = self._encode_assistant_message(
+                    content=message["content"],
+                    tool_calls_str=message["tool_calls_str"] if "tool_calls_str" in message else None
+                )
                 elements.append(assistant_message)
                 roles.append(Role.ASSISTANT)
 
@@ -277,7 +352,6 @@ class Template:
                 tool_message = self._encode_tool_message(message["content"])
                 elements.append(tool_message)
                 roles.append(Role.TOOL)
-
             else:
                 raise ValueError(f"Invalid role: {message['role']}")
 
@@ -323,7 +397,7 @@ class Template:
         return "\n".join([json.dumps(tool) for tool in tools])
 
     def _encode_system_message_default(self, tools=None) -> str:
-        Logger.debug(f"[Template] Encoding system message default for template: {self.name}")
+        logger.debug(f"[Template] Encoding system message default for template: {self.name}")
         if not self.system_policy.use_system_without_system_message:
             if tools is None:
                 return ""
@@ -346,7 +420,7 @@ class Template:
 
     def _encode_system_message(self, content, tools=None) -> str:
         # Handle both string content and list content formats
-        Logger.debug(f"[Template] Encoding system message for template: {self.name}")
+        logger.debug(f"[Template] Encoding system message for template: {self.name}")
         if isinstance(content, str):
             system_message = content
         else:
@@ -403,35 +477,35 @@ class Template:
         user_message = self.user_template.format(content=text)
         return user_message
     
-    def _encode_assistant_message(self, content) -> str:
-        # Handle both string content and list content formats
+    def _encode_assistant_message(self, content, tool_calls_str=None) -> str:
+
         if isinstance(content, str):
             text = content
         else:
             assert len(content) == 1, "Assistant message must be a single message"
             text = content[0]["text"]
-        assistant_message = self.assistant_template.format(content=text)
+
+
+        if "{tool_calls}" in self.assistant_template:
+            assistant_message = self.assistant_template.format(content=text, tool_calls=tool_calls_str if tool_calls_str else "")
+        else:
+            assistant_message = self.assistant_template.format(content=text)
+        
+        logger.debug(f"[Template] tool_calls_str: {tool_calls_str}, assistant_message: {assistant_message}")
+        
         return assistant_message
     
     def _encode_tool_message(self, content) -> str:
-        # Handle both string content and list content formats
-        if isinstance(content, str):
-            text = content
+        """
+        Encode the tool message. By default, we use "observations" as placeholder for parallel tool calls and "observation" for single tool call.
+        """
+        # We have already preprocessed the messages, so content should be a string
+        assert isinstance(content, str), f"Content should be a string, but got {type(content)}"
+
+        if "{observations}" in self.tool_template:
+            tool_message = self.tool_template.format(observations=content)
         else:
-            # assert len(content) == 1, "Tool message must be a single message"
-            # text = content[0]["text"]
-            text = ""
-            for item in content:
-                if item["type"] == "text":
-                    text += item["text"]
-                elif item["type"] == "image":
-                    text += self.vision_start + self.image_token + self.vision_end
-                # This is for openai format, since chat completion API only supports image_url
-                elif item["type"] == "image_url":
-                    text += self.vision_start + self.image_token + self.vision_end
-                else:
-                    raise ValueError(f"Invalid message type: {item['type']}")
-        tool_message = self.tool_template.format(observation=text)
+            tool_message = self.tool_template.format(observation=content)
         return tool_message
     
     def _encode_generation_prompt(self) -> str:
@@ -489,7 +563,7 @@ class Template:
             return self._encode_standard(messages, tokenizer, return_tensors, tools, add_generation_prompt=add_generation_prompt, **kwargs)
 
     def _encode_standard(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, **kwargs) -> str:
-        Logger.debug(f"[Template] Encoding standard for template: {self.name}")
+        logger.debug(f"[Template] Encoding standard for template: {self.name}")
         """Standard encoding without vision support"""
         prompt, elements, roles = self.render(messages, tools=tools, add_generation_prompt=add_generation_prompt, **kwargs)
         elements, mask_flags = self._postprocess_elements(elements, roles)
@@ -497,7 +571,6 @@ class Template:
         attention_mask = []
         labels = []
         action_mask = []
-
 
         if tokenizer.bos_token:
             # If add_bos_token is not set, we assume to add bos token
@@ -529,7 +602,7 @@ class Template:
         return inputs
 
     def _encode_with_vision_processor(self, messages: List[Dict], tokenizer: PreTrainedTokenizer, return_tensors: str = None, tools=None, add_generation_prompt=False, processor=None, **kwargs) -> str:
-        Logger.debug(f"[Template] Encoding with vision processor for template: {self.name}")
+        logger.debug(f"[Template] Encoding with vision processor for template: {self.name}")
         """Encode with vision processor handling proper alignment"""
         from .vision_processor import get_processor
         from .utils import extract_vision_inputs_from_messages
@@ -546,10 +619,9 @@ class Template:
         # Extract vision inputs
         images, videos = extract_vision_inputs_from_messages(messages)
 
-        Logger.debug(f"[Template] images: {len(images)}")
-        Logger.debug(f"[Template] videos: {len(videos)}")
-
-        Logger.debug(f"[Template] messages: {messages}")
+        logger.debug(f"[Template] images: {len(images)}")
+        logger.debug(f"[Template] videos: {len(videos)}")
+        logger.debug(f"[Template] messages: {messages}")
         
         # Use vision processor with alignment support
         return vision_processor.process_for_llm(
@@ -629,7 +701,7 @@ class Template:
 
     def get_vision_inputs(self, messages: List[Dict]):
         vision_inputs = defaultdict(list)
-        Logger.debug(f"[Template] get_vision_inputs: messages: {messages}")
+        logger.debug(f"[Template] get_vision_inputs: messages: {messages}")
         for message in messages:
             content = message["content"]
             if isinstance(content, list):
@@ -725,7 +797,12 @@ class Template:
             ) from exc
 
         if self.tool_template:
-            t_pref, t_suff = self.tool_template.split("{observation}")
+            if "{observations}" in self.tool_template:
+                t_pref, t_suff = self.tool_template.split("{observations}")
+            elif "{observation}" in self.tool_template:
+                t_pref, t_suff = self.tool_template.split("{observation}")
+            else:
+                raise ValueError(f"Invalid tool template: {self.tool_template}")
         else:
             t_pref, t_suff = "", ""
 
@@ -733,20 +810,50 @@ class Template:
         img_tok = (self.vision_start or "") + (self.image_token or "") + (self.vision_end or "")
         vid_tok = (self.vision_start or "") + (self.video_token or "") + (self.vision_end or "")
 
+        # Check if assistant template supports tool calls
+        supports_tool_calls_in_template = "{tool_calls}" in self.assistant_template
+        
+        # Check if tool template uses observations (plural) or observation (singular)
+        uses_observations = "{observations}" in self.tool_template if self.tool_template else False
+
         header = [
-            f"{{% set _u_pref  = {u_pref!r} %}}",
-            f"{{% set _u_suff  = {u_suff!r} %}}",
-            f"{{% set _a_pref  = {a_pref!r} %}}",
-            f"{{% set _a_suff  = {a_suff!r} %}}",
-            f"{{% set _t_pref  = {t_pref!r} %}}",
-            f"{{% set _t_suff  = {t_suff!r} %}}",
-            f"{{% set _img_tok = {img_tok!r} %}}",
-            f"{{% set _vid_tok = {vid_tok!r} %}}",
+            f"{{% set _user_pref  = {u_pref!r} %}}",
+            f"{{% set _user_suff  = {u_suff!r} %}}",
+            f"{{% set _assistant_pref  = {a_pref!r} %}}",
+            f"{{% set _assistant_suff  = {a_suff!r} %}}",
+            f"{{% set _assistant_template = {self.assistant_template!r} %}}",
+            f"{{% set _tool_pref  = {t_pref!r} %}}",
+            f"{{% set _tool_suff  = {t_suff!r} %}}",
+            f"{{% set _image_token = {img_tok!r} %}}",
+            f"{{% set _video_token = {vid_tok!r} %}}",
             f"{{% set _default_system = {default_system!r} %}}",
             f"{{% set _system_message = {self.system_message!r} %}}",
             f"{{% set _system_template = {self.system_template!r} %}}",
             f"{{% set _tool_placement = {self.tool_policy.placement.name!r} %}}",
+            f"{{% set _supports_tool_calls = {supports_tool_calls_in_template} %}}",
+            f"{{% set _uses_observations = {uses_observations} %}}",
         ]
+        
+        if self.tool_template:
+            header.append(
+                f"{{% set _tool_template = {self.tool_template!r} %}}"
+            )
+        else:
+            header.append(
+                "{% set _tool_template = '' %}"
+            )
+        
+        # Add tool_call_template if it exists
+        if self.tool_call_template:
+            header.append(
+                f"{{% set _tool_call_template = {self.tool_call_template!r} %}}"
+            )
+        
+        # Add tool_observation_template if it exists
+        if self.tool_observation_template:
+            header.append(
+                f"{{% set _tool_observation_template = {self.tool_observation_template!r} %}}"
+            )
 
         if system_template_with_tools_raw:
             header.append(
@@ -758,7 +865,7 @@ class Template:
             # Convert double braces to single braces for Jinja compatibility
             processed_template = self.user_template_with_tools.replace('{{', '{').replace('}}', '}')
             header.append(
-                f"{{% set _u_template_with_tools = {processed_template!r} %}}"
+                f"{{% set _user_template_with_tools = {processed_template!r} %}}"
             )
 
         # ------------------------------------------------------------------
@@ -879,7 +986,7 @@ class Template:
         """Return Jinja loop that encodes all messages except the first system."""
 
         return [
-            "{% set _tool_ns = namespace(inserted=False, user_count=0) %}",
+            "{% set _tool_ns = namespace(inserted=False, user_count=0, observations=[]) %}",
             # Process remaining messages (skip first if it was system)
             "{% for m in messages %}",
             "{% if not (loop.first and m['role'] == 'system') %}",
@@ -893,46 +1000,87 @@ class Template:
             "{% if item['type'] == 'text'  %}",
             "{% set ns.txt = ns.txt + item['text'] %}",
             "{% elif item['type'] == 'image' %}",
-            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% set ns.txt = ns.txt + _image_token %}",
             "{% elif item['type'] == 'image_url' %}",
-            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% set ns.txt = ns.txt + _image_token %}",
             "{% elif item['type'] == 'video' %}",
-            "{% set ns.txt = ns.txt + _vid_tok %}",
+            "{% set ns.txt = ns.txt + _video_token %}",
             "{% endif %}",
             "{% endfor %}",
             "{% endif %}",
             "{% if tools and ((_tool_placement == 'FIRST_USER' and _tool_ns.user_count == 1) or (_tool_placement == 'LAST_USER' and loop.index0 == _insert_ns.idx)) and not _tool_ns.inserted %}",
-            "{% if _u_template_with_tools is defined %}",
+            "{% if _user_template_with_tools is defined %}",
             "{% set formatted_tools = _fmt_tools(tools) %}",
-            "{{ _u_template_with_tools | replace('{content}', ns.txt) | replace('{tools}', formatted_tools) }}",
+            "{{ _user_template_with_tools | replace('{content}', ns.txt) | replace('{tools}', formatted_tools) }}",
             "{% else %}",
-            "{{ _u_pref }}{{ ns.txt }}{{ _u_suff }}\\n{{ _fmt_tools(tools) }}",
+            "{{ _user_pref }}{{ ns.txt }}{{ _user_suff }}\\n{{ _fmt_tools(tools) }}",
             "{% endif %}",
             "{% set _tool_ns.inserted = True %}",
             "{% else %}",
-            "{{ _u_pref }}{{ ns.txt }}{{ _u_suff }}",
+            "{{ _user_pref }}{{ ns.txt }}{{ _user_suff }}",
             "{% endif %}",
             "{% elif m['role'] == 'assistant' %}",
+            "{% set ns = namespace(txt='', tool_calls_str='') %}",
             "{% if m['content'] is string %}",
-            "{{ _a_pref }}{{ m['content'] }}{{ _a_suff }}",
+            "{% set ns.txt = m['content'] %}",
             "{% else %}",
-            "{{ _a_pref }}{{ m['content'][0]['text'] }}{{ _a_suff }}",
+            "{% if m['content'] %}",
+            "{% set ns.txt = m['content'][0]['text'] %}",
+            "{% else %}",
+            "{% set ns.txt = '' %}",
+            "{% endif %}",
+            "{% endif %}",
+            "{% if m['tool_calls'] and _tool_call_template is defined %}",
+            "{% for tool_call in m['tool_calls'] %}",
+            "{% set tc = tool_call %}",
+            "{% if tool_call['type'] == 'function' %}",
+            "{% set tc = tool_call['function'] %}",
+            "{% endif %}",
+            "{% set tool_call_json = tc | tojson %}",
+            "{% set tool_call_formatted = _tool_call_template | replace('{tool_call}', tool_call_json) %}",
+            "{% set ns.tool_calls_str = ns.tool_calls_str + tool_call_formatted %}",
+            "{% endfor %}",
+            "{% set ns.tool_calls_str = ns.tool_calls_str | trim %}",
+            "{% endif %}",
+            "{% if _supports_tool_calls %}",
+            "{% set assistant_msg = _assistant_template | replace('{content}', ns.txt) | replace('{tool_calls}', ns.tool_calls_str) %}",
+            "{{ assistant_msg }}",
+            "{% else %}",
+            "{{ _assistant_pref }}{{ ns.txt }}{{ _assistant_suff }}",
             "{% endif %}",
             "{% elif m['role'] == 'tool' %}",
-            "{% if m['content'] is string %}",
-            "{{ _t_pref }}{{ m['content'] }}{{ _t_suff }}",
-            "{% else %}",
+            "{% if loop.first or messages[loop.index0 - 1]['role'] != 'tool' %}",
+            "{% set _tool_ns.observations = [] %}",
+            "{% endif %}",
             "{% set ns = namespace(txt='') %}",
+            "{% if m['content'] is string %}",
+            "{% set ns.txt = m['content'] %}",
+            "{% else %}",
             "{% for item in m['content'] %}",
             "{% if item['type'] == 'text' %}",
             "{% set ns.txt = ns.txt + item['text'] %}",
             "{% elif item['type'] == 'image' %}",
-            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% set ns.txt = ns.txt + _image_token %}",
             "{% elif item['type'] == 'image_url' %}",
-            "{% set ns.txt = ns.txt + _img_tok %}",
+            "{% set ns.txt = ns.txt + _image_token %}",
             "{% endif %}",
             "{% endfor %}",
-            "{{ _t_pref }}{{ ns.txt }}{{ _t_suff }}",
+            "{% endif %}",
+            "{% if _tool_observation_template is defined %}",
+            "{% set observation_formatted = _tool_observation_template | replace('{observation}', ns.txt) %}",
+            "{% set _tool_ns.observations = _tool_ns.observations + [observation_formatted] %}",
+            "{% else %}",
+            "{% set _tool_ns.observations = _tool_ns.observations + [ns.txt] %}",
+            "{% endif %}",
+            "{% if loop.last or (loop.index0 < messages|length - 1 and messages[loop.index0 + 1]['role'] != 'tool') %}",
+            "{% set observations_combined = _tool_ns.observations | join('') | trim %}",
+            "{% if _tool_template and _uses_observations %}",
+            "{{ _tool_template | replace('{observations}', observations_combined) }}",
+            "{% elif _tool_template %}",
+            "{{ _tool_template | replace('{observation}', observations_combined) }}",
+            "{% else %}",
+            "{{ _tool_pref }}{{ observations_combined }}{{ _tool_suff }}",
+            "{% endif %}",
             "{% endif %}",
             "{% endif %}",
             "{% endif %}",
@@ -944,7 +1092,7 @@ class Template:
 
         return [
             "{% if add_generation_prompt %}",
-            "{{ _a_pref }}",
+            "{{ _assistant_pref }}",
             "{% endif %}",
         ]
 
@@ -977,7 +1125,9 @@ class Template:
             user_template=self.user_template,
             user_template_with_tools=self.user_template_with_tools,
             assistant_template=self.assistant_template,
+            tool_call_template=self.tool_call_template,
             tool_template=self.tool_template,
+            tool_observation_template=self.tool_observation_template,
             stop_words=self.stop_words,
             generation_prompt=self.generation_prompt,
             vision_start=self.vision_start,
@@ -1019,7 +1169,9 @@ class Qwen3Template(Template):
         """
         
         # Step 1 – decide tool placement & clone messages
-        work_messages, tools_str, insert_tools_idx = self._insert_tools(messages, tools)
+        work_messages = self._preprocess_messages(messages)
+        logger.debug(f"[Qwen3Template] work_messages: {work_messages}")
+        work_messages, tools_str, insert_tools_idx = self._insert_tools(work_messages, tools)
         
         # Step 2 – clean think content from all assistant messages except the last one
         work_messages = self._clean_think_content(work_messages)
@@ -1053,7 +1205,7 @@ class Qwen3Template(Template):
                 if isinstance(content, str):
                     # Remove think content from string
                     cleaned_content = self._remove_think_tags(content)
-                else:
+                elif isinstance(content, list):
                     # Handle list content format
                     cleaned_content = []
                     for item in content:
@@ -1062,6 +1214,10 @@ class Qwen3Template(Template):
                             cleaned_content.append({"type": "text", "text": cleaned_text})
                         else:
                             cleaned_content.append(item)
+                elif content is None:
+                    cleaned_content = ""
+                else:
+                    raise ValueError(f"Invalid content type: {type(content)}")
                 
                 cleaned_message["content"] = cleaned_content
                 cleaned_messages.append(cleaned_message)
@@ -1243,7 +1399,10 @@ class Chat:
             return None
         role_label, content_label = self._detect_labels(messages)
         for message in messages:
-            hf_messages.append({"role": message[role_label], "content": message[content_label]})
+            hf_message = {"role": message[role_label], "content": message[content_label]}
+            if "tool_calls" in message:
+                hf_message["tool_calls"] = message["tool_calls"]
+            hf_messages.append(hf_message)
         
         for message in hf_messages:
             self._convert_single_message_to_hf_format(message)
@@ -1400,8 +1559,10 @@ register_template(
         system_message="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
         system_template_with_tools="""<|im_start|>system\n{system_message}\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
-        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}{tool_calls}<|im_end|>\n",
+        tool_call_template="<tool_call>\n{tool_call}\n</tool_call>\n",
+        tool_template="<|im_start|>user\n{observations}<|im_end|>\n",
+        tool_observation_template="<tool_response>\n{observation}\n</tool_response>\n",
         stop_words=["<|im_end|>"],
     )
 )
@@ -1431,14 +1592,39 @@ register_template(
         system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
         system_template_with_tools="""<|im_start|>system\n{system_message}# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
-        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}{tool_calls}<|im_end|>\n",
+        tool_call_template="<tool_call>\n{tool_call}\n</tool_call>\n",
+        tool_template="<|im_start|>user\n{observations}<|im_end|>\n",
+        tool_observation_template="<tool_response>\n{observation}\n</tool_response>\n",
         stop_words=["<|im_end|>"],
         system_policy=SystemPolicy(
             use_system_without_system_message=False,
             content_processor=lambda system, tools: f"{system}\n\n" if (system != "" and tools) else system,
         ),
         chat_template="{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0].role == 'system' %}\n        {{- messages[0].content + '\\n\\n' }}\n    {%- endif %}\n    {{- \"# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0].role == 'system' %}\n        {{- '<|im_start|>system\\n' + messages[0].content + '<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}\n{%- for message in messages[::-1] %}\n    {%- set index = (messages|length - 1) - loop.index0 %}\n    {%- if ns.multi_step_tool and message.role == \"user\" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}\n        {%- set ns.multi_step_tool = false %}\n        {%- set ns.last_query_index = index %}\n    {%- endif %}\n{%- endfor %}\n{%- for message in messages %}\n    {%- if message.content is string %}\n        {%- set content = message.content %}\n    {%- else %}\n        {%- set content = '' %}\n    {%- endif %}\n    {%- if (message.role == \"user\") or (message.role == \"system\" and not loop.first) %}\n        {{- '<|im_start|>' + message.role + '\\n' + content + '<|im_end|>' + '\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {%- set reasoning_content = '' %}\n        {%- if message.reasoning_content is string %}\n            {%- set reasoning_content = message.reasoning_content %}\n        {%- else %}\n            {%- if '</think>' in content %}\n                {%- set reasoning_content = content.split('</think>')[0].rstrip('\\n').split('<think>')[-1].lstrip('\\n') %}\n                {%- set content = content.split('</think>')[-1].lstrip('\\n') %}\n            {%- endif %}\n        {%- endif %}\n        {%- if loop.index0 > ns.last_query_index %}\n            {%- if loop.last or (not loop.last and reasoning_content) %}\n                {{- '<|im_start|>' + message.role + '\\n<think>\\n' + reasoning_content.strip('\\n') + '\\n</think>\\n\\n' + content.lstrip('\\n') }}\n            {%- else %}\n                {{- '<|im_start|>' + message.role + '\\n' + content }}\n            {%- endif %}\n        {%- else %}\n            {{- '<|im_start|>' + message.role + '\\n' + content }}\n        {%- endif %}\n        {%- if message.tool_calls %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if (loop.first and content) or (not loop.first) %}\n                    {{- '\\n' }}\n                {%- endif %}\n                {%- if tool_call.function %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {{- '<tool_call>\\n{\"name\": \"' }}\n                {{- tool_call.name }}\n                {{- '\", \"arguments\": ' }}\n                {%- if tool_call.arguments is string %}\n                    {{- tool_call.arguments }}\n                {%- else %}\n                    {{- tool_call.arguments | tojson }}\n                {%- endif %}\n                {{- '}\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- content }}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n    {%- if enable_thinking is defined and enable_thinking is false %}\n        {{- '<think>\\n\\n</think>\\n\\n' }}\n    {%- endif %}\n{%- endif %}",
+    )
+)
+
+register_template(
+    Template(
+        name="qwen3-instruct",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        system_template_with_tools="""<|im_start|>system\n{system_message}# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}{tool_calls}<|im_end|>\n",
+        tool_call_template="<tool_call>\n{tool_call}\n</tool_call>\n",
+        tool_template="<|im_start|>user\n{observations}\n<|im_end|>\n",
+        tool_observation_template="<tool_response>\n{observation}\n</tool_response>\n",
+        vision_start="<|vision_start|>",
+        vision_end="<|vision_end|>",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        stop_words=["<|im_end|>"],
+        system_policy=SystemPolicy(
+            use_system_without_system_message=False,
+            content_processor=lambda system, tools: f"{system}\n\n" if (system != "" and tools) else system,
+        ),
+        chat_template="{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0].role == 'system' %}\n        {%- if messages[0].content is string %}\n            {{- messages[0].content }}\n        {%- else %}\n            {%- for content in messages[0].content %}\n                {%- if 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '\\n\\n' }}\n    {%- endif %}\n    {{- \"# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0].role == 'system' %}\n        {{- '<|im_start|>system\\n' }}\n        {%- if messages[0].content is string %}\n            {{- messages[0].content }}\n        {%- else %}\n            {%- for content in messages[0].content %}\n                {%- if 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- set image_count = namespace(value=0) %}\n{%- set video_count = namespace(value=0) %}\n{%- for message in messages %}\n    {%- if message.role == \"user\" %}\n        {{- '<|im_start|>' + message.role + '\\n' }}\n        {%- if message.content is string %}\n            {{- message.content }}\n        {%- else %}\n            {%- for content in message.content %}\n                {%- if content.type == 'image' or 'image' in content or 'image_url' in content %}\n                    {%- set image_count.value = image_count.value + 1 %}\n                    {%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}\n                    <|vision_start|><|image_pad|><|vision_end|>\n                {%- elif content.type == 'video' or 'video' in content %}\n                    {%- set video_count.value = video_count.value + 1 %}\n                    {%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}\n                    <|vision_start|><|video_pad|><|vision_end|>\n                {%- elif 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {{- '<|im_start|>' + message.role + '\\n' }}\n        {%- if message.content is string %}\n            {{- message.content }}\n        {%- else %}\n            {%- for content_item in message.content %}\n                {%- if 'text' in content_item %}\n                    {{- content_item.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {%- if message.tool_calls %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if (loop.first and message.content) or (not loop.first) %}\n                    {{- '\\n' }}\n                {%- endif %}\n                {%- if tool_call.function %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {{- '<tool_call>\\n{\"name\": \"' }}\n                {{- tool_call.name }}\n                {{- '\", \"arguments\": ' }}\n                {%- if tool_call.arguments is string %}\n                    {{- tool_call.arguments }}\n                {%- else %}\n                    {{- tool_call.arguments | tojson }}\n                {%- endif %}\n                {{- '}\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {%- if message.content is string %}\n            {{- message.content }}\n        {%- else %}\n            {%- for content in message.content %}\n                {%- if content.type == 'image' or 'image' in content or 'image_url' in content %}\n                    {%- set image_count.value = image_count.value + 1 %}\n                    {%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}\n                    <|vision_start|><|image_pad|><|vision_end|>\n                {%- elif content.type == 'video' or 'video' in content %}\n                    {%- set video_count.value = video_count.value + 1 %}\n                    {%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}\n                    <|vision_start|><|video_pad|><|vision_end|>\n                {%- elif 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n{%- endif %}\n",
     )
 )
 
