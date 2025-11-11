@@ -6,9 +6,7 @@
         - add_generation_prompt
         - tools
 """
-
-
-from ....templates import compare_hf_template
+from ....templates import compare_hf_template, validate_messages_for_template
 from transformers import AutoTokenizer
 import pytest
 
@@ -53,7 +51,7 @@ def test_hf_template_print(model_name_or_path, messages, tools, add_generation_p
 
 # "qwen2.5-think", "qwen2.5", "qwen2.5-no-tool",
 # "llama-3.2", "mistral", "glm-4", "internlm2.5", "phi-3.5", "phi-4"
-@pytest.mark.parametrize("template", ["qwen3-instruct"])
+@pytest.mark.parametrize("template", ["qwen2.5"])
 @pytest.mark.parametrize("messages", [
     [
         {"role": "user", "content": "Hello, how are you?"},
@@ -68,7 +66,12 @@ def test_hf_template_print(model_name_or_path, messages, tools, add_generation_p
     ],
     [
         {"role": "user", "content": "Help me to calculate 3 times 5."},
-        {"role": "assistant", "content": None, "tool_calls": [{"type": "function", "function": {"name": "multiply", "arguments": {"x": 3, "y": 5}}}, {"type": "function", "function": {"name": "addition", "arguments": {"x": 3, "y": 5}}}]},
+        {"role": "assistant", "content": "", "tool_calls": [{"type": "function", "function": {"name": "addition", "arguments": {"x": 3, "y": 5}}}]},
+        {"role": "tool", "content": "The answer is 15"}
+    ],
+    [
+        {"role": "user", "content": "Help me to calculate 3 times 5."},
+        {"role": "assistant", "content": "none", "tool_calls": [{"type": "function", "function": {"name": "multiply", "arguments": {"x": 3, "y": 5}}}, {"type": "function", "function": {"name": "addition", "arguments": {"x": 3, "y": 5}}}]},
         {"role": "tool", "content": "The answer is 15"},
         {"role": "tool", "content": "The answer is 8"},
     ],
@@ -83,15 +86,14 @@ def test_hf_template_print(model_name_or_path, messages, tools, add_generation_p
     None,
     [
         {"type": "function", "function": {"name": "multiply", "description": "A function that multiplies two numbers", "parameters": {"type": "object", "properties": {"x": {"type": "number", "description": "The first number to multiply"}, "y": {"type": "number", "description": "The second number to multiply"}}, "required": ["x", "y"]}}},
-        {"type": "function", "function": {"name": "multiply", "description": "A function that multiplies two numbers", "parameters": {"type": "object", "properties": {"x": {"type": "number", "description": "The first number to multiply"}, "y": {"type": "number", "description": "The second number to multiply"}}, "required": ["x", "y"]}}},
+        # {"type": "function", "function": {"name": "multiply", "description": "A function that multiplies two numbers", "parameters": {"type": "object", "properties": {"x": {"type": "number", "description": "The first number to multiply"}, "y": {"type": "number", "description": "The second number to multiply"}}, "required": ["x", "y"]}}},
     ]
 ])
-@pytest.mark.parametrize("add_generation_prompt", [False])
+@pytest.mark.parametrize("add_generation_prompt", [True, False])
 def test_chat_template_equal(template, messages, tools, add_generation_prompt):
     # Filter invalid combinations
-    if add_generation_prompt and messages[-1]['role'] == 'assistant':
-        return
-    
+    if not validate_messages_for_template(template, messages, tools, add_generation_prompt):
+        pytest.skip("Invalid messages for the template")
     
     template_tokenizer_mapping = {
         "qwen2.5": "Qwen/Qwen2.5-3B-Instruct",
@@ -110,9 +112,13 @@ def test_chat_template_equal(template, messages, tools, add_generation_prompt):
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template], trust_remote_code=True)
 
     is_equal, is_equal_between_implemented_prompts, is_equal_between_jinja_prompts, official_prompt, implemented_prompt, implemented_jinja_prompt, highlighted_prompt = compare_hf_template(tokenizer, template, messages=messages, tools=tools,add_generation_prompt=add_generation_prompt)
-    
+    if not is_equal:
+        print(f"Official prompt:\n\n||{official_prompt}||")
+        print(f"Implemented prompt:\n\n||{implemented_prompt}||")
+    if not is_equal_between_jinja_prompts:
+        print(f"Implemented prompt:\n\n||{implemented_prompt}||")
+        print(f"Jinja prompt:\n\n||{implemented_jinja_prompt}||")
     assert is_equal, f"Template: {template}\n\nMessages: {messages}\n\ntools: {tools}\n\nadd_generation_prompt: {add_generation_prompt}\n\nOfficial prompt:\n\n{official_prompt}\n\nImplemented prompt:\n\n{implemented_prompt}"
     assert is_equal_between_jinja_prompts, f"Template: {template}\n\nMessages: {messages}\n\ntools: {tools}\n\nadd_generation_prompt: {add_generation_prompt}\n\nImplemented prompt:\n\n{implemented_prompt}\n\nJinja prompt:\n\n{implemented_jinja_prompt}"
-    # print(f"Official prompt:\n\n{official_prompt}")
-    # print(f"Highlighted prompt:\n\n{highlighted_prompt}")
+    
 

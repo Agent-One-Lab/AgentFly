@@ -345,5 +345,20 @@ def compare_hf_template(tokenizer, template_name, messages=None, tools=None, add
     return is_equal, is_equal_between_implemented_prompts, is_equal_between_jinja_prompts, official_prompt, implemented_prompt, implemented_jinja_prompt, highlighted_prompt
 
 
+def validate_messages_for_template(template_name, messages, tools=None, add_generation_prompt=False):
+    """ Validate the messages for the given template. """
+    if add_generation_prompt and messages[-1]['role'] == 'assistant':
+        return False
 
+    template = get_template(template_name)
+    
+    if tools and not template._supports_tool_call():
+        return False
+    
+    if template_name in ["llama-3.2"]:
+        for message in messages:
+            if 'tool_calls' in message and len(message['tool_calls']) > 1:
+                return False
+    
+    return True
 

@@ -4,6 +4,7 @@ from .utils import (
     tokenize_conversation,
     tokenize_conversations,
     compare_hf_template,
+    validate_messages_for_template,
 )
 from .tool_policy import ToolPolicy, JsonFormatter
 from .system_policy import SystemPolicy

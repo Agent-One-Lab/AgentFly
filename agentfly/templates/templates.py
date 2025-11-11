@@ -24,6 +24,7 @@ from .tool_policy import (
 from datetime import datetime
 from .constants import Role
 from .system_policy import Llama32DateProcessor, SystemPolicy
+from .assistant_policy import AssistantPolicy, Qwen25AssistantContentProcessor
 from .tool_policy import ToolPolicy
 from .constants import ToolPlacement, Role
 from .global_policy import GlobalPolicy
@@ -81,6 +82,8 @@ class Template:
     global_policy: "GlobalPolicy" = None
     # System message policy
     system_policy: "SystemPolicy" = None
+    # Assistant policy
+    assistant_policy: "AssistantPolicy" = None
     # Tool policy for this template
     tool_policy: "ToolPolicy" = None
 
@@ -101,6 +104,8 @@ class Template:
             self.tool_policy = ToolPolicy()
         if self.system_policy is None:
             self.system_policy = SystemPolicy()
+        if self.assistant_policy is None:
+            self.assistant_policy = AssistantPolicy()
     
     def _register_vision_processor(self):
         """Automatically register a vision processor for this template"""
@@ -161,7 +166,7 @@ class Template:
             if 'type' in tool_call and tool_call['type'] == 'function':
                 tool_call = tool_call['function']
             tool_calls_str.append(self.tool_call_template.format(tool_call=json.dumps(tool_call)))
-        return "".join(tool_calls_str).strip()
+        return "".join(tool_calls_str)
 
     def _render_tool_observation(self, tool_observation_content: Union[str, List[Dict]]) -> str:
         """
@@ -220,7 +225,7 @@ class Template:
             elif message["role"] == "tool" and "content" in message:
                 tool_observations_str.append(self._render_tool_observation(message["content"]))
                 if i == len(messages) - 1 or messages[i+1]["role"] != "tool":
-                    preprocessed_messages.append({"role": "tool", "content": "".join(tool_observations_str).strip()})
+                    preprocessed_messages.append({"role": "tool", "content": "".join(tool_observations_str)})
                     tool_observations_str = []
             else:
                 preprocessed_messages.append(message)
@@ -485,6 +490,8 @@ class Template:
             assert len(content) == 1, "Assistant message must be a single message"
             text = content[0]["text"]
 
+        if self.assistant_policy.content_processor is not None:
+            text = self.assistant_policy.content_processor(text)
 
         if "{tool_calls}" in self.assistant_template:
             assistant_message = self.assistant_template.format(content=text, tool_calls=tool_calls_str if tool_calls_str else "")
@@ -855,6 +862,16 @@ class Template:
                 f"{{% set _tool_observation_template = {self.tool_observation_template!r} %}}"
             )
 
+        # Add generation_prompt if it exists
+        if self.generation_prompt:
+            header.append(
+                f"{{% set _generation_prompt = {self.generation_prompt!r} %}}"
+            )
+        else:
+            header.append(
+                "{% set _generation_prompt = None %}"
+            )
+
         if system_template_with_tools_raw:
             header.append(
                 f"{{% set _system_template_with_tools = {system_template_with_tools_raw!r} %}}"
@@ -878,7 +895,7 @@ class Template:
 
             # The snippet usually comes wrapped in "{{ ... }}".  We drop the
             # outer braces because macro bodies are already an output context.
-            formatter_body = formatter_snippet.strip()
+            formatter_body = formatter_snippet
 
             header.extend(
                 [
@@ -901,6 +918,24 @@ class Template:
             header.extend(
                 [
                     "{% macro _process_system_message(system_message) %}",
+                    f"{processor_snippet}",
+                    "{% endmacro %}",
+                ]
+            )
+
+        # ------------------------------------------------------------------
+        #  Assistant processor macro (if assistant policy has a content processor)
+        # ------------------------------------------------------------------
+
+        if self.assistant_policy.content_processor is not None:
+            # Build a Jinja macro that reproduces the assistant content processor behaviour
+            processor_snippet = self.assistant_policy.content_processor.jinja()
+            
+            # The snippet should be a template that expects 'content' variable
+            # We create a macro that can be called with the assistant content
+            header.extend(
+                [
+                    "{% macro _process_assistant_content(content) %}",
                     f"{processor_snippet}",
                     "{% endmacro %}",
                 ]
@@ -1030,6 +1065,9 @@ class Template:
             "{% set ns.txt = '' %}",
             "{% endif %}",
             "{% endif %}",
+            "{% if _process_assistant_content is defined %}",
+            "{% set ns.txt = _process_assistant_content(ns.txt) %}",
+            "{% endif %}",
             "{% if m['tool_calls'] and _tool_call_template is defined %}",
             "{% for tool_call in m['tool_calls'] %}",
             "{% set tc = tool_call %}",
@@ -1040,7 +1078,7 @@ class Template:
             "{% set tool_call_formatted = _tool_call_template | replace('{tool_call}', tool_call_json) %}",
             "{% set ns.tool_calls_str = ns.tool_calls_str + tool_call_formatted %}",
             "{% endfor %}",
-            "{% set ns.tool_calls_str = ns.tool_calls_str | trim %}",
+            "{% set ns.tool_calls_str = ns.tool_calls_str %}",
             "{% endif %}",
             "{% if _supports_tool_calls %}",
             "{% set assistant_msg = _assistant_template | replace('{content}', ns.txt) | replace('{tool_calls}', ns.tool_calls_str) %}",
@@ -1073,7 +1111,7 @@ class Template:
             "{% set _tool_ns.observations = _tool_ns.observations + [ns.txt] %}",
             "{% endif %}",
             "{% if loop.last or (loop.index0 < messages|length - 1 and messages[loop.index0 + 1]['role'] != 'tool') %}",
-            "{% set observations_combined = _tool_ns.observations | join('') | trim %}",
+            "{% set observations_combined = _tool_ns.observations | join('') %}",
             "{% if _tool_template and _uses_observations %}",
             "{{ _tool_template | replace('{observations}', observations_combined) }}",
             "{% elif _tool_template %}",
@@ -1092,7 +1130,11 @@ class Template:
 
         return [
             "{% if add_generation_prompt %}",
+            "{% if _generation_prompt is not none %}",
+            "{{ _generation_prompt }}",
+            "{% else %}",
             "{{ _assistant_pref }}",
+            "{% endif %}",
             "{% endif %}",
         ]
 
@@ -1137,6 +1179,7 @@ class Template:
             global_policy=deepcopy(self.global_policy),
             system_policy=deepcopy(self.system_policy),
             tool_policy=deepcopy(self.tool_policy),
+            assistant_policy=deepcopy(self.assistant_policy),
             chat_template=self.chat_template,
         )
 
@@ -1559,11 +1602,15 @@ register_template(
         system_message="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
         system_template_with_tools="""<|im_start|>system\n{system_message}\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
-        assistant_template="<|im_start|>assistant\n{content}{tool_calls}<|im_end|>\n",
-        tool_call_template="<tool_call>\n{tool_call}\n</tool_call>\n",
-        tool_template="<|im_start|>user\n{observations}<|im_end|>\n",
-        tool_observation_template="<tool_response>\n{observation}\n</tool_response>\n",
+        assistant_template="<|im_start|>assistant{content}{tool_calls}<|im_end|>\n",
+        generation_prompt="<|im_start|>assistant\n",
+        tool_call_template="\n<tool_call>\n{tool_call}\n</tool_call>",
+        tool_template="<|im_start|>user{observations}<|im_end|>\n",
+        tool_observation_template="\n<tool_response>\n{observation}\n</tool_response>",
         stop_words=["<|im_end|>"],
+        assistant_policy=AssistantPolicy(
+            content_processor=Qwen25AssistantContentProcessor(),
+        ),
     )
 )
 
@@ -1611,10 +1658,11 @@ register_template(
         system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
         system_template_with_tools="""<|im_start|>system\n{system_message}# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{{"name": <function-name>, "arguments": <args-json-object>}}\n</tool_call><|im_end|>\n""",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
-        assistant_template="<|im_start|>assistant\n{content}{tool_calls}<|im_end|>\n",
-        tool_call_template="<tool_call>\n{tool_call}\n</tool_call>\n",
-        tool_template="<|im_start|>user\n{observations}\n<|im_end|>\n",
-        tool_observation_template="<tool_response>\n{observation}\n</tool_response>\n",
+        assistant_template="<|im_start|>assistant{content}{tool_calls}<|im_end|>\n",
+        generation_prompt="<|im_start|>assistant\n",
+        tool_call_template="\n<tool_call>\n{tool_call}\n</tool_call>",
+        tool_template="<|im_start|>user{observations}<|im_end|>\n",
+        tool_observation_template="\n<tool_response>\n{observation}\n</tool_response>",
         vision_start="<|vision_start|>",
         vision_end="<|vision_end|>",
         image_token="<|image_pad|>",
@@ -1623,6 +1671,9 @@ register_template(
         system_policy=SystemPolicy(
             use_system_without_system_message=False,
             content_processor=lambda system, tools: f"{system}\n\n" if (system != "" and tools) else system,
+        ),
+        assistant_policy=AssistantPolicy(
+            content_processor=Qwen25AssistantContentProcessor(),
         ),
         chat_template="{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0].role == 'system' %}\n        {%- if messages[0].content is string %}\n            {{- messages[0].content }}\n        {%- else %}\n            {%- for content in messages[0].content %}\n                {%- if 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '\\n\\n' }}\n    {%- endif %}\n    {{- \"# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0].role == 'system' %}\n        {{- '<|im_start|>system\\n' }}\n        {%- if messages[0].content is string %}\n            {{- messages[0].content }}\n        {%- else %}\n            {%- for content in messages[0].content %}\n                {%- if 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- set image_count = namespace(value=0) %}\n{%- set video_count = namespace(value=0) %}\n{%- for message in messages %}\n    {%- if message.role == \"user\" %}\n        {{- '<|im_start|>' + message.role + '\\n' }}\n        {%- if message.content is string %}\n            {{- message.content }}\n        {%- else %}\n            {%- for content in message.content %}\n                {%- if content.type == 'image' or 'image' in content or 'image_url' in content %}\n                    {%- set image_count.value = image_count.value + 1 %}\n                    {%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}\n                    <|vision_start|><|image_pad|><|vision_end|>\n                {%- elif content.type == 'video' or 'video' in content %}\n                    {%- set video_count.value = video_count.value + 1 %}\n                    {%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}\n                    <|vision_start|><|video_pad|><|vision_end|>\n                {%- elif 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {{- '<|im_start|>' + message.role + '\\n' }}\n        {%- if message.content is string %}\n            {{- message.content }}\n        {%- else %}\n            {%- for content_item in message.content %}\n                {%- if 'text' in content_item %}\n                    {{- content_item.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {%- if message.tool_calls %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if (loop.first and message.content) or (not loop.first) %}\n                    {{- '\\n' }}\n                {%- endif %}\n                {%- if tool_call.function %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {{- '<tool_call>\\n{\"name\": \"' }}\n                {{- tool_call.name }}\n                {{- '\", \"arguments\": ' }}\n                {%- if tool_call.arguments is string %}\n                    {{- tool_call.arguments }}\n                {%- else %}\n                    {{- tool_call.arguments | tojson }}\n                {%- endif %}\n                {{- '}\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {%- if message.content is string %}\n            {{- message.content }}\n        {%- else %}\n            {%- for content in message.content %}\n                {%- if content.type == 'image' or 'image' in content or 'image_url' in content %}\n                    {%- set image_count.value = image_count.value + 1 %}\n                    {%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}\n                    <|vision_start|><|image_pad|><|vision_end|>\n                {%- elif content.type == 'video' or 'video' in content %}\n                    {%- set video_count.value = video_count.value + 1 %}\n                    {%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}\n                    <|vision_start|><|video_pad|><|vision_end|>\n                {%- elif 'text' in content %}\n                    {{- content.text }}\n                {%- endif %}\n            {%- endfor %}\n        {%- endif %}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n{%- endif %}\n",
     )
@@ -1669,7 +1720,8 @@ register_template(
         system_template_with_tools="<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nEnvironment: ipython\n{system_message}<|eot_id|>",
         user_template="<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>",
         user_template_with_tools="""<|start_header_id|>user<|end_header_id|>\n\nGiven the following functions, please respond with a JSON for a function call with its proper arguments that best answers the given prompt.\n\nRespond in the format {{"name": function name, "parameters": dictionary of argument name and its value}}.Do not use variables.\n\n{tools}\n\n{content}<|eot_id|>""",
-        assistant_template="<|start_header_id|>assistant<|end_header_id|>\n\n{content}<|eot_id|>",
+        assistant_template="<|start_header_id|>assistant<|end_header_id|>\n\n{content}{tool_calls}<|eot_id|>",
+        tool_call_template="{tool_call}",
         tool_template="""<|start_header_id|>ipython<|end_header_id|>\n\n"{observation}"<|eot_id|>""",
         stop_words=["<|eot_id|>"],
         system_policy=SystemPolicy(

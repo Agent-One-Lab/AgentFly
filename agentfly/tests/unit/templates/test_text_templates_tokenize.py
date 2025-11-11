@@ -27,6 +27,12 @@ from ....templates.templates import Chat
         {"role": "tool", "content": "15"},
     ],
     [
+        {"role": "user", "content": "Help me to calculate 3 times 5."},
+        {"role": "assistant", "content": "none", "tool_calls": [{"type": "function", "function": {"name": "multiply", "arguments": {"x": 3, "y": 5}}}, {"type": "function", "function": {"name": "addition", "arguments": {"x": 3, "y": 5}}}]},
+        {"role": "tool", "content": "The answer is 15"},
+        {"role": "tool", "content": "The answer is 8"},
+    ],
+    [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Hello, how are you?"},
         {"role": "assistant", "content": "I am fine, thank you."},
