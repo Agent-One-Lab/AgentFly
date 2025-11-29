@@ -143,8 +143,8 @@ setup_conda_environment() {
             return 1
         fi
     else
-        print_status "Creating new conda environment 'agentfly' with Python 3.10..."
-        conda create -n agentfly python=3.10 -y
+        print_status "Creating new conda environment 'agentfly' with Python 3.12..."
+        conda create -n agentfly python=3.12 -y
         if [ $? -eq 0 ]; then
             print_success "agentfly environment created successfully!"
             INSTALLATION_STATUS+=("conda environment creation: SUCCESS")
@@ -201,7 +201,7 @@ main() {
         print_status "Found Python version: $PYTHON_VERSION"
         INSTALLATION_STATUS+=("Python availability: SUCCESS")
     else
-        print_error "Python 3 not found. Please install Python 3.10.x first."
+        print_error "Python 3 not found. Please install Python 3.12.x first."
         INSTALLATION_STATUS+=("Python availability: FAILED")
         exit 1
     fi
@@ -254,7 +254,7 @@ main() {
     fi
     
     # Install Python dependencies
-    print_status "Installing basic Python dependencies..."
+    print_status "Installing basic Python dependencies, this may take a while..."
     pip install -e . > /dev/null
     if [ $? -eq 0 ]; then
         print_success "Basic dependencies installed successfully!"

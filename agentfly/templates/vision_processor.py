@@ -391,7 +391,7 @@ class PatchBasedProcessor(VisionProcessor):
         if image_processor is None:
             raise ValueError("Image processor not found")
         
-        images = self._regularize_images(images)
+        # images = self._regularize_images(images)
         return image_processor(images, return_tensors="pt")
     
     def preprocess_videos(self, videos: List["VideoInput"], processor: Any) -> Dict[str, Any]:

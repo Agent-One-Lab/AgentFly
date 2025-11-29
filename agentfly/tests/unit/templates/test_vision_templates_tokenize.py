@@ -21,7 +21,7 @@ from qwen_vl_utils import process_vision_info
     [
         {
             "role": "system",
-            "content": "You are a multi-modal assistant that can answer questions about images.",
+            "content": [{"type": "text", "text": "You are a multi-modal assistant that can answer questions about images."}],
         },
         {
             "role": "user",
@@ -94,31 +94,40 @@ from qwen_vl_utils import process_vision_info
 def test_chat_template_equal(template, messages, tools, add_generation_prompt):
     template_tokenizer_mapping = {
         "qwen2.5-vl": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "qwen3-vl-instruct": "Qwen/Qwen3-VL-4B-Instruct",
     }
     tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template])
     processor = AutoProcessor.from_pretrained(template_tokenizer_mapping[template])
-    official_prompt = tokenizer.apply_chat_template(messages
-    , tokenize=False, add_generation_prompt=add_generation_prompt)
-    image_inputs, video_inputs = process_vision_info(messages)
-    official_inputs = processor(
-        text=[official_prompt],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
+    # official_prompt = tokenizer.apply_chat_template(messages
+    # , tokenize=False, add_generation_prompt=add_generation_prompt)
+    # image_inputs, video_inputs = process_vision_info(messages)
+    # official_inputs = processor(
+    #     text=[official_prompt],
+    #     images=image_inputs,
+    #     videos=video_inputs,
+    #     padding=True,
+    #     return_tensors="pt",
+    # )
+    official_inputs = processor.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=add_generation_prompt,
         return_tensors="pt",
+        return_dict=True
     )
+    print(f"Official inputs: {official_inputs}")
 
-    implemented_inputs = tokenize_conversation(messages, tokenizer, template, max_length=8192, tools=tools, add_generation_prompt=add_generation_prompt, return_tensors="pt", processor=processor)
+    implemented_inputs = tokenize_conversation(messages, tokenizer, template, max_length=32768, tools=tools, add_generation_prompt=add_generation_prompt, return_tensors="pt", processor=processor)
     
     official_prompt = tokenizer.decode(official_inputs['input_ids'][0])
     implemented_prompt = tokenizer.decode(implemented_inputs['input_ids'][0])
-    print(f"Official prompt image tokens: {official_prompt.count('<|image_pad|>')}\nImplemented prompt image tokens: {implemented_prompt.count('<|image_pad|>')}")
-    print(f"Official images: {official_inputs['pixel_values'].shape}\nImplemented images: {implemented_inputs['pixel_values'].shape}")
+    # print(f"Official prompt image tokens: {official_prompt.count('<|image_pad|>')}\nImplemented prompt image tokens: {implemented_prompt.count('<|image_pad|>')}")
+    # print(f"Official images: {official_inputs['pixel_values'].shape}\nImplemented images: {implemented_inputs['pixel_values'].shape}")
 
     assert torch.equal(official_inputs["input_ids"], implemented_inputs["input_ids"]), f"""Offical 
     prompt:\n{official_prompt}\nImplemented prompt:\n{implemented_prompt}"""
     
-    assert torch.equal(official_inputs["pixel_values"], implemented_inputs["pixel_values"]), f"""Official pixel values: {official_inputs["pixel_values"].shape}\nImplemented pixel values: {implemented_inputs["pixel_values"].shape}"""
+    assert torch.equal(official_inputs["pixel_values"], implemented_inputs["pixel_values"]), f"""Official pixel values: {official_inputs["pixel_values"].shape} dtype: {official_inputs["pixel_values"].dtype}\nImplemented pixel values: {implemented_inputs["pixel_values"].shape} dtype: {implemented_inputs["pixel_values"].dtype}\n\nvalues: {official_inputs["pixel_values"]}\n{implemented_inputs["pixel_values"]}"""
 
     assert torch.equal(official_inputs["image_grid_thw"], implemented_inputs["image_grid_thw"]), f"""Official image grid thw: {official_inputs["image_grid_thw"]}\nImplemented image grid thw: {implemented_inputs["image_grid_thw"]}"""
 

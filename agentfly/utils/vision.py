@@ -1,3 +1,4 @@
+from typing import Dict, List
 from pathlib import Path
 from urllib.parse import urlparse
 import base64
@@ -218,3 +219,32 @@ def display_image(
             except Exception:
                 pass
         raise
+
+
+def display_messages(messages: List[Dict]):
+    for i, message in enumerate(messages):
+        print(f"{'=' * 40} Turn {i} {'=' * 40}")
+        role = message["role"]
+        print(f"{role}: ", end="")
+
+        content = message["content"]
+        if isinstance(content, str):
+            print(content)
+        elif isinstance(content, list):
+            for item in content:
+                if item["type"] == "text":
+                    print(item["text"])
+                elif item["type"] == "image":
+                    display_image(item["image"])
+                elif item["type"] == "image_url":
+                    display_image(item["image_url"])
+                else:
+                    raise ValueError(f"Invalid message type: {item['type']}")
+        else:
+            print(content)
+
+        if "tool_calls" in message:
+            print("Tool calls: ", end="")
+            print(message["tool_calls"])
+
+        

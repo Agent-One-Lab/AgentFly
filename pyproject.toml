@@ -15,7 +15,7 @@ name = "AgentFly"
 version = "0.0.1"
 description = "Agent reinforcement learning framework."
 readme = "README.md"
-requires-python = ">=3.10,<3.13" # Release the version limit for Python 3.12
+requires-python = "==3.12.*"
 license = { text = "Apache-2.0" }
 
 dependencies = [
@@ -27,14 +27,15 @@ dependencies = [
     "docker",
     "openai",
     "faiss-cpu",
-    "vllm==0.11.0",
+    "vllm==0.11.2",
     "termcolor",
     "tenacity",
     "bs4",
     "qwen_vl_utils",
     "onnxruntime",
     "mpmath",
-    "wandb"
+    "wandb",
+    "diffusers",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +44,7 @@ verl = [
     "codetiming",
     "datasets",
     "dill",
-    "flash-attn==2.7.3",
+    "flash-attn==2.8.3",
     "hydra-core",
     "liger-kernel",
     "numpy",
@@ -54,7 +55,7 @@ verl = [
     "pylatexenc",
     "pre-commit",
     "ray[default]",
-    "tensordict<=0.6.2",
+    "tensordict",
     "torchdata",
     "transformers",
     "packaging>=20.0",
