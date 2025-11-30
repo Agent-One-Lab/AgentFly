@@ -3,8 +3,6 @@ LLM Backend module for reward functions.
 This module provides a unified interface to different LLM implementations.
 """
 import asyncio
-from asyncore import loop
-from collections import deque
 import copy
 from functools import partial
 import time
