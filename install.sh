@@ -327,16 +327,16 @@ main() {
     
     if command_exists python3; then
         PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-        if [[ "$PYTHON_VERSION" =~ ^3\.10\. ]]; then
-            print_success "✓ Python 3.10.x ($PYTHON_VERSION)"
-            INSTALLATION_STATUS+=("Python 3.10.x verification: SUCCESS")
+        if [[ "$PYTHON_VERSION" =~ ^3\.12\. ]]; then
+            print_success "✓ Python 3.12.x ($PYTHON_VERSION)"
+            INSTALLATION_STATUS+=("Python 3.12.x verification: SUCCESS")
         else
             print_error "✗ Python version $PYTHON_VERSION does not meet requirements (need 3.10.x)"
-            INSTALLATION_STATUS+=("Python 3.10.x verification: FAILED")
+            INSTALLATION_STATUS+=("Python 3.12.x verification: FAILED")
         fi
     else
         print_error "✗ Python 3 not found"
-        INSTALLATION_STATUS+=("Python 3.10.x verification: FAILED")
+        INSTALLATION_STATUS+=("Python 3.12.x verification: FAILED")
     fi
     
     if [ -d "AgentFly.egg-info" ] || [ -d "agents" ]; then

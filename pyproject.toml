@@ -27,7 +27,7 @@ dependencies = [
     "docker",
     "openai",
     "faiss-cpu",
-    "vllm==0.11.2",
+    "vllm==0.10.0",
     "termcolor",
     "tenacity",
     "bs4",
