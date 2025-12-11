@@ -52,6 +52,10 @@ class LLMBackend:
             vision_inputs.append(chat.vision_inputs())
 
         return prompts, vision_inputs
+
+    def prepare(self):
+        """Prepare the backend"""
+        pass
     
     def generate(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt"""
@@ -402,6 +406,18 @@ class AsyncVerlBackend(LLMBackend):
             trust_remote_code=True,
         )
         self.llm_engine = llm_engine
+
+    def preprocess(self):
+        """Preprocess the backend"""
+        self.llm_engine.wake_up()
+        if self.llm_engine.reward_model_manager:
+            self.llm_engine.reward_model_manager.wake_up()
+    
+    def postprocess(self):
+        """Postprocess the backend"""
+        self.llm_engine.sleep()
+        if self.llm_engine.reward_model_manager:
+            self.llm_engine.reward_model_manager.sleep()
     
     def _process_inputs(self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]):
         inputs = []
@@ -431,6 +447,22 @@ class AsyncVerlBackend(LLMBackend):
             if "tool_choice" in message:
                 del message["tool_choice"]
         return messages
+
+    def _process_messages(self, messages: List[Dict]):
+        new_messages = []
+        for message in messages:
+            new_message = {}
+            new_message.update(message)
+            if isinstance(message["content"], list):
+                if len(message["content"]) == 1:
+                    assert message["content"][0]["type"] == "text"
+                    new_message["content"] = message["content"][0]["text"]
+                else:
+                    new_message["content"] = message["content"]
+
+            new_messages.append(new_message)
+        return new_messages
+
     
     async def generate_async(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt using Verl"""
@@ -438,6 +470,8 @@ class AsyncVerlBackend(LLMBackend):
 
         generation_config = {}
         tensors = torch.ones(len(messages_list), dtype=torch.int64)
+        # messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
+        messages_list = [self._process_messages(messages) for messages in messages_list]
         messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
         tools = kwargs.get("tools", None)
         tools_list = np.array([tools] * len(messages_list))
@@ -451,8 +485,11 @@ class AsyncVerlBackend(LLMBackend):
 
         batch = DataProto.from_single_dict(data, meta_info={"n": n, "temperature": temperature})
 
-        gen_batch_output = await self.llm_engine.generate_sequences_async(batch, **generation_config)
-        response_texts = gen_batch_output.batch['responses'].tolist() # np.array of strings with length BS
+        gen_batch_output = await self.llm_engine.generate_sequences_async(batch)
+        response_ids = gen_batch_output.batch['responses'].tolist() # np.array of strings with length BS
+        assert len(response_ids) == len(messages_list)
+        response_texts = [self.tokenizer.decode(response_id, skip_special_tokens=True) for response_id in response_ids]
+
         return response_texts
 
 

@@ -19,8 +19,8 @@ def cleanup_envs():
     for env in tqdm(GLOBAL_ENVS):
         env.close()
 
-import atexit, signal
+# import atexit, signal
 
-atexit.register(cleanup_envs)
-for sig in [signal.SIGTERM, signal.SIGINT]:
-    signal.signal(sig, cleanup_envs)
+# atexit.register(cleanup_envs)
+# for sig in [signal.SIGTERM, signal.SIGINT]:
+#     signal.signal(sig, cleanup_envs)

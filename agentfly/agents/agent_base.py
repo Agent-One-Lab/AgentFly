@@ -55,7 +55,7 @@ class BaseAgent(ChainRollout, ABC):
         log_file: str = "agent",
         streaming: str = "console",
         debug: bool = False,
-        monitors: List[str] = [],
+        monitors: List[str] = ["wandb"],
         wandb_project_name: str = None,
         wandb_run_name: str = None,
         local_cache_dir: str = None,
@@ -184,6 +184,12 @@ class BaseAgent(ChainRollout, ABC):
 
         return messages_list.to_list()
 
+    def _preprocess_backends(self):
+        self.llm_engine.preprocess()
+
+    def _postprocess_backends(self):
+        self.llm_engine.postprocess()
+
     def _initialize_monitor(self, monitors: List[str]) -> None:
         for monitor in monitors:
             if monitor == "local":
@@ -212,13 +218,16 @@ class BaseAgent(ChainRollout, ABC):
 
         """
         processed_messages = self._preprocess_messages(messages)
+        self._preprocess_backends()
 
-        return await self.run_async(
+        await self.run_async(
             processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
             **kwargs,
         )
+
+        self._postprocess_backends()
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"

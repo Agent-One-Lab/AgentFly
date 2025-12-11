@@ -10,7 +10,7 @@
 <a href="https://github.com/Agent-One-Lab/AgentFly" target="_blank"><img alt="Static Badge" src="https://img.shields.io/github/stars/Agent-One-Lab/AgentFly?style=for-the-badge&logo=github&color=a2d2ff"></a>
 </p>
 <p align="center">
-<a href="./assets/images/wechat.jpg" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/WeChat-%23e9edc9?style=for-the-badge&logo=wechat"></a>
+<a href="https://agent-one-lab.github.io/assets/agentfly/wechat.jpg" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/WeChat-%23e9edc9?style=for-the-badge&logo=wechat"></a>
 <a href="https://discord.gg/Ze5Z9QhhJ3" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/discord-%23dedbd2?style=for-the-badge&logo=discord"></a>
 </p>
 <p align="center">
@@ -39,16 +39,18 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 ## News
 
-**08/2025 Multi-Modal (Vision) Agent Training Support** - Thanks to the powerful template system, AgentFly now supports training vision-language agents! 🎉 Train agents that can see and understand visual content, including GUI automation and image-based QA. See our [predefined training examples](docs/examples/predefined_training_examples.md) for ready-to-use scripts.
+**12/2025 verl update**: Updated verl to 0.6.x version.
+
+**08/2025 Multi-Modal (Vision) Agent Training Support**: Thanks to the powerful template system, AgentFly now supports training vision-language agents! 🎉 Train agents that can see and understand visual content, including GUI automation and image-based QA. See our [predefined training examples](docs/examples/predefined_training_examples.md) for ready-to-use scripts.
 
 ---
 
-**08/2025 Chat Template System** - A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. [Learn more →](docs/chat_template/)
+**08/2025 Chat Template System**: A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. [Learn more →](docs/chat_template/)
 
 ## Installation
 **Option 1**: One-line Installation:
 ```
-bash install.sh # Assume conda with python3.10.x
+bash install.sh # Assume conda with python3.12.x
 ```
 **Option 2**: Customized Installation
 
@@ -144,7 +146,7 @@ During training, `question` will be used to format the input messages, while oth
 #### 2. Tools & Rewards
 You can use any existing tool, which is in [documentation](https://agentfly.readthedocs.io/), or define a tool by decorating it with `@tool`. The output should eighther be a string, or a dictionary containing `observation` as a key.
 ```python
-@reward(name="customized_tool")
+@tool(name="customized_tool")
 def customized_tool(arg1, arg2):
     # tool logic here
 ```
