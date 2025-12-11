@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 
 from vllm import AsyncEngineArgs
@@ -39,7 +39,7 @@ class VLLMConfig:
 
 
 
-@dataclass
+@dataclass(init=False)
 class AsyncVLLMConfig:
     """Configuration for Async VLLM backend with engine arguments. Arguments are the same as vLLM's arguments, which can
     be found at https://docs.vllm.ai/en/latest/configuration/engine_args.html. Here listed some important arguments:
@@ -53,10 +53,21 @@ class AsyncVLLMConfig:
         data_parallel_size (int): Data parallel size.
         tensor_parallel_size (int): Tensor parallel size.
     """
-    engine_args: AsyncEngineArgs = AsyncEngineArgs()
+    engine_args: AsyncEngineArgs
 
-    def __init__(self, **kwargs):
-        self.engine_args = AsyncEngineArgs(**kwargs)
+    def __init__(self, engine_args: Optional[AsyncEngineArgs] = None, **kwargs):
+        """Initialize AsyncVLLMConfig.
+        
+        Args:
+            engine_args: Optional AsyncEngineArgs instance. If provided, kwargs are ignored.
+            **kwargs: Arguments to pass to AsyncEngineArgs if engine_args is not provided.
+        """
+        if engine_args is not None:
+            self.engine_args = engine_args
+        elif kwargs:
+            self.engine_args = AsyncEngineArgs(**kwargs)
+        else:
+            self.engine_args = AsyncEngineArgs()
 
 
 @dataclass

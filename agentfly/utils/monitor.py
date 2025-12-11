@@ -188,50 +188,71 @@ class WandbSink(BaseSink):
         wandb.finish()
 
 
-# Example of a wrapper sink that filters kinds/names without touching producers
-class FilterSink(BaseSink):
-    """Wrap another sink and allow include/exclude rules."""
-
-    def __init__(
-        self,
-        wrapped: BaseSink,
-        include_kinds: Optional[List[str]] = None,
-        exclude_kinds: Optional[List[str]] = None,
-    ) -> None:
-        self.wrapped = wrapped
-        self.include = set(include_kinds or [])
-        self.exclude = set(exclude_kinds or [])
-
-    async def log(self, evt: MetricEvent) -> None:
-        if self.include and evt.kind not in self.include:
-            return
-        if evt.kind in self.exclude:
-            return
-        await self.wrapped.log(evt)
-
-    async def flush(self) -> None:
-        await self.wrapped.flush()
-
-    async def close(self) -> None:
-        await self.wrapped.close()
-
-
-
 class Monitor:
     """Singleton helper controlling the consumer task and registered sinks."""
 
     _sinks: Dict[str, BaseSink] = {}
-    _queue: "asyncio.Queue[MetricEvent | None]" = asyncio.Queue()
+    _queue: Optional["asyncio.Queue[MetricEvent | None]"] = None
+    _queue_loop: Optional[asyncio.AbstractEventLoop] = None
     _consumer_task: Optional[asyncio.Task[None]] = None
     _running: bool = False
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     @classmethod
+    def _ensure_queue(cls) -> "asyncio.Queue[MetricEvent | None]":
+        """Ensure queue exists and is bound to the current event loop."""
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running event loop - create queue without binding (will bind on first use)
+            if cls._queue is None:
+                cls._queue = asyncio.Queue()
+                cls._queue_loop = None
+            return cls._queue
+        
+        # Check if queue needs to be recreated for current event loop
+        if cls._queue is None or cls._queue_loop is not current_loop:
+            # Recreate queue for current event loop
+            # Note: We can't migrate events from old queue, but that's acceptable
+            # since events are best-effort and the old loop is closed anyway
+            cls._queue = asyncio.Queue()
+            cls._queue_loop = current_loop
+        
+        return cls._queue
+
+    @classmethod
     def ensure_started(cls) -> None:
-        if cls._running:
-            return
-        cls._consumer_task = asyncio.create_task(cls._consumer_loop(), name="monitor-consumer")
-        cls._running = True
+        # Check if consumer task is still running
+        if cls._running and cls._consumer_task is not None:
+            try:
+                # Check if task is done or cancelled
+                if cls._consumer_task.done():
+                    # Task completed/cancelled, need to restart
+                    cls._running = False
+                    cls._consumer_task = None
+                else:
+                    # Task is still running, nothing to do
+                    return
+            except (RuntimeError, AttributeError, Exception):
+                # Task might be from a different event loop that was closed
+                # or the task object might be invalid
+                cls._running = False
+                cls._consumer_task = None
+        
+        # Ensure queue is bound to current event loop
+        cls._ensure_queue()
+        
+        # Create new consumer task
+        try:
+            loop = asyncio.get_running_loop()
+            cls._consumer_task = loop.create_task(cls._consumer_loop(), name="monitor-consumer")
+            cls._running = True
+        except RuntimeError:
+            # No running event loop - this shouldn't happen in normal usage
+            # but we'll handle it gracefully
+            print("[Monitor] Warning: No running event loop found. Monitor consumer not started.")
+            cls._running = False
+            cls._consumer_task = None
 
     @classmethod
     async def shutdown(cls) -> None:
@@ -239,16 +260,18 @@ class Monitor:
 
         if not cls._running:
             return
+        # Ensure queue exists
+        queue = cls._ensure_queue()
         # send sentinel
-        await cls._queue.put(None)
+        await queue.put(None)
         await cls._consumer_task
         for sink in list(cls._sinks.values()):
             with contextlib.suppress(Exception):
                 await sink.close()
         cls._sinks.clear()
         cls._running = False
-
-    # ── sink management ─────────────────────────────────────────────────────
+        cls._queue = None
+        cls._queue_loop = None
 
     @classmethod
     def add_sink(cls, name: str, sink: BaseSink) -> None:
@@ -264,12 +287,11 @@ class Monitor:
             await sink.close()
         asyncio.create_task(_close())
 
-    # ── core consumer ───────────────────────────────────────────────────────
-
     @classmethod
     async def _consumer_loop(cls) -> None:
+        queue = cls._ensure_queue()
         while True:
-            evt = await cls._queue.get()
+            evt = await queue.get()
             if evt is None:  # sentinel
                 break
             for sink_name, sink in list(cls._sinks.items()):
@@ -281,93 +303,34 @@ class Monitor:
                 except Exception as exc:
                     print(f"[Monitor] Sink {sink!r} failed: {exc}")
         # drain any remaining events (best‑effort)
-        while not cls._queue.empty():
-            cls._queue.get_nowait()
-
+        while not queue.empty():
+            queue.get_nowait()
 
 
 def emit(evt: MetricEvent) -> None:
     """Enqueue an event for asynchronous processing (non‑blocking)."""
 
     Monitor.ensure_started()
+    queue = Monitor._ensure_queue()
     try:
-        Monitor._queue.put_nowait(evt)
-    except asyncio.QueueFull:  # extremely unlikely – drop oldest
-        Monitor._queue.get_nowait()
-        Monitor._queue.put_nowait(evt)
+        queue.put_nowait(evt)
+    except (asyncio.QueueFull, RuntimeError) as e:
+        # QueueFull: extremely unlikely – drop oldest
+        # RuntimeError: queue not bound to current event loop (shouldn't happen in normal usage)
+        if isinstance(e, RuntimeError) and "bound to a different event loop" in str(e):
+            # Queue is bound to different loop, recreate it
+            Monitor._queue = None
+            Monitor._queue_loop = None
+            queue = Monitor._ensure_queue()
+            try:
+                queue.put_nowait(evt)
+            except asyncio.QueueFull:
+                queue.get_nowait()
+                queue.put_nowait(evt)
+        elif isinstance(e, asyncio.QueueFull):
+            queue.get_nowait()
+            queue.put_nowait(evt)
+        else:
+            # Re-raise other RuntimeErrors
+            raise
 
-
-class ResourcePoller:
-    """Emit process RSS/CPU every *interval* seconds."""
-
-    def __init__(self, interval: float = 10.0, *, run_id: str | None = None):
-        import psutil  # heavyweight; keep local to avoid hard dep for everybody
-
-        self.psutil = psutil
-        self.interval = interval
-        self.run_id = run_id
-        self._task: Optional[asyncio.Task[None]] = None
-
-    # API -------------------------------------------------------------------
-    def start(self) -> None:
-        if self._task is None:
-            self._task = asyncio.create_task(self._loop(), name="resource-poller")
-
-    def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-
-    # internals --------------------------------------------------------------
-    async def _loop(self) -> None:
-        proc = self.psutil.Process(os.getpid())
-        while True:
-            rss_mb = proc.memory_info().rss / 1e6
-            cpu = proc.cpu_percent(interval=None)  # % since last call
-            emit(
-                MetricEvent(
-                    kind="resource",
-                    name="memory/rss_mb",
-                    value=rss_mb,
-                    tags={"run": self.run_id} if self.run_id else {},
-                )
-            )
-            emit(
-                MetricEvent(
-                    kind="resource",
-                    name="cpu/percent",
-                    value=cpu,
-                    tags={"run": self.run_id} if self.run_id else {},
-                )
-            )
-            await asyncio.sleep(self.interval)
-
-
-
-async def _demo() -> None:  # pragma: no cover
-    """Run with `python -m monitoring` to see events flowing."""
-
-    # 1. sinks ----------------------------------------------------------------
-    Monitor.add_sink("jsonl", JsonlSink("demo_metrics.jsonl"))
-
-    try:
-        Monitor.add_sink("wandb", WandbSink(project="agentrl-demo"))
-    except ModuleNotFoundError:
-        print("wandb not installed - skipping WandbSink")
-
-    # 2. start poller ---------------------------------------------------------
-    poller = ResourcePoller(interval=5.0)
-    poller.start()
-
-    # 3. produce some fake scalar metrics ------------------------------------
-    for step in range(20):
-        reward = 1.0 - (step / 20)
-        emit(MetricEvent("scalar", "reward/step", reward, step=step))
-        await asyncio.sleep(0.5)
-
-    # 4. graceful shutdown ----------------------------------------------------
-    poller.stop()
-    await Monitor.shutdown()
-
-
-if __name__ == "__main__":
-    asyncio.run(_demo())
