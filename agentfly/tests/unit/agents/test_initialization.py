@@ -17,7 +17,7 @@ def test_agent_initialization_backend(backend: str):
         agent = CodeAgent(
             "Qwen/Qwen2.5-3B-Instruct",
             tools=tools,
-            template="qwen2.5",
+            template=None if backend == "client" else "qwen2.5",
             backend=backend
         )
         print("Agent initialized successfully")
@@ -29,7 +29,6 @@ def test_agent_initialization_backend(backend: str):
     assert agent.backend == backend
     assert agent.tools == tools
     assert agent.model_name_or_path == "Qwen/Qwen2.5-3B-Instruct"
-    assert agent.template == "qwen2.5"
     
     # Test basic methods
     messages = agent.get_messages()
@@ -42,7 +41,7 @@ def test_code_agent_initialization(backend: str):
     agent = CodeAgent(
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
-        template="qwen2.5",
+        template=None if backend == "client" else "qwen2.5",
         backend=backend
     )
     
@@ -55,7 +54,7 @@ def test_react_agent_initialization(backend: str):
     agent = ReactAgent(
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
-        template="qwen2.5",
+        template=None if backend == "client" else "qwen2.5",
         task_info=task_info,
         backend=backend
     )
@@ -72,6 +71,6 @@ def test_think_agent_initialization(backend: str):
     agent = ThinkAgent(
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
-        template="qwen2.5",
+        template=None if backend == "client" else "qwen2.5",
         backend=backend
     )

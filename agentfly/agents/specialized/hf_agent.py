@@ -5,12 +5,16 @@ import os
 from typing import List
 from ..agent_base import BaseAgent
 from ..parsers import extract_tool_calls
+import logging
+
+logger = logging.getLogger(__file__)
 
 class HFAgent(BaseAgent):
     def __init__(self, model_name_or_path: str, **kwargs):
         super().__init__(model_name_or_path, **kwargs)
 
     def parse(self, responses: List[str], **kwargs) -> List[Dict]:
+        logger.debug(f"[HFAgent] Responses: {responses}")
         new_messages_list = []
         for response in responses:
             tool_calls = extract_tool_calls(response)

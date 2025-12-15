@@ -11,11 +11,10 @@ import uuid
 from termcolor import colored
 import numpy as np
 from copy import deepcopy
-from ...tools.tool_base import Tool, submit_tool_call, submit_tool_calls
+from ...tools.tool_base import Tool, submit_tool_call
 from tqdm.asyncio import tqdm_asyncio
 from ...utils.monitor import JsonlSink, MetricEvent, Monitor, WandbSink, emit, serialize_for_json
 from ... import AGENT_DATA_DIR
-import wandb
 from .streaming_observer import ConsoleStreamObserver, StreamingManager, StreamEvent, StreamEventType
 import logging
 

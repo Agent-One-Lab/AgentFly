@@ -8,8 +8,7 @@ from .tool_base import (
     hallucination_tool,
     invalid_input_tool,
     tool,
-    submit_tool_call,
-    submit_tool_calls
+    submit_tool_call
 )
 from .src.code.tools import code_interpreter
 from .src.alfworld.tools import (

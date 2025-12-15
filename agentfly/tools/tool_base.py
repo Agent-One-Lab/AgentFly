@@ -17,7 +17,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# current_env = contextvars.ContextVar("current_env")
 
 class Tool:
     """
@@ -55,12 +54,7 @@ class Tool:
         status: str = "success"
     ):
         # Check if the function is a method
-        self.is_method = False
-        self.instance: Optional[Any] = None
-        sig = inspect.signature(func)
-        params = list(sig.parameters.keys())
-        if params and params[0] == 'self':
-            self.is_method = True
+        self.is_method, self.instance = self._bind_method_tool(func)
             
         # Basic properties
         self.func = func
@@ -74,13 +68,24 @@ class Tool:
         # Stateful properties
         self.env_cls, self.env_kwargs = env_cls, env_kwargs or {}
         self.pool_size = pool_size
-        # self._pool = None
-        # self._pool_initialized = False
+        
         self.initialized = False
         self.is_stateful = stateful
         self._envs: dict[str, BaseEnv] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self.user_func = func
+
+    def _bind_method_tool(self, func: Callable):
+        """
+        Bind the method tool to the instance. We don't actually bind the instance here, we leave it to the agent to bind it.
+        """
+        is_method = False
+        instance: Optional[Any] = None
+        sig = inspect.signature(func)
+        params = list(sig.parameters.keys())
+        if params and params[0] == 'self':
+            is_method = True
+        return is_method, instance
         
     @property
     def parallel_size(self):
@@ -389,74 +394,6 @@ async def submit_tool_call(
     if id is not None and tool_obj.is_stateful:
         tool_input_json["id"] = id
     return await tool_obj(**tool_input_json)
-
-
-def submit_tool_calls(
-    tool_names: List[str],
-    tool_inputs: List[Dict | str],
-    ids: List[str],
-    allowed_tool_names: List[str] = None,
-) -> List[dict]:
-    """
-    Submit tool calls to the environment. This is a synchronous wrapper that blocks until all results are ready.
-    Uses ThreadPoolExecutor to run tool calls in parallel.
-    """
-
-    if allowed_tool_names is None:
-        allowed_tool_names = list(TOOL_REGISTRY.keys())
-
-
-    mapped_tool_names = []
-    mapped_tool_inputs = []
-    tool_objs = []
-
-    for tool_name, tool_input, id in zip(tool_names, tool_inputs, ids):
-        if isinstance(tool_input, dict):
-            tool_input_json = tool_input
-        elif isinstance(tool_input, str):
-            try:
-                tool_input_json = json.loads(tool_input)
-            except json.JSONDecodeError:
-                tool_input_json = None
-        else:
-            raise ValueError(f"Invalid tool input: {tool_input}")
-
-        
-        if tool_name not in allowed_tool_names:
-            # Called a non-existent tool
-            mapped_tool_name = "hallucination_tool"
-            tool_input_json = {"tool_name": tool_name}
-        elif tool_input_json is None:
-            # Invalid input
-            mapped_tool_name = "invalid_input_tool"
-            tool_input_json = {"tool_input": tool_input}
-        else:
-            mapped_tool_name = tool_name
-        
-        tool_obj = TOOL_REGISTRY[mapped_tool_name]
-        if tool_obj.is_stateful:
-            assert id is not None, "ID is required for stateful tools"
-            tool_input_json["id"] = id
-        else:
-            if id is not None:
-                warnings.warn(f"ID {id} is not used for non-stateful tool {mapped_tool_name}")
-
-        mapped_tool_names.append(mapped_tool_name)
-        mapped_tool_inputs.append(tool_input_json)
-        tool_objs.append(tool_obj)
-
-    # Use ThreadPoolExecutor to run tool calls in parallel
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Create a list of futures
-        futures = [
-            executor.submit(tool_obj.call, **tool_input)
-            for tool_obj, tool_input in zip(tool_objs, mapped_tool_inputs)
-        ]
-        
-        # Wait for all futures to complete and get results
-        results = [future.result() for future in concurrent.futures.as_completed(futures)]
-    
-    return results
 
 
 @tool()

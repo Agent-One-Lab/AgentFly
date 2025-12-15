@@ -56,7 +56,7 @@ class BaseAgent(ChainRollout, ABC):
         reward_fn: Callable = None,
         streaming: str = "console",
         debug: bool = False,
-        monitors: List[str] = [],
+        monitors: List[str] = ["wandb"],
         wandb_project_name: str = None,
         wandb_run_name: str = None,
         local_cache_dir: str = None,
@@ -86,24 +86,15 @@ class BaseAgent(ChainRollout, ABC):
             monitors,
             wandb_project_name,
             wandb_run_name,
-            local_cache_dir,
-            **kwargs
+            local_cache_dir
         )
-        torch.set_printoptions(threshold=10_000)
+
         self.debug = debug
         self.backend = backend
         self.template = template
         # TODO: Make max_length aligned with training
         self.max_length = max_length
         self.tools = tools
-        
-        tool_methods = []
-        for name, method in inspect.getmembers(self):
-            if isinstance(method, Tool):
-                tool_methods.append(method)
-        for tool_method in tool_methods:
-            if hasattr(tool_method, 'is_method') and tool_method.is_method:
-                tool_method.instance = self
         
         self.tool_names = [tool.name for tool in tools]
         self.system_prompt = system_prompt
@@ -147,13 +138,24 @@ class BaseAgent(ChainRollout, ABC):
             raise ValueError(f"Streaming mode {streaming} is not supported.")
         super().__init__()
         if kwargs:
-            warnings.warn(f"Unused arguments for agent initialization: {kwargs}")
+            raise ValueError(f"Unused arguments for agent: {kwargs}")
 
-    def _validate_init_args(self, model_name_or_path, template, system_prompt, tools, max_length, backend, backend_config, reward_fn, streaming, debug, monitors, wandb_project_name, wandb_run_name, local_cache_dir, **kwargs):
+    def _validate_init_args(self, model_name_or_path, template, system_prompt, tools, max_length, backend, backend_config, reward_fn, streaming, debug, monitors, wandb_project_name, wandb_run_name, local_cache_dir):
         if backend == "client":
             assert template is None, "For client backend, we do not support chat template. Set the template when deploying the model."
         if backend == "async_vllm":
             assert template is not None, "For async vllm backend, chat template is required."
+
+
+    def _bind_method_tools(self):
+        tool_methods = []
+        for name, method in inspect.getmembers(self):
+            if isinstance(method, Tool):
+                tool_methods.append(method)
+        for tool_method in tool_methods:
+            if hasattr(tool_method, 'is_method') and tool_method.is_method:
+                tool_method.instance = self
+        
     
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         assert not (self.template and backend == "client"), "For client backend, we do not support template. Set the template when deploying the model."
@@ -217,6 +219,12 @@ class BaseAgent(ChainRollout, ABC):
 
         return messages_list.to_list()
 
+    def _preprocess_backends(self):
+        self.llm_engine.preprocess()
+
+    def _postprocess_backends(self):
+        self.llm_engine.postprocess()
+
     def _initialize_monitor(self, monitors: List[str]) -> None:
         for monitor in monitors:
             if monitor == "local":
@@ -245,13 +253,16 @@ class BaseAgent(ChainRollout, ABC):
 
         """
         processed_messages = self._preprocess_messages(messages)
+        self._preprocess_backends()
 
-        return await self.run_async(
+        await self.run_async(
             processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
             **kwargs,
         )
+
+        self._postprocess_backends()
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", "Only async verl backend is supported for now"
