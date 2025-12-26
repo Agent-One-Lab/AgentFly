@@ -1,6 +1,6 @@
 import traceback
 
-from ...tool_base import tool
+from ...decorator import tool
 
 from ....envs.webshop_text_env import WebAgentTextEnv
 

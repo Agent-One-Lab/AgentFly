@@ -1,6 +1,6 @@
 import traceback
 
-from ...tool_base import tool
+from ...decorator import tool
 
 from ....envs.scienceworld_env import ScienceWorldEnv
 

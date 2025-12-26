@@ -1,4 +1,4 @@
-from ...tool_base import tool
+from ...decorator import tool
 from sympy import simplify, sympify, Rational
 
 @tool(name="calculator", description="Calculate the result of a mathematical expression.")

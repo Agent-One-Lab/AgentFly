@@ -3,7 +3,7 @@
 
 import json
 from typing import Any
-from ...tool_base import tool
+from ...decorator import tool
 from ....utils.ui_action_parser import parsing_response_to_pyautogui_code
 
 # Default image dimensions for UI interactions

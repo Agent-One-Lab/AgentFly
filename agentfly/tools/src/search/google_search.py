@@ -8,7 +8,7 @@ from ....envs.redis_env import RedisEnv
 import timeout_decorator
 import requests
 import redis
-from ...tool_base import tool
+from ...decorator import tool
 from ....utils.logging import get_logger
 import time
 import httpx

@@ -3,7 +3,7 @@ from .faiss_indexer import Indexer
 import datasets
 from transformers import AutoTokenizer, AutoModel
 from torch import Tensor
-from ...tool_base import tool
+from ...decorator import tool
 from ....__init__ import AGENT_CACHE_DIR
 
 def load_corpus(corpus_path: str):

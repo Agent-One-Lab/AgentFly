@@ -25,7 +25,7 @@ except ImportError as e:
     AutoModel = None
 
 from .faiss_indexer import Indexer
-from ...tool_base import tool
+from ...decorator import tool
 from ....__init__ import AGENT_CACHE_DIR
 import builtins
 import numpy as np

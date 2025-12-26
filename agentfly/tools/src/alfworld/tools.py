@@ -2,7 +2,7 @@ import asyncio
 import traceback
 
 from ....envs.alfworld_env import ALFWorldEnv
-from ...tool_base import tool
+from ...decorator import tool
 
 
 @tool(env_cls=ALFWorldEnv, name="alfworld_step", description="Take an action in the ALFWorld environment and return the observation", stateful=True, pool_size=8)

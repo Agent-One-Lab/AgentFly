@@ -1,4 +1,4 @@
-from ...tool_base import tool
+from ...decorator import tool
 
 @tool(name="answer", description="Give the final answer. The answer should be put inside the \\boxed{} tag.", status="finish")
 def answer(answer: str):

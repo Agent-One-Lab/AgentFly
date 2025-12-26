@@ -4,7 +4,8 @@ import requests
 import traceback
 
 from ....envs.python_env import PythonSandboxEnv
-from ...tool_base import tool
+from ...decorator import tool
+from ...tool_base import Tool
 
 def make_request(url, payload, headers, timeout=20):
     """Make a single request to the server"""
@@ -29,30 +30,6 @@ def make_request(url, payload, headers, timeout=20):
     except Exception as e:
         return {"error": f"Unexpected error: {str(e)}\n{traceback.format_exc()}"}
 
-# @tool()
-# def code_interpreter(code: str, port: int = 9000):
-#     """
-#     Run the code in docker container and return the output from stdout or stderr
-#     Args:
-#         code (str): The code to run
-#     Returns:
-#         str: The output from stdout or stderr
-#     """
-#     url = f"http://127.0.0.1:{port}/run"
-#     payload = {
-#         "code": code
-#     }
-#     headers = {
-#         "Content-Type": "application/json",
-#     }
-
-#     response = make_request(url, payload, headers, timeout=40)
-#     if 'error' in response:
-#         return response['error']
-#     elif 'output' in response:
-#         return response['output']
-#     else:
-#         return str(response)
     
 @tool(env_cls=PythonSandboxEnv, name="code_interpreter", description="Run the code in docker container and return the output from stdout or stderr", stateful=True, pool_size=32)
 async def code_interpreter(code: str, env: PythonSandboxEnv):
@@ -69,6 +46,23 @@ async def code_interpreter(code: str, env: PythonSandboxEnv):
         return str(obs)
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
+
+
+class CodeInterpreterTool(Tool):
+    name = "code_interpreter_tool"
+    description = "Run the code in docker container and return the output from stdout or stderr"
+    env_cls = PythonSandboxEnv
+    pool_size = 32
+    def __init__(self):
+        super().__init__()
+
+    async def call(self, code: str, env: PythonSandboxEnv):
+        code = str(code)
+        try:
+            obs = await env.step(code)
+            return str(obs)
+        except Exception as e:
+            return f"Error: {str(e)}\n{traceback.format_exc()}"
 
 if __name__ == "__main__":
     print(code_interpreter.schema)
