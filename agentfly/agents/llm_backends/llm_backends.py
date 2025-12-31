@@ -512,7 +512,7 @@ class ClientBackend(LLMBackend):
         timeout: int = 600,
         api_key: str = "EMPTY",
         max_length: int = None,
-        max_new_tokens: int = 1024,
+        max_new_tokens: int = 8192,
         **kwargs,
     ):
         """Initialize ClientBackend.
@@ -549,20 +549,21 @@ class ClientBackend(LLMBackend):
     # --------------------------------------------------------------------- #
     # Low‑level single request (runs in threadpool so it doesn't block loop)
     # --------------------------------------------------------------------- #
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=15))
+    # @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
     def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
-        # LOGGER.debug(f"[ClientBackend] _blocking_call kwargs: {kwargs}")
         if "num_return_sequences" in kwargs:
             n = kwargs.pop("num_return_sequences")
         else:
             n = 1
 
-        logger.debug(f"[ClientBackend] messages: {messages}")
+        logger.debug(f"[ClientBackend] model_name: {self.model_name}")
+        logger.debug(f"[ClientBackend] messages: {len(messages)}")
+        logger.debug(f"[ClientBackend] kwargs: {kwargs}")
 
-        with open(f"{AGENT_DATA_DIR}/debug/messages_{len(messages)}.json", "w") as f:
-            json.dump(messages, f, indent=4)
-        with open(f"{AGENT_DATA_DIR}/debug/args.json", 'w') as f:
-            json.dump(kwargs, f, indent=4)
+        # with open(f"{AGENT_DATA_DIR}/debug/messages_{len(messages)}.json", "w") as f:
+        #     json.dump(messages, f, indent=4)
+        # with open(f"{AGENT_DATA_DIR}/debug/args.json", 'w') as f:
+        #     json.dump(kwargs, f, indent=4)
 
         resp = self.client.chat.completions.create(
             model=self.model_name,
@@ -643,11 +644,12 @@ class ClientBackend(LLMBackend):
 
         messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages, is_openai_model) for messages in messages_list]
         
-        if is_openai_model:
-            kwargs['tool_choice'] = "auto"
-        else:
-            # For self-deployed models, we will use the response to extract tool calls
-            kwargs['tool_choice'] = "none"
+        if "tools" in kwargs:
+            if is_openai_model:
+                kwargs['tool_choice'] = "auto"
+            else:
+                # For self-deployed models, we will use the response to extract tool calls
+                kwargs['tool_choice'] = "none"
         
         return messages_list, kwargs
 

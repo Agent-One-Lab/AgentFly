@@ -154,7 +154,7 @@ def validate_schema(name, description, signature, docs):
         else:
             # May be should raise an error
             properties[param]['type'] = "unknown"
-            logger.warning(f"Parameter {param} has no type in signature or docstring.")
+            # logger.warning(f"Parameter {param} has no type in signature or docstring.")
         
         if "default" in signature[param]:
             properties[param]['default'] = signature[param]['default']

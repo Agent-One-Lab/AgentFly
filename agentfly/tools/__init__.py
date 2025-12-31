@@ -23,8 +23,13 @@ from .src.react.tools import answer_qa, answer_math
 from .src.search.async_dense_retriever import asyncdense_retrieve
 from .src.scienceworld.tools import scienceworld_explorer
 from .src.ui.tools import pyautogui_code_generator
-
 from .registry import TOOL_REGISTRY
+from .registry import (
+    register_tool,
+    get_tool_from_name,
+    get_tools_from_names,
+    list_available_tools,
+)
 
 @tool()
 def hallucination_tool(tool_name):

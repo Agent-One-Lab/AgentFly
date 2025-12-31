@@ -1,6 +1,5 @@
 import pytest
-from ....tools import code_interpreter
-from ....tools.tool_base import tool, Tool
+from ....tools import code_interpreter, tool, Tool
 from ....envs.python_env import PythonSandboxEnv
 
 

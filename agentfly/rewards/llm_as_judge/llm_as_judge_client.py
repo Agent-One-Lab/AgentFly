@@ -7,6 +7,7 @@ import json
 import glob
 import logging
 import asyncio
+import sys
 from tqdm.asyncio import tqdm_asyncio
 from pathlib import Path
 from ... import AGENT_HOME
@@ -292,7 +293,7 @@ class LLMClient:
                 all_tasks.extend(tasks)
             
             # Run all tasks concurrently with progress bar
-            responses = await tqdm_asyncio.gather(*all_tasks, desc="Processing requests")
+            responses = await tqdm_asyncio.gather(*all_tasks, desc="Processing requests", file=sys.stdout)
             
             # Group responses by input
             grouped_responses = []

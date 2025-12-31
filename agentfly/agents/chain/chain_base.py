@@ -13,6 +13,9 @@ import numpy as np
 from copy import deepcopy
 from ...tools.tool_base import Tool, submit_tool_call
 from tqdm.asyncio import tqdm_asyncio
+from tqdm.asyncio import tqdm as async_tqdm
+from tqdm import tqdm
+import sys
 from ...utils.monitor import JsonlSink, MetricEvent, Monitor, WandbSink, emit, serialize_for_json
 from ... import AGENT_DATA_DIR
 from .streaming_observer import ConsoleStreamObserver, StreamingManager, StreamEvent, StreamEventType
@@ -244,7 +247,7 @@ class ChainRollout:
                 for cid, node in first_nodes.items()
         ]
 
-        await tqdm_asyncio.gather(*tasks)
+        await tqdm_asyncio.gather(*tasks, file=sys.stdout)
 
         self.chains = {}
         while not done_q.empty():
@@ -503,8 +506,7 @@ class ChainRollout:
 
     async def release_resources(self, id: str) -> None:
         for tool in self.tools:
-            if isinstance(tool, Tool):
-                await tool.release(id=id)
+            await tool.release(id=id)
         if self._reward_fn is not None:
             await self._reward_fn.release(id=id)
 

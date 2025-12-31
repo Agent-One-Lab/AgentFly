@@ -44,8 +44,8 @@ class _CallableToolClass(type):
         """Delegate attribute access to singleton instance."""
         # Use __dict__ to check for _instance to avoid recursion
         if '_instance' not in cls.__dict__ or cls.__dict__.get('_instance') is None:
-            func = getattr(cls, '_func', None)
-            cls._instance = super(_CallableToolClass, cls).__call__(func=func)
+            # Create instance (no func parameter allowed - func is set via call method or _func class attribute)
+            cls._instance = super(_CallableToolClass, cls).__call__()
         return getattr(cls._instance, name)
 
 
@@ -85,7 +85,7 @@ def tool(
         func_name = func.__name__
         final_name = name or func_name
         if name and name != func_name:
-            logger.warning(f"Tool name {func_name!r} overridden by {name!r}")
+            logger.debug(f"Tool name {func_name!r} overridden by {name!r}")
             # warnings.warn(f"Tool name {func_name!r} overridden by {name!r}")
 
         signature  = extract_signatures(func)

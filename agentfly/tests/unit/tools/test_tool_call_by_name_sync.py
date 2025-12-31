@@ -1,5 +1,5 @@
 import pytest
-from ....tools.tool_base import tool, submit_tool_calls
+from ....tools import tool, submit_tool_call
 
 # def test_tool_call_sync():
 #     # Create a custom sync tool that doesn't use the async implementation

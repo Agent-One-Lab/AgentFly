@@ -1,4 +1,4 @@
-from ....tools.tool_base import tool
+from ....tools import tool
 from ....envs.python_env import PythonSandboxEnv
 import pytest
 

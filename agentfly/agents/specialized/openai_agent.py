@@ -4,7 +4,7 @@ from openai import OpenAI, AzureOpenAI
 import httpx
 import asyncio
 from ...tools import answer_qa
-from ...tools.tool_base import tool
+from ...tools.decorator import tool
 from ..agent_base import BaseAgent
 from ..llm_backends import ClientBackend
 from ..llm_backends.backend_configs import ClientConfig

@@ -1,5 +1,4 @@
 from typing import Any, Callable, Dict, List, Optional, Type, Union
-
 from .specialized.think_agent import ThinkAgent
 from .specialized.openai_agent import OpenAIAgent
 from ..tools import get_tools_from_names
@@ -90,7 +89,7 @@ class AutoAgent:
         for k, v in config.items():
             agent_kwargs[k] = v
         
-        required_params = ["agent_type", "template", "tools", "backend"]
+        required_params = ["agent_type", "tools", "backend"]
         missing_params = [param for param in required_params if not config.get(param)]
         
         if missing_params:
@@ -125,7 +124,6 @@ class AutoAgent:
         template: str,
         tools: Optional[List] = None,
         debug: bool = False,
-        log_file: str = "agent",
         reward_fn: Optional[Callable] = None,
         **kwargs
     ) -> BaseAgent:
@@ -156,7 +154,6 @@ class AutoAgent:
             "template": template,
             "tools": tools or [],
             "debug": debug,
-            "log_file": log_file,
             "reward_fn": reward_fn,
             **kwargs
         }

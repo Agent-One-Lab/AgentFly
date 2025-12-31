@@ -1,4 +1,4 @@
-from ....tools import submit_tool_call, tool, submit_tool_calls
+from ....tools import submit_tool_call, tool
 import pytest
 import asyncio
 

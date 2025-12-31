@@ -1,5 +1,5 @@
 import asyncio, inspect, types, ray
-from ...tools.tool_base import TOOL_FACTORY, Tool
+from ...tools import Tool, get_tool_from_name
 
 def rayify(tool: Tool, *, export=None, **ray_opts):
     """
@@ -14,7 +14,7 @@ def rayify(tool: Tool, *, export=None, **ray_opts):
 
     def __init__(self):
         # Re-lookup the tool inside the worker process
-        self._tool = TOOL_FACTORY[tool_name]()
+        self._tool = get_tool_from_name(tool_name)()
 
     namespace["__init__"] = __init__
 

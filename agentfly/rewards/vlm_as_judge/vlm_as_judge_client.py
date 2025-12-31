@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from pathlib import Path
 from openai import AsyncOpenAI
+import sys
 from tqdm.asyncio import tqdm_asyncio
 
 from ... import AGENT_HOME
@@ -216,7 +217,7 @@ class VLMClient:
             for _ in range(num_generations):
                 all_tasks.append(self.single_call(inputs, model=model, **kwargs))
 
-        responses = await tqdm_asyncio.gather(*all_tasks, desc="Processing VLM requests")
+        responses = await tqdm_asyncio.gather(*all_tasks, desc="Processing VLM requests", file=sys.stdout)
 
         grouped_responses = []
         for i in range(0, len(responses), num_generations):
