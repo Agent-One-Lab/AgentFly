@@ -184,10 +184,13 @@ class VLMClient:
                  timeout_seconds: int = 60,
                  max_window_size_per_instance: int = 10,
                  port: int = 8000,
-                 api_key: str = "token-abc123"):
+                 api_key: str = "token-abc123",
+                 server_ips: Optional[List[str]] = None):
         self.timeout_seconds = timeout_seconds
-        server_ips = get_server_ips(model)
-        # server_ips = ["10.24.3.24"]
+        # Prefer explicit server IPs when provided; otherwise keep existing default.
+        # server_ips = get_server_ips(model)
+        if server_ips is None:
+            server_ips = ["10.24.3.228"]
         rate_limiters = [RateLimiter(max_window_size_per_instance) for _ in server_ips]
         self.client_manager = RoundRobinClient(server_ips, port, api_key, timeout_seconds, rate_limiters)
 
@@ -455,25 +458,53 @@ def create_vlm_prompt(summarize: str, all_questions: str) -> str:
 def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
     """Extract the VLM JSON list from the model output.
 
-    Tries strict JSON first; falls back to extracting the substring between
-    the first '[' and the last ']' and parsing that.
+    Tries strict JSON first; then looks for fenced JSON blocks and
+    substring-extracts list/object payloads.
     """
-    try:
-        parsed = json.loads(output_str)
-        if isinstance(parsed, list):
-            return parsed
-    except Exception:
-        pass
+    def _coerce_list(value: Any) -> Optional[List[Dict[str, Any]]]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value]
+        return None
 
-    # Fallback: try to extract JSON list portion
-    start = output_str.find('[')
-    end = output_str.rfind(']')
-    if start != -1 and end != -1 and end > start:
+    def _try_parse(candidate: str) -> Optional[List[Dict[str, Any]]]:
         try:
-            parsed = json.loads(output_str[start:end+1])
-            if isinstance(parsed, list):
-                return parsed
+            parsed = json.loads(candidate)
+            coerced = _coerce_list(parsed)
+            if coerced is not None:
+                return coerced
         except Exception:
             pass
-    raise ValueError("Failed to parse VLM JSON list from output")
 
+        for start_char, end_char in (('[', ']'), ('{', '}')):
+            start = candidate.find(start_char)
+            end = candidate.rfind(end_char)
+            if start != -1 and end != -1 and end > start:
+                try:
+                    parsed = json.loads(candidate[start:end + 1])
+                    coerced = _coerce_list(parsed)
+                    if coerced is not None:
+                        return coerced
+                except Exception:
+                    continue
+        return None
+
+    candidates: List[str] = [output_str.strip()]
+
+    for match in re.finditer(r"```(?:json)?\s*(.*?)```", output_str, flags=re.DOTALL | re.IGNORECASE):
+        block = match.group(1).strip()
+        if block:
+            candidates.append(block)
+
+    unterminated = re.search(r"```(?:json)?\s*(.*)$", output_str, flags=re.DOTALL | re.IGNORECASE)
+    if unterminated:
+        tail = unterminated.group(1).strip()
+        if tail:
+            candidates.append(tail)
+
+    for candidate in candidates:
+        parsed = _try_parse(candidate)
+        if parsed is not None:
+            return parsed
+    raise ValueError("Failed to parse VLM JSON list from output")

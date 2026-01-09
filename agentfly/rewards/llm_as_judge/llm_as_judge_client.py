@@ -244,7 +244,8 @@ class LLMClient:
             api_key: API key for authentication
         """
         self.timeout_seconds = timeout_seconds
-        server_ips = get_server_ips(model)
+        # server_ips = get_server_ips(model)
+        server_ips = ["10.24.0.80"]
         # Create a rate limiter for each instance
         rate_limiters = [RateLimiter(max_window_size_per_instance) for _ in server_ips]
         self.client_manager = RoundRobinClient(server_ips, port, api_key, timeout_seconds, rate_limiters)

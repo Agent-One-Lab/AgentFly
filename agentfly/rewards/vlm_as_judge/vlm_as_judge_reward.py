@@ -8,6 +8,7 @@ import tempfile
 import subprocess
 import asyncio
 import logging
+import time
 import concurrent.futures
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
@@ -15,7 +16,12 @@ from pathlib import Path
 # Support running both as a package module and as a standalone script
 try:
     from ..reward_base import reward
-    from .vlm_as_judge_client import VLMClient, create_vlm_prompt, _extract_json_list
+    from .vlm_as_judge_client import (
+        VLMClient,
+        create_vlm_prompt,
+        create_vlm_prompt_from_template,
+        _extract_json_list,
+    )
 except ImportError:  # Running as a script without package context
     import sys
     # Add repo root to sys.path so absolute imports work when invoked directly
@@ -31,6 +37,251 @@ except ImportError:  # Running as a script without package context
     )
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_VLM_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"
+VLM_MODEL_SERVER_IPS = {
+    "Qwen/Qwen3-VL-235B-A22B-Instruct": ["10.24.2.31"],
+    "OpenGVLab/InternVL3_5-241B-A28B": ["10.24.3.227"],
+    "zai-org/GLM-4.6V": ["10.24.0.201"]
+}
+_VLM_CLIENTS: Dict[Tuple[str, Tuple[str, ...], int, int, int, str], VLMClient] = {}
+DEFAULT_VLM_ENSEMBLE_MODEL_SPECS = [
+    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.2.31"]},
+    {"model": "OpenGVLab/InternVL3_5-241B-A28B", "server_ips": ["10.24.3.227"]},
+    {"model": "zai-org/GLM-4.6V", "server_ips": ["10.24.0.201"]},
+]
+VLM_ENSEMBLE_PROMPT_TEMPLATE = """You are given a video and several visual verification questions. Your task is to judge each question as true or false based only on what can be seen or reasonably inferred from the video. If the visual evidence is insufficient to confirm the statement, or if the statement directly contradicts the video, answer 'false'.
+ 
+⸻
+ 
+Visual Reasoning Rules
+    1.  Perspective Changes:Objects can look different from different angles. such as a circular path may look curved, straight, or wavy depending on the viewpoint, or a cylinder may look like a circle (top view) or a rectangle (side view)
+    2.  Simplified / Symbolic Drawings: The video may use simple shapes or colors to represent real objects. If the motion or layout still matches the description, treat it as True.
+    3.  Container Boundaries: If no container is drawn, assume the video frame is the boundary. If a container is shown, treat it as see-through if you can see inside it. If something is not visible, don’t assume it is inside the container.
+    4.  Focus on Shape and Motion, ignore assumptions about material, weight, texture, or color. If the described motion does not match (e.g., “slides down” vs. actually moving up), answer False.
+    5.  Occlusion: If something is partly hidden, use nearby cues to infer how it is moving or positioned.
+ 
+Input
+Questions:{all_questions}
+ 
+Output Format:
+Return a JSON list of objects. **Do not include any conversational filler or Markdown formatting tags.** Fields for each object:
+- `"index"`: The question index.
+- `"question"`: The full question text.
+- `"analysis"`: A concise step-by-step breakdown of what was observed vs. what the question claims.
+- `"result"`: "true" if visually confirmed, "false" if contradicted or evidence is insufficient.
+ 
+Example Format:
+[
+  {{
+    "index": "1",
+    "question": "The ball rolls along the circular path.",
+    "analysis": "The red sphere moves in a consistent arc that completes a 360-degree loop.",
+    "result": "true"
+  }}
+]
+"""
+VLM_ENSEMBLE_MIN_RESPONSES = 2
+
+
+def _env_flag_enabled(name: str) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return False
+    return value.strip().lower() not in ("", "0", "false", "no")
+
+
+def _log_vlm_raw_output(model_name: str, output_text: str, reason: str, force: bool = False) -> None:
+    if not (force or _env_flag_enabled("VLM_LOG_RAW_OUTPUT")):
+        return
+    if force:
+        log_fn = logger.error
+    else:
+        log_fn = logger.warning
+    log_fn("VLM raw output (%s) for model '%s':\n%s", reason, model_name, output_text)
+
+
+def _normalize_server_ips(value: Optional[Any]) -> Optional[List[str]]:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        ips = [str(ip).strip() for ip in value if str(ip).strip()]
+        return ips or None
+    if isinstance(value, str):
+        ips = [ip.strip() for ip in value.split(",") if ip.strip()]
+        return ips or None
+    return None
+
+
+def _resolve_vlm_model(explicit_model: Optional[str], data_fields: Dict[str, Any]) -> str:
+    if explicit_model:
+        return explicit_model
+    for key in ("vlm_model", "vlm_model_name", "vlm_model_name_or_path"):
+        candidate = data_fields.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return os.getenv("VLM_JUDGE_MODEL", DEFAULT_VLM_MODEL)
+
+
+def _resolve_vlm_server_ips(
+    model: str,
+    explicit_ips: Optional[Any],
+    data_fields: Dict[str, Any],
+) -> Optional[List[str]]:
+    ips = _normalize_server_ips(explicit_ips)
+    if ips:
+        return ips
+    ips = _normalize_server_ips(data_fields.get("vlm_server_ips"))
+    if ips:
+        return ips
+    env_json = os.getenv("VLM_SERVER_IPS_JSON")
+    if env_json:
+        try:
+            mapping = json.loads(env_json)
+        except json.JSONDecodeError as exc:
+            logger.warning("Invalid VLM_SERVER_IPS_JSON: %s", exc)
+        else:
+            if isinstance(mapping, dict):
+                env_ips = _normalize_server_ips(mapping.get(model))
+                if env_ips:
+                    return env_ips
+    ips = VLM_MODEL_SERVER_IPS.get(model)
+    if ips:
+        return list(ips)
+    logger.warning(
+        "No VLM server IPs configured for model '%s'; falling back to VLMClient default.",
+        model,
+    )
+    return None
+
+
+def _get_vlm_ensemble_log_path() -> str:
+    env_path = os.getenv("VLM_ENSEMBLE_LOG_PATH")
+    if env_path:
+        return env_path
+    data_dir = os.getenv("AGENT_DATA_DIR")
+    if data_dir:
+        return os.path.join(data_dir, "vlm_ensemble_endpoints.jsonl")
+    default_data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+    return os.path.join(default_data_dir, "vlm_ensemble_endpoints.jsonl")
+
+
+def _append_vlm_ensemble_log(record: Dict[str, Any]) -> None:
+    log_path = _get_vlm_ensemble_log_path()
+    try:
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+    except Exception as exc:
+        logger.debug("Failed to write VLM ensemble log: %s", exc)
+
+
+def _get_vlm_client(
+    model: str,
+    timeout_seconds: int = 60,
+    max_window_size_per_instance: int = 10,
+    port: int = 8000,
+    api_key: str = "token-abc123",
+    server_ips: Optional[List[str]] = None,
+) -> VLMClient:
+    ips_key = tuple(server_ips) if server_ips else ("__default__",)
+    key = (model, ips_key, timeout_seconds, max_window_size_per_instance, port, api_key)
+    client = _VLM_CLIENTS.get(key)
+    if client is None:
+        client = VLMClient(
+            model=model,
+            timeout_seconds=timeout_seconds,
+            max_window_size_per_instance=max_window_size_per_instance,
+            port=port,
+            api_key=api_key,
+            server_ips=server_ips,
+        )
+        _VLM_CLIENTS[key] = client
+    return client
+
+
+def _normalize_model_specs(value: Optional[Any]) -> Optional[List[Dict[str, Any]]]:
+    if not value or not isinstance(value, list):
+        return None
+
+    specs = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        model = item.get("model") or item.get("model_name")
+        if not isinstance(model, str) or not model.strip():
+            continue
+        server_ips = _normalize_server_ips(item.get("server_ips") or item.get("ips"))
+        specs.append({"model": model.strip(), "server_ips": server_ips})
+
+    return specs or None
+
+
+def _resolve_vlm_model_specs(explicit_specs: Optional[Any], data_fields: Dict[str, Any]) -> List[Dict[str, Any]]:
+    specs = _normalize_model_specs(explicit_specs)
+    if not specs:
+        specs = _normalize_model_specs(data_fields.get("vlm_model_specs"))
+
+    if not specs:
+        return [dict(item) for item in DEFAULT_VLM_ENSEMBLE_MODEL_SPECS]
+
+    for spec in specs:
+        if not spec.get("server_ips"):
+            spec["server_ips"] = _resolve_vlm_server_ips(spec["model"], None, data_fields)
+    return specs
+
+
+def _parse_confidence_score(value: Any, default: int = 1) -> int:
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(5, score))
+
+
+def _result_is_true(value: Any) -> bool:
+    return str(value).strip().lower() == "true"
+
+
+def _aggregate_vlm_results(
+    results_by_model: List[Dict[str, Dict[str, Any]]],
+    questions_list: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    aggregated = []
+
+    for question in questions_list:
+        idx = str(question.get("index", "")).strip()
+        if not idx:
+            continue
+
+        votes = []
+        confidences = []
+        for result_map in results_by_model:
+            result = result_map.get(idx)
+            if not result:
+                continue
+            votes.append(_result_is_true(result.get("result")))
+            confidences.append(_parse_confidence_score(result.get("confidence_score")))
+
+        if len(votes) < VLM_ENSEMBLE_MIN_RESPONSES:
+            final_value = False
+        else:
+            true_votes = sum(1 for vote in votes if vote)
+            false_votes = len(votes) - true_votes
+            final_value = true_votes > false_votes
+
+        avg_conf = int(round(sum(confidences) / len(confidences))) if confidences else 1
+        aggregated.append({
+            "index": idx,
+            "question": question.get("question", ""),
+            "analysis": "Ensemble vote across available models.",
+            "result": "True" if final_value else "False",
+            "confidence_score": str(max(1, min(5, avg_conf))),
+        })
+
+    return aggregated
 
 
 class VideoGenerator:
@@ -224,22 +475,16 @@ def calculate_weighted_reward(results: List[Dict], questions_list: List[Dict]) -
     
     for result in results:
         idx = str(result.get("index", ""))
-        result_value = result.get("result", "Not sure")
-        confidence = int(result.get("confidence_score", "1"))
+        result_value = str(result.get("result", "")).strip().lower()
         
         # Get weight for this question
         weight = weight_map.get(idx, 1.0)
         
         # Calculate score based on result
-        if result_value == "True":
+        if result_value == "true":
             score = 1.0
-        elif result_value == "False":
+        else:
             score = 0.0
-        else:  # "Not sure"
-            if confidence >= 4:
-                score = 0.0  # High confidence "Not sure" -> False
-            else:
-                score = 1.0  # Low confidence "Not sure" -> True
         
         scores.append(score)
         weights.append(weight)
@@ -257,8 +502,7 @@ def calculate_weighted_reward(results: List[Dict], questions_list: List[Dict]) -
 def pass_fail_reward(results: List[Dict], questions_list: List[Dict]) -> float:
     """Calculate a binary pass/fail score from VLM results.
 
-    Returns 1.0 only when every question is judged as satisfied (or low-confidence
-    "Not sure"), otherwise returns 0.0.
+    Returns 1.0 only when every question is judged as "true", otherwise 0.0.
     """
     if not results or not questions_list:
         return 0.0
@@ -280,28 +524,75 @@ def pass_fail_reward(results: List[Dict], questions_list: List[Dict]) -> float:
             logger.warning("Missing VLM result for question index %s", idx)
             return 0.0
 
-        result_value = str(result.get("result", "Not sure")).strip().lower()
-        confidence_raw = result.get("confidence_score", "1")
-        try:
-            confidence = int(confidence_raw)
-        except (TypeError, ValueError):
-            confidence = 1
-
-        if result_value == "true":
-            continue
-        if result_value == "not sure" and confidence < 4:
-            continue
-
-        # Any explicit false or high-confidence uncertainty causes failure
-        return 0.0
+        result_value = str(result.get("result", "")).strip().lower()
+        if result_value != "true":
+            return 0.0
 
     return 1.0
+
+
+def _all_true_pass(results: List[Dict], questions_list: List[Dict]) -> bool:
+    """Strict pass/fail: only True counts; any non-True or missing result fails."""
+    if not results or not questions_list:
+        return False
+
+    result_map = {
+        str(r.get("index", "")).strip(): r
+        for r in results
+        if str(r.get("index", "")).strip()
+    }
+
+    for question in questions_list:
+        idx = str(question.get("index", "")).strip()
+        if not idx:
+            logger.warning("Question without index encountered in strict pass/fail")
+            return False
+
+        result = result_map.get(idx)
+        if result is None:
+            logger.warning("Missing VLM result for question index %s in strict pass/fail", idx)
+            return False
+
+        result_value = str(result.get("result", "")).strip().lower()
+        if result_value != "true":
+            return False
+
+    return True
+
+
+def _true_rate(results: List[Dict], questions_list: List[Dict]) -> float:
+    """Compute true-rate over questions; missing/False counts as 0."""
+    if not questions_list:
+        return 0.0
+
+    result_map = {
+        str(r.get("index", "")).strip(): r
+        for r in results
+        if str(r.get("index", "")).strip()
+    }
+
+    true_count = 0
+    for question in questions_list:
+        idx = str(question.get("index", "")).strip()
+        if not idx:
+            logger.warning("Question without index encountered in true-rate reward")
+            return 0.0
+
+        result = result_map.get(idx)
+        result_value = str(result.get("result", "")).strip().lower() if result else ""
+        if result_value == "true":
+            true_count += 1
+
+    return true_count / len(questions_list)
+
 
 @reward(name="vlm_as_judge_pass_reward")
 async def vlm_as_judge_pass_reward(
     prediction: str, 
     trajectory: Dict[str, Any] = None,
     vlm_questions: Dict[str, Any] = None,
+    vlm_model: Optional[str] = None,
+    vlm_server_ips: Optional[List[str]] = None,
     **data_fields
 ) -> Dict[str, float]:
         """VLM as Judge reward function for evaluating agent trajectories
@@ -381,10 +672,13 @@ async def vlm_as_judge_pass_reward(
                 logger.error("Failed to generate video from code")
                 return {"reward": 0.0}
             
+            model_name = _resolve_vlm_model(vlm_model, data_fields)
+            server_ips = _resolve_vlm_server_ips(model_name, vlm_server_ips, data_fields)
             # Run VLM evaluation directly since we're already async
-            client = VLMClient(
-                model="Qwen/Qwen2.5-VL-72B-Instruct",
-                timeout_seconds=120
+            client = _get_vlm_client(
+                model=model_name,
+                timeout_seconds=120,
+                server_ips=server_ips,
             )
             
             # Wait for client availability
@@ -408,9 +702,9 @@ async def vlm_as_judge_pass_reward(
             
             # Process the request
             responses = await client.process_all_inputs(
-                [messages], 
-                model="Qwen/Qwen2.5-VL-72B-Instruct",
-                temperature=0.1
+                [messages],
+                model=model_name,
+                temperature=0,
             )
             
             if not responses or not responses[0] or not responses[0][0]:
@@ -465,11 +759,574 @@ async def vlm_as_judge_pass_reward(
             return {"reward": 0.0}
     
 
-@reward(name="vlm_as_judge_reward")
-async def vlm_as_judge_reward(
-    prediction: str, 
+@reward(name="vlm_as_judge_pass_reward_multi_model")
+async def vlm_as_judge_pass_reward_multi_model(
+    prediction: str,
     trajectory: Dict[str, Any] = None,
     vlm_questions: Dict[str, Any] = None,
+    vlm_model_specs: Optional[List[Dict[str, Any]]] = None,
+    **data_fields,
+) -> Dict[str, float]:
+    """VLM as Judge pass/fail reward using multiple models with an ensemble vote."""
+    video_path = None
+    try:
+        logger.info(f"=" * 60)
+        logger.info("vlm_as_judge_pass_reward_multi_model called")
+        logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+
+        video_gen = VideoGenerator()
+
+        all_data = dict(data_fields)
+        if vlm_questions is not None:
+            all_data["vlm_questions"] = vlm_questions
+
+        all_questions, _, questions_list = extract_vlm_questions_from_data(all_data)
+        if not questions_list:
+            logger.warning("No VLM questions found in data.")
+            return {"reward": 0.0}
+
+        code = video_gen.extract_code_from_response(prediction)
+        if not code:
+            logger.warning("No Python code found in prediction")
+            return {"reward": 0.0}
+
+        video_filename = f"video_{uuid.uuid4().hex}.mp4"
+        video_path = os.path.join(video_gen.output_dir, video_filename)
+
+        success = video_gen.generate_video_from_code(code, video_path)
+        if not success:
+            logger.error("Failed to generate video from code")
+            return {"reward": 0.0}
+
+        expected_indices = [
+            str(question.get("index", "")).strip()
+            for question in questions_list
+            if str(question.get("index", "")).strip()
+        ]
+        if not expected_indices:
+            expected_indices = [str(i + 1) for i in range(len(questions_list))]
+        expected_index_set = set(expected_indices)
+
+        expected_indices = [
+            str(question.get("index", "")).strip()
+            for question in questions_list
+            if str(question.get("index", "")).strip()
+        ]
+        if not expected_indices:
+            expected_indices = [str(i + 1) for i in range(len(questions_list))]
+        expected_index_set = set(expected_indices)
+
+        prompt_text = create_vlm_prompt_from_template(
+            VLM_ENSEMBLE_PROMPT_TEMPLATE,
+            variables={"all_questions": all_questions},
+        )
+        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
+        messages = [
+            {"role": "user", "content": user_text},
+        ]
+
+        model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
+        if not model_specs:
+            logger.error("No VLM model specs configured for ensemble.")
+            return {"reward": 0.0}
+
+        async def _run_model(spec: Dict[str, Any], spec_index: int) -> Dict[str, Any]:
+            model_name = spec["model"]
+            server_ips = spec.get("server_ips")
+            try:
+                client = _get_vlm_client(
+                    model=model_name,
+                    timeout_seconds=120,
+                    server_ips=server_ips,
+                )
+
+                for _ in range(10):
+                    if client.is_available():
+                        break
+                    await asyncio.sleep(1)
+                else:
+                    logger.error("VLM client not available for model '%s'", model_name)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "client_unavailable",
+                    }
+
+                responses = await client.process_all_inputs(
+                    [messages],
+                    model=model_name,
+                    temperature=0,
+                )
+
+                if not responses or not responses[0] or not responses[0][0]:
+                    if _env_flag_enabled("VLM_LOG_RAW_OUTPUT"):
+                        logger.warning(
+                            "VLM raw responses for model '%s' were empty: %s",
+                            model_name,
+                            responses,
+                        )
+                    logger.error("No response from VLM server for model '%s'", model_name)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "empty_response",
+                    }
+
+                output_text = responses[0][0]
+                _log_vlm_raw_output(model_name, output_text, "response")
+                try:
+                    results = _extract_json_list(output_text)
+                except Exception as exc:
+                    logger.error("Failed to parse VLM results for model '%s': %s", model_name, exc)
+                    # print(f"output_text: {output_text}")
+                    _log_vlm_raw_output(model_name, output_text, "parse_error", force=True)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "parse_error",
+                    }
+
+                if not results:
+                    logger.error("Empty VLM results for model '%s'", model_name)
+                    _log_vlm_raw_output(model_name, output_text, "no_results", force=True)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "no_results",
+                    }
+
+                passed = _all_true_pass(results, questions_list)
+                return {
+                    "index": spec_index,
+                    "model": model_name,
+                    "server_ips": server_ips,
+                    "passed": passed,
+                    "endpoint_reward": 1.0 if passed else 0.0,
+                    "error": None,
+                }
+            except Exception as exc:
+                logger.error("Error running VLM model '%s': %s", model_name, exc)
+                return {
+                    "index": spec_index,
+                    "model": model_name,
+                    "server_ips": server_ips,
+                    "passed": None,
+                    "endpoint_reward": None,
+                    "error": str(exc),
+                }
+
+        tasks = [_run_model(spec, idx) for idx, spec in enumerate(model_specs, start=1)]
+        model_results = await asyncio.gather(*tasks)
+        failed_results = [r for r in model_results if r["passed"] is None]
+        if failed_results:
+            failed_summary = ", ".join(
+                f"{result['model']}:{result.get('error')}" for result in failed_results
+            )
+            logger.error(
+                "VLM ensemble all-or-nothing: %d/%d models failed (%s); dropping partial results.",
+                len(failed_results),
+                len(model_specs),
+                failed_summary,
+            )
+            available_results = []
+        else:
+            available_results = model_results
+
+        required_responses = len(model_specs)
+        if len(available_results) < required_responses:
+            logger.error(
+                "Only %d/%d VLM models returned results; need at least %d.",
+                len(available_results),
+                len(model_specs),
+                required_responses,
+            )
+            _append_vlm_ensemble_log(
+                {
+                    "timestamp": time.time(),
+                    "reward": 0.0,
+                    "available": len(available_results),
+                    "required": required_responses,
+                    "endpoints": model_results,
+                }
+            )
+            return {"reward": 0.0}
+
+        pass_votes = sum(1 for result in available_results if result["passed"])
+        fail_votes = len(available_results) - pass_votes
+        reward_score = 1.0 if pass_votes > fail_votes else 0.0
+        logger.info(
+            "Ensemble VLM evaluation completed. Pass votes: %d/%d. Reward: %.3f",
+            pass_votes,
+            len(available_results),
+            reward_score,
+        )
+        _append_vlm_ensemble_log(
+            {
+                "timestamp": time.time(),
+                "reward": reward_score,
+                "available": len(available_results),
+                "required": required_responses,
+                "endpoints": model_results,
+            }
+        )
+        return {"reward": reward_score}
+
+    except Exception as e:
+        logger.error(f"Error in vlm_as_judge_pass_reward_multi_model: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"reward": 0.0}
+    finally:
+        if video_path:
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
+
+
+@reward(name="vlm_as_judge_reward_multi_model")
+async def vlm_as_judge_reward_multi_model(
+    prediction: str,
+    trajectory: Dict[str, Any] = None,
+    vlm_questions: Dict[str, Any] = None,
+    vlm_model_specs: Optional[List[Dict[str, Any]]] = None,
+    **data_fields,
+) -> Dict[str, float]:
+    """VLM as Judge reward using multiple models, returning true-rate (0-1)."""
+    video_path = None
+    try:
+        logger.info(f"=" * 60)
+        logger.info("vlm_as_judge_reward_multi_model called")
+        logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+
+        video_gen = VideoGenerator()
+
+        all_data = dict(data_fields)
+        if vlm_questions is not None:
+            all_data["vlm_questions"] = vlm_questions
+
+        all_questions, _, questions_list = extract_vlm_questions_from_data(all_data)
+        if not questions_list:
+            logger.warning("No VLM questions found in data.")
+            return {"reward": 0.0}
+
+        code = video_gen.extract_code_from_response(prediction)
+        if not code:
+            logger.warning("No Python code found in prediction")
+            return {"reward": 0.0}
+
+        video_filename = f"video_{uuid.uuid4().hex}.mp4"
+        video_path = os.path.join(video_gen.output_dir, video_filename)
+
+        success = video_gen.generate_video_from_code(code, video_path)
+        if not success:
+            logger.error("Failed to generate video from code")
+            return {"reward": 0.0}
+
+        prompt_text = create_vlm_prompt_from_template(
+            VLM_ENSEMBLE_PROMPT_TEMPLATE,
+            variables={"all_questions": all_questions},
+        )
+        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
+        messages = [
+            {"role": "user", "content": user_text},
+        ]
+
+        model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
+        if not model_specs:
+            logger.error("No VLM model specs configured for ensemble.")
+            return {"reward": 0.0}
+
+        async def _run_model(spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            model_name = spec["model"]
+            server_ips = spec.get("server_ips")
+            try:
+                client = _get_vlm_client(
+                    model=model_name,
+                    timeout_seconds=120,
+                    server_ips=server_ips,
+                )
+
+                for _ in range(10):
+                    if client.is_available():
+                        break
+                    await asyncio.sleep(1)
+                else:
+                    logger.error("VLM client not available for model '%s'", model_name)
+                    return None
+
+                responses = await client.process_all_inputs(
+                    [messages],
+                    model=model_name,
+                    temperature=0,
+                )
+
+                if not responses or not responses[0] or not responses[0][0]:
+                    logger.error("No response from VLM server for model '%s'", model_name)
+                    return None
+
+                output_text = responses[0][0]
+                try:
+                    results = _extract_json_list(output_text)
+                except Exception as exc:
+                    logger.error("Failed to parse VLM results for model '%s': %s", model_name, exc)
+                    return None
+
+                if not results:
+                    logger.error("Empty VLM results for model '%s'", model_name)
+                    return None
+
+                return {
+                    "model": model_name,
+                    "true_rate": _true_rate(results, questions_list),
+                }
+            except Exception as exc:
+                logger.error("Error running VLM model '%s': %s", model_name, exc)
+                return None
+
+        tasks = [_run_model(spec) for spec in model_specs]
+        model_results = [r for r in await asyncio.gather(*tasks) if r]
+
+        if len(model_results) < VLM_ENSEMBLE_MIN_RESPONSES:
+            logger.error(
+                "Only %d/%d VLM models returned results; need at least %d.",
+                len(model_results),
+                len(model_specs),
+                VLM_ENSEMBLE_MIN_RESPONSES,
+            )
+            return {"reward": 0.0}
+
+        reward_score = sum(r["true_rate"] for r in model_results) / len(model_results)
+        logger.info(
+            "Ensemble VLM evaluation completed. True-rate avg: %.3f (%d models).",
+            reward_score,
+            len(model_results),
+        )
+        return {"reward": reward_score}
+
+    except Exception as e:
+        logger.error(f"Error in vlm_as_judge_reward_multi_model: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"reward": 0.0}
+    finally:
+        if video_path:
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
+
+
+@reward(name="vlm_as_judge_pass_reward_rebuttal")
+async def vlm_as_judge_pass_reward_rebuttal(
+    prediction: str,
+    trajectory: Dict[str, Any] = None,
+    question: str = None,
+    vlm_model: Optional[str] = None,
+    vlm_server_ips: Optional[List[str]] = None,
+    **data_fields
+) -> Dict[str, float]:
+    """VLM as Judge pass/fail reward for evaluating video generation based on question/prompt
+
+    This is a simplified reward function that:
+    1. Extracts Python code from the prediction
+    2. Generates a video using the code
+    3. Uses VLM to judge if the video correctly represents the question/prompt
+    4. Returns a binary pass/fail score
+
+    Args:
+        prediction: Agent's generated response (should contain Python code)
+        trajectory: Agent trajectory information
+        question: The original question/prompt describing what the video should show
+        **data_fields: Additional data fields from the RL data
+
+    Returns:
+        Binary pass/fail reward: 1.0 if passed, 0.0 if failed
+    """
+    try:
+        # Log incoming data for debugging
+        logger.info(f"=" * 60)
+        logger.info(f"vlm_as_judge_pass_reward_rebuttal called")
+        logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+        logger.info(f"Question: {question[:200] if question else 'None'}...")
+
+        # Initialize video generator
+        video_gen = VideoGenerator()
+
+        # Get question from parameters
+        if question is None:
+            question = data_fields.get("question", "")
+
+        if not question:
+            logger.warning("No question found in data")
+            return {"reward": 0.0}
+
+        # Extract code from prediction
+        code = video_gen.extract_code_from_response(prediction)
+        if not code:
+            logger.warning("No Python code found in prediction")
+            logger.warning(f"Prediction was: {prediction[:1000] if prediction else 'None'}")
+            return {"reward": 0.0}
+
+        logger.info(f"Extracted Python code ({len(code)} chars)")
+
+        # Generate unique video filename
+        video_filename = f"video_{uuid.uuid4().hex}.mp4"
+        video_path = os.path.join(video_gen.output_dir, video_filename)
+
+        # Generate video from code
+        success = video_gen.generate_video_from_code(code, video_path)
+        if not success:
+            logger.error("Failed to generate video from code")
+            return {"reward": 0.0}
+
+        model_name = _resolve_vlm_model(vlm_model, data_fields)
+        server_ips = _resolve_vlm_server_ips(model_name, vlm_server_ips, data_fields)
+        # Run VLM evaluation
+        client = _get_vlm_client(
+            model=model_name,
+            timeout_seconds=120,
+            server_ips=server_ips,
+        )
+
+        # Wait for client availability
+        for _ in range(10):
+            if client.is_available():
+                break
+            await asyncio.sleep(1)
+        else:
+            logger.error("VLM client not available")
+            try:
+                os.remove(video_path)
+            except:
+                pass
+            return {"reward": 0.0}
+
+        # Create VLM prompt for pass/fail judgment
+        prompt_text = f"""You are evaluating a video that was supposed to demonstrate the following scenario:
+
+{question}
+
+Please watch the video carefully and determine whether it correctly demonstrates the described scenario.
+
+Consider:
+1. Does the video show the objects and elements described?
+2. Does the motion/behavior match what was described?
+3. Are the physical relationships and interactions correct?
+4. Does the overall visualization accurately represent the scenario?
+
+**Important**: Focus on the core physical behavior and motion. Minor visual simplifications (like using 2D views of 3D objects, or symbolic representations) are acceptable as long as the fundamental physics and motion are correct.
+
+Provide your judgment as a JSON object with:
+- "passed": true or false (whether the video correctly demonstrates the scenario)
+- "reasoning": your detailed reasoning for the judgment
+- "confidence": 1-5 (how confident you are in your judgment)
+
+Return only the JSON object, no additional text."""
+
+        # Build message using <video> tag
+        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
+        messages = [{
+            "role": "user",
+            "content": user_text
+        }]
+
+        # Process the request
+        responses = await client.process_all_inputs(
+            [messages],
+            model=model_name,
+            temperature=0,
+        )
+
+        if not responses or not responses[0] or not responses[0][0]:
+            logger.error("No response from VLM server")
+            try:
+                os.remove(video_path)
+            except:
+                pass
+            return {"reward": 0.0}
+
+        output_text = responses[0][0]
+
+        try:
+            # Parse VLM result
+            # Try to extract JSON from the response
+            result = None
+            try:
+                result = json.loads(output_text)
+            except:
+                # Try to find JSON in the text
+                start = output_text.find('{')
+                end = output_text.rfind('}')
+                if start != -1 and end != -1 and end > start:
+                    result = json.loads(output_text[start:end+1])
+
+            if not result:
+                logger.error("Failed to parse VLM result")
+                logger.error(f"VLM output: {output_text}")
+                try:
+                    os.remove(video_path)
+                except:
+                    pass
+                return {"reward": 0.0}
+
+            # Extract pass/fail decision
+            passed = result.get("passed", False)
+            reasoning = result.get("reasoning", "")
+            confidence = result.get("confidence", 1)
+
+            # Calculate reward: 1.0 if passed, 0.0 if failed
+            reward_score = 1.0 if passed else 0.0
+
+            logger.info(f"VLM judgment: {'PASSED' if passed else 'FAILED'}")
+            logger.info(f"Reasoning: {reasoning}")
+            logger.info(f"Confidence: {confidence}/5")
+            logger.info(f"Reward: {reward_score}")
+
+            # Clean up video file
+            try:
+                os.remove(video_path)
+            except:
+                pass
+
+            return {"reward": reward_score}
+
+        except Exception as e:
+            logger.error(f"Error processing VLM result: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                os.remove(video_path)
+            except:
+                pass
+            return {"reward": 0.0}
+
+    except Exception as e:
+        logger.error(f"Error in vlm_as_judge_pass_reward_rebuttal: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"reward": 0.0}
+
+
+@reward(name="vlm_as_judge_reward")
+async def vlm_as_judge_reward(
+    prediction: str,
+    trajectory: Dict[str, Any] = None,
+    vlm_questions: Dict[str, Any] = None,
+    vlm_model: Optional[str] = None,
+    vlm_server_ips: Optional[List[str]] = None,
     **data_fields
 ) -> Dict[str, float]:
     """VLM as Judge reward function for evaluating agent trajectories
@@ -549,10 +1406,13 @@ async def vlm_as_judge_reward(
             logger.error("Failed to generate video from code")
             return {"reward": 0.0}
         
+        model_name = _resolve_vlm_model(vlm_model, data_fields)
+        server_ips = _resolve_vlm_server_ips(model_name, vlm_server_ips, data_fields)
         # Run VLM evaluation directly since we're already async
-        client = VLMClient(
-            model="Qwen/Qwen2.5-VL-72B-Instruct",
-            timeout_seconds=120
+        client = _get_vlm_client(
+            model=model_name,
+            timeout_seconds=120,
+            server_ips=server_ips,
         )
         
         # Wait for client availability
@@ -576,9 +1436,9 @@ async def vlm_as_judge_reward(
         
         # Process the request
         responses = await client.process_all_inputs(
-            [messages], 
-            model="Qwen/Qwen2.5-VL-72B-Instruct",
-            temperature=0.1
+            [messages],
+            model=model_name,
+            temperature=0,
         )
         
         if not responses or not responses[0] or not responses[0][0]:
