@@ -128,6 +128,8 @@ class BaseAgent(ChainRollout, ABC):
         self.max_model_len = max_model_len
         
         self.tool_names = [tool.name for tool in tools]
+        if isinstance(system_prompt, str):
+            system_prompt = system_prompt.replace("\\n", "\n")
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
         
@@ -628,13 +630,38 @@ class BaseAgent(ChainRollout, ABC):
     
     def get_verl_data_proto(self):
         inputs, other_info_list = self.tokenize_trajectories(return_reward_mask=True, concatenate_mm_inputs=False)
-        group_ids = np.array([info["group_id"] for info in other_info_list], dtype=object)
+        group_ids_list = [info["group_id"] for info in other_info_list]
+        group_ids = np.array(group_ids_list, dtype=object)
+        batch_size = len(group_ids_list)
+        unique_group_ids = []
+        seen_group_ids = set()
+        for group_id in group_ids_list:
+            if group_id not in seen_group_ids:
+                unique_group_ids.append(group_id)
+                seen_group_ids.add(group_id)
         # Do evaluation here
         reward_values, other_values = self.rewards
         inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(reward_values, dtype=torch.float32).unsqueeze(dim=-1) # BS x L
         # Handle other values as np.array
         for key, values in other_values.items():
-            inputs[f"rm_{key}"] = np.array(values)
+            aligned_values = list(values)
+            if len(aligned_values) == len(unique_group_ids) and unique_group_ids:
+                group_to_value = {
+                    group_id: aligned_values[idx]
+                    for idx, group_id in enumerate(unique_group_ids)
+                }
+                aligned_values = [group_to_value[group_id] for group_id in group_ids_list]
+            elif len(aligned_values) == 1 and batch_size > 1:
+                aligned_values = aligned_values * batch_size
+            if len(aligned_values) != batch_size:
+                self.logger.warning(
+                    f"Adjusting rm_{key} length from {len(aligned_values)} to {batch_size} to match batch size."
+                )
+                if len(aligned_values) < batch_size:
+                    aligned_values = aligned_values + [0.0] * (batch_size - len(aligned_values))
+                else:
+                    aligned_values = aligned_values[:batch_size]
+            inputs[f"rm_{key}"] = np.array(aligned_values)
         # We handle the group id in the agent side, to be compatible with GRPO
         inputs["uid"] = group_ids
         

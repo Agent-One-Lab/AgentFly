@@ -17,18 +17,11 @@ from .webshop_reward import webshop_reward
 from .alfworld_reward import alfworld_episode_reward
 from .scienceworld_reward import scienceworld_reward
 from .gui_reward import gui_reward
-from .llm_as_judge import llm_as_judge_reward, llm_as_judge_client_math_reward
-from .vlm_as_judge import (
-    vlm_as_judge_reward,
+from .vlm_as_judge.vlm_as_judge_reward import (
     vlm_as_judge_pass_reward,
-    VideoGenerator,
-    extract_vlm_questions_from_data,
-    calculate_weighted_reward,
-    pass_fail_reward,
-    VLMClient,
-    create_vlm_prompt,
-    create_vlm_prompt_from_template,
-    create_vlm_prompt_custom,
+    vlm_as_judge_pass_reward_multi_model,
+    vlm_as_judge_pass_reward_rebuttal,
+    vlm_as_judge_reward,
+    vlm_as_judge_reward_multi_model,
 )
-from .code_reward import code_reward_test
-
+from .llm_as_judge.llm_as_judge_video_reward import llm_as_judge_video_reward
