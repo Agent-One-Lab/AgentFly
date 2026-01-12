@@ -119,7 +119,6 @@ class ThinkAgent(BaseAgent):
             model_name_or_path=model_name_or_path,
             template=template,
             tools=tools,
-            max_length=8192,
             **kwargs
         )
 

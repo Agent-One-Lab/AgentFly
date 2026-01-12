@@ -10,5 +10,4 @@ from .llm_backends import (
     AsyncVLLMBackend,
     AsyncVerlBackend,
     TransformersBackend,
-    VLLMBackend,
 )

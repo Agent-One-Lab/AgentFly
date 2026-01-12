@@ -29,9 +29,6 @@ from .constants import ToolPlacement, Role
 from .global_policy import GlobalPolicy
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-
 
 @dataclasses.dataclass
 class Template:

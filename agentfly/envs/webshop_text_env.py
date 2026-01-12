@@ -109,8 +109,10 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     async def reset(self, env_args=None) -> str:        
         """
         Reset the environment to its initial state or to a specific task_id if provided.
+
         Args:
             env_args (dict, optional): Dictionary that may contain 'task_id'. Default is None. Used during training.
+
         Returns:
             str: None (kept for compatibility)
         """
@@ -134,9 +136,11 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     async def step(self, action: str, task_id: int = None) -> str:
         """
         Take an action in the environment and return the observation.
+
         Args:
             action (str): An action in the form of 'click[value]' or 'search[keywords]'.
             task_id (int, optional): Task identifier for reward calculation.
+
         Returns:
             str or dict: The observation after the action, and reward if applicable.
         """
@@ -394,6 +398,7 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
         """
         Returns list of available actions at the current step.
         Scans the current HTML for clickable elements and search bar.
+
         Returns:
             dict: { 'has_search_bar': bool, 'clickables': list of str }
         """
@@ -422,6 +427,7 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     def get_instruction_text(self):
         """
         Get corresponding instruction text for current environment session.
+
         Returns:
             str: The instruction text from the HTML.
         """
@@ -432,8 +438,10 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     def _parse_html(self, html=None):
         """
         Returns web request result wrapped in BeautifulSoup object.
+
         Args:
             html (str, optional): HTML string to parse. If None, uses current state HTML.
+
         Returns:
             BeautifulSoup: Parsed HTML object.
         """
@@ -446,6 +454,7 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     def observation(self):
         """
         Compiles state into either the `html`, `text`, `text_rich`, or `url` observation mode.
+
         Returns:
             str: The current observation in the selected mode.
         """
@@ -474,9 +483,11 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     def convert_html_to_text(self, html, simple=True):
         """
         Strip HTML of tags and add separators to convert observation into simple or rich text mode.
+
         Args:
             html (str): HTML string to convert.
             simple (bool): If True, use simple [SEP] separators. If False, use rich formatting.
+
         Returns:
             str: The converted text observation.
         """
@@ -512,8 +523,10 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     def tag_visible(element):
         """
         Determine if a tag is visible (not style/script/head/title/meta/document/comment).
+
         Args:
             element: BeautifulSoup element.
+
         Returns:
             bool: True if visible, False otherwise.
         """
@@ -529,6 +542,7 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     async def acquire():
         """
         Acquire and start a new WebAgentTextEnv environment asynchronously.
+
         Returns:
             WebAgentTextEnv: The started environment instance.
         """
@@ -541,8 +555,10 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
     def parse_action(action):
         """
         Parse action string to action name and its arguments.
+
         Args:
             action (str): Action string, e.g., 'click[value]' or 'search[keywords]'.
+            
         Returns:
             tuple: (action_name, action_arg)
         """

@@ -20,6 +20,9 @@ class PythonSandboxEnv(BaseEnv, SupportsDocker):
         host_ip: str = "127.0.0.1",
         container_port: int = 8000,
     ):
+        """
+        Initialize the PythonSandboxEnv.
+        """
         super().__init__()
         self.image, self.runtime = image, runtime
         self.cpu, self.mem = cpu, mem
@@ -48,7 +51,9 @@ class PythonSandboxEnv(BaseEnv, SupportsDocker):
         )
     
     async def start(self) -> None:
-        # Ask Docker to map container 8000/tcp ⇒ random free host port
+        """
+        Start the Docker container and wait for it to be ready.
+        """
         await self._docker_start(
             image=self.image,
             runtime=self.runtime,
@@ -66,7 +71,9 @@ class PythonSandboxEnv(BaseEnv, SupportsDocker):
         await self._wait_ready()
 
     async def reset(self, env_args=None) -> str:
-        # Do not use env_args, only for compatibility
+        """
+        Reset the environment by clearing the global state.
+        """
         try:
             await asyncio.wait_for(self.step("globals().clear()"), timeout=20.0)
         except (asyncio.TimeoutError, httpx.TransportError):
@@ -77,11 +84,15 @@ class PythonSandboxEnv(BaseEnv, SupportsDocker):
         return ""
 
     async def step(self, code: str) -> Tuple[str, float, bool, Mapping]:
-        # if self._episodes % self.max_episodes == self.max_episodes - 1:
-        #     await self.aclose()
-        #     await self.start()
-        #     await self.reset()
-        #     print(f"Restarted container after {self._episodes} episodes")
+        """
+        Execute the code in the environment and return the output from stdout or stderr.
+
+        Args:
+            code (str): The code to execute.
+
+        Returns:
+            str: The output from stdout or stderr.
+        """
 
         self._episodes += 1
         resp = await self._client.post("/exec", json={"code": code})
@@ -95,6 +106,9 @@ class PythonSandboxEnv(BaseEnv, SupportsDocker):
             raise RuntimeError(f"Unknown response: {data}")
 
     async def aclose(self) -> None:
+        """
+        Close the environment by stopping the Docker container and closing the HTTP client.
+        """
         await self._docker_stop()
         if self._client:
             await self._client.aclose()
@@ -106,10 +120,7 @@ class PythonSandboxEnv(BaseEnv, SupportsDocker):
             self._container = None
 
     async def _connect(self):
-        """
-        Discover which host port Docker chose and open an httpx client
-        targeting http://127.0.0.1:<host_port>.
-        """
+        # Discover which host port Docker chose and open an httpx client targeting http://127.0.0.1:<host_port>.
         deadline = time.time() + self.start_timeout
         host_port = None
 
@@ -131,6 +142,9 @@ class PythonSandboxEnv(BaseEnv, SupportsDocker):
 
     @staticmethod
     async def acquire():
+        """
+        Create a new PythonSandboxEnv instance and start it.
+        """
         env = PythonSandboxEnv()
         await env.start()
         await env.reset()

@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class Tool:
+class BaseTool:
     """
     Universal tool wrapper that can handle both stateful and non-stateful tools.
 
@@ -25,43 +25,42 @@ class Tool:
     
     1. Decorator-based (existing pattern):
     
-    .. code-block:: python
-
-        @tool(name="my_tool", description="Does something")
-        def my_function(arg1: str, arg2: int):
-            return f"Result: {arg1} {arg2}"
+    ```python
+    @tool(name="my_tool", description="Does something")
+    def my_function(arg1: str, arg2: int):
+        return f"Result: {arg1} {arg2}"
+    ```
     
     2. Inheritance-based (new pattern):
     
-    .. code-block:: python
+    ```python
+    class MyTool(BaseTool):
+        # Class-level metadata (shared across all instances)
+        name = "my_tool"
+        description = "A tool that uses an API key"
+        
+        def __init__(self, api_key: str):
+            super().__init__()  # Class attributes are set at class definition time
+            self.api_key = api_key  # Instance data
+            # Schema is automatically extracted from call() method
+        
+        def call(self, query: str) -> str:
+            ···
+            Execute a query using the API key.
+            
+            Args:
+                query (str): The query to execute.
+            
+            Returns:
+                str: The result of the query.
+            ···
+            # Use self.api_key here
+            return f"Result for {query} with key {self.api_key}"
 
-        class MyTool(Tool):
-            # Class-level metadata (shared across all instances)
-            name = "my_tool"
-            description = "A tool that uses an API key"
-            
-            def __init__(self, api_key: str):
-                super().__init__()  # Class attributes are set at class definition time
-                self.api_key = api_key  # Instance data
-                # Schema is automatically extracted from call() method
-            
-            def call(self, query: str) -> str:
-                ···
-                Execute a query using the API key.
-                
-                Args:
-                    query (str): The query to execute.
-                
-                Returns:
-                    str: The result of the query.
-                ···
-                # Use self.api_key here
-                return f"Result for {query} with key {self.api_key}"
-        
-        # Register the tool
-        # Tool is automatically registered on initialization
-        my_tool = MyTool(api_key="secret")
-        
+    # Register the tool
+    # Tool is automatically registered on initialization
+    my_tool = MyTool(api_key="secret")
+    ```
     Note: Metadata (name, description, schema, etc.) is stored as class attributes,
     making it shared across all instances of the same tool class. This is more
     memory-efficient and semantically correct since all instances of a tool type
@@ -69,15 +68,15 @@ class Tool:
     
     Call signature for stateful tools:
     
-    .. code-block:: python
-
-        tool(action=..., id=...)
+    ```python
+    tool(action=..., id=...)
+    ```
 
     Call signature for non-stateful tools:
     
-    .. code-block:: python
-
-        tool(action=...)
+    ```python
+    tool(action=...)
+    ```
     """
     # ========== Class Attributes ==========
     name: str | None = None
@@ -215,28 +214,44 @@ class Tool:
             raise ValueError(f"Tool {self.name} has no function set. For inheritance-based tools, define a 'call' method.")
     
     def _execute_user_function_sync(self, **kwargs):
-        """Execute the user function synchronously."""
+        """Execute the user function synchronously. Catches user function errors and converts them to strings."""
+        # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
             if self.instance is None:
                 raise ValueError(f"Instance not set for method tool {self.name}")
-            return self.user_func(self.instance, **kwargs)
-        else:
-            return self.user_func(**kwargs)
-    
-    async def _execute_user_function_async(self, **kwargs):
-        """Execute the user function, handling both sync and async functions."""
-        if self.is_method:
-            if self.instance is None:
-                raise ValueError(f"Instance not set for method tool {self.name}")
-            if inspect.iscoroutinefunction(self.user_func):
-                return await self.user_func(self.instance, **kwargs)
-            else:
+        
+        # Execute user function and catch errors, converting them to strings
+        try:
+            if self.is_method:
                 return self.user_func(self.instance, **kwargs)
-        else:
-            if inspect.iscoroutinefunction(self.user_func):
-                return await self.user_func(**kwargs)
             else:
                 return self.user_func(**kwargs)
+        except Exception as e:
+            # Convert user function execution errors to strings
+            return str(e)
+    
+    async def _execute_user_function_async(self, **kwargs):
+        """Execute the user function, handling both sync and async functions. Catches user function errors and converts them to strings."""
+        # Infrastructure checks (these should raise if there's a problem)
+        if self.is_method:
+            if self.instance is None:
+                raise ValueError(f"Instance not set for method tool {self.name}")
+        
+        # Execute user function and catch errors, converting them to strings
+        try:
+            if self.is_method:
+                if inspect.iscoroutinefunction(self.user_func):
+                    return await self.user_func(self.instance, **kwargs)
+                else:
+                    return self.user_func(self.instance, **kwargs)
+            else:
+                if inspect.iscoroutinefunction(self.user_func):
+                    return await self.user_func(**kwargs)
+                else:
+                    return self.user_func(**kwargs)
+        except Exception as e:
+            # Convert user function execution errors to strings
+            return str(e)
     
     async def _execute_stateful_tool(self, id: str, **kwargs):
         """Execute a stateful tool with environment management."""
@@ -280,12 +295,8 @@ class Tool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function
-        try:
-            result = self._execute_user_function_sync(**kwargs)
-        except Exception as e:
-            raise e  # For debugging
-            result = str(e)
+        # Execute the function (errors from user function are already converted to strings)
+        result = self._execute_user_function_sync(**kwargs)
 
         # Format and return result
         return self._format_result(result, kwargs)
@@ -299,21 +310,17 @@ class Tool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function
-        try:
-            if not self.is_stateful:
-                # For non-stateful tools, directly execute the function
-                result = await self._execute_user_function_async(**kwargs)
+        # Execute the function (errors from user function are already converted to strings)
+        if not self.is_stateful:
+            # For non-stateful tools, directly execute the function
+            result = await self._execute_user_function_async(**kwargs)
+        else:
+            # For stateful tools, handle environment management
+            id = kwargs.pop('id', None)
+            if id is None:
+                result = "Error: 'id' parameter is required for stateful tools"
             else:
-                # For stateful tools, handle environment management
-                id = kwargs.pop('id', None)
-                if id is None:
-                    result = "Error: 'id' parameter is required for stateful tools"
-                else:
-                    result = await self._execute_stateful_tool(id, **kwargs)
-        except Exception as e:
-            raise e  # For debugging
-            result = str(e)
+                result = await self._execute_stateful_tool(id, **kwargs)
 
         # Format and return result
         return self._format_result(result, kwargs)
@@ -453,9 +460,9 @@ class Tool:
         if register_name is None:
             register_name = getattr(tool_obj, '__name__', str(tool_obj))
         
-        # Check for re-registration
-        if register_name in TOOL_REGISTRY:
-            warnings.warn(f"Tool {register_name!r} re-registered; overriding.")
+        # TODO: Should we warn for re-registration?
+        # if register_name in TOOL_REGISTRY:
+        #     warnings.warn(f"Tool {register_name!r} re-registered; overriding.")
         
         TOOL_REGISTRY[register_name] = tool_obj
         
@@ -514,7 +521,19 @@ async def submit_tool_call(
     # Add id to the input for stateful tools
     if id is not None and tool_obj.is_stateful:
         tool_input_json["id"] = id
-    return await tool_obj(**tool_input_json)
+    
+    # Call tool_obj without await first to check if it returns a coroutine
+    result = tool_obj(**tool_input_json)
+    
+    # Check if result is a coroutine and await it if needed
+    if inspect.iscoroutine(result):
+        # We're already in an async function, so we can directly await the coroutine
+        result = await result
+    # If result is not a coroutine, it's already the final value, use it directly
+    
+    return result
+
+    
 
 
 if __name__ == "__main__":
@@ -543,7 +562,7 @@ if __name__ == "__main__":
     
     # Example 2: Inheritance-based tool (new pattern)
     # Metadata can be defined as class attributes
-    class APITool(Tool):
+    class APITool(BaseTool):
         """
         Example of an inheritance-based tool that stores API credentials.
         """

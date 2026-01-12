@@ -1,6 +1,6 @@
 from typing import List
 from ..decorator import tool
-from ..tool_base import Tool
+from ..tool_base import BaseTool
 
 
 
@@ -18,13 +18,13 @@ def register_tool(tool_name, tool_func):
     global TOOL_REGISTRY
     TOOL_REGISTRY[tool_name] = tool_func
 
-def get_tool_from_name(tool_name: str) -> Tool:
+def get_tool_from_name(tool_name: str) -> BaseTool:
     """
     Get a tool instance from its name.
     """
     return TOOL_REGISTRY[tool_name]
 
-def get_tools_from_names(tool_names: List[str]) -> List[Tool]:
+def get_tools_from_names(tool_names: List[str]) -> List[BaseTool]:
     """
     Get tool instances from their names.
     

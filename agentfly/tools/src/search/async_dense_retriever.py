@@ -575,6 +575,15 @@ GLOBAL_RETRIEVER = None
     max_length=4096,
 )
 async def asyncdense_retrieve(query: str):
+    """
+    Use a dense retriever to retrieve documents from a corpus.
+    
+    Args:
+        query (str): The query to search for
+        
+    Returns:
+        str: A string containing the retrieved documents
+    """
     global GLOBAL_RETRIEVER, AGENT_CACHE_DIR
 
     if not query.startswith("query:"):

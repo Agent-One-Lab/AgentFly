@@ -8,7 +8,6 @@ from .backend_configs import (
 
 from .llm_backends import (
     TransformersBackend,
-    VLLMBackend,
     AsyncVLLMBackend,
     AsyncVerlBackend,
     ClientBackend,

@@ -3,17 +3,16 @@
 import asyncio
 import warnings
 from .warm_pool import WarmPool
-from ..env_base import BaseEnv
 
 
 class EnvironmentManager:
-    _pools: dict[type[BaseEnv], WarmPool[BaseEnv]] = {}
+    _pools: dict[type["BaseEnv"], WarmPool["BaseEnv"]] = {}
 
     # We will keep track of the acquired envs to allow request for same environment
-    _acquired_envs: dict[str, BaseEnv] = {}
+    _acquired_envs: dict[str, "BaseEnv"] = {}
 
     @classmethod
-    async def start(cls, env_cls: type[BaseEnv], size: int = 1, env_kwargs: dict | None = None):
+    async def start(cls, env_cls: type["BaseEnv"], size: int = 1, env_kwargs: dict | None = None):
         """
         Start a new pool for the environment class if it doesn't exist,
         or add more envs to the existing pool if the size is larger.
@@ -36,9 +35,9 @@ class EnvironmentManager:
 
     @classmethod
     async def acquire(cls,
-        env_cls: type[BaseEnv],
+        env_cls: type["BaseEnv"],
         id: str,
-    ) -> BaseEnv:
+    ) -> "BaseEnv":
         if id in cls._acquired_envs:
             return cls._acquired_envs[id]
         else:
@@ -52,7 +51,7 @@ class EnvironmentManager:
 
     @classmethod
     async def release(cls,
-        env: BaseEnv,
+        env: "BaseEnv",
         id: str,
         finished: bool = True
     ):
@@ -66,7 +65,7 @@ class EnvironmentManager:
             pass
 
     @classmethod
-    async def reset(cls, env: BaseEnv, env_args: dict | None = None):
+    async def reset(cls, env: "BaseEnv", env_args: dict | None = None):
         if env_args is not None:
             await env.reset(env_args)
         else:

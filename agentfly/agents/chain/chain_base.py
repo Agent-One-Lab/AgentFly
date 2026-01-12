@@ -11,11 +11,12 @@ import uuid
 from termcolor import colored
 import numpy as np
 from copy import deepcopy
-from ...tools.tool_base import Tool, submit_tool_call
+from ...tools.tool_base import BaseTool, submit_tool_call
 from tqdm.asyncio import tqdm_asyncio
 from tqdm.asyncio import tqdm as async_tqdm
 from tqdm import tqdm
 import sys
+import inspect
 from ...utils.monitor import JsonlSink, MetricEvent, Monitor, WandbSink, emit, serialize_for_json
 from ... import AGENT_DATA_DIR
 from .streaming_observer import ConsoleStreamObserver, StreamingManager, StreamEvent, StreamEventType
@@ -207,7 +208,6 @@ class ChainRollout:
         num_chains: int,
         generation_config: Optional[Dict[str, Any]] = None,
         enable_streaming: bool = False,
-        streaming_callback: Optional[Callable] = None,
     ):
         """
         Run the chain-based rollout with optional streaming support.
@@ -240,6 +240,7 @@ class ChainRollout:
                         chains[cid],
                         tool_schemas,
                         max_turns=max_turns,
+                        generation_config=generation_config,
                         done_queue=done_q,
                         enable_streaming=enable_streaming
                     )
@@ -264,6 +265,7 @@ class ChainRollout:
         chain: Chain,
         tools: List[Dict],
         max_turns: int,
+        generation_config: Dict[str, Any],
         done_queue: asyncio.Queue,
         enable_streaming: bool = False
     ):
@@ -280,7 +282,12 @@ class ChainRollout:
             if not current_node.is_terminal:
                 # Generate response
                 new_msg = await self._generate_response(
-                    current_node, tools, depth, chain_id, enable_streaming
+                    current_node=current_node,
+                    tools=tools,
+                    depth=depth,
+                    chain_id=chain_id,
+                    generation_config=generation_config,
+                    enable_streaming=enable_streaming,
                 )
                 
                 newest_messages.append(new_msg)
@@ -349,7 +356,7 @@ class ChainRollout:
         message_info = chain.info
         self.monitor_chain(trajectory=current_node.messages.messages, info=message_info)
 
-    async def _generate_response(self, current_node, tools, depth, chain_id, enable_streaming):
+    async def _generate_response(self, current_node, tools, depth, chain_id, generation_config, enable_streaming):
         """Generate response with optional streaming support."""
         if enable_streaming:
             # Emit generation start event
@@ -377,7 +384,7 @@ class ChainRollout:
             if has_streaming:
                 # Collect full response from streaming
                 full_response = ""
-                async for chunk in self.generate_streaming([current_node.messages.messages], tools=tools):
+                async for chunk in self.generate_streaming([current_node.messages.messages], tools=tools, **generation_config):
                     await self.streaming_manager.emit_event(StreamEvent(
                         event_type=StreamEventType.LLM_GENERATION_CHUNK,
                         chain_id=chain_id,
@@ -402,12 +409,12 @@ class ChainRollout:
                 ))
                 
                 # Parse response
-                new_msg = self.parse([full_response], tools=self.tools)
+                new_msg = self.parse([full_response])
                 return new_msg[0]
             else:
                 # Fallback to non-streaming generation
-                responses = await self.generate_async([current_node.messages.messages], tools=tools, num_return_sequences=1)
-                new_msg = self.parse(responses, tools=self.tools)
+                responses = await self.generate_async([current_node.messages.messages], tools=tools, **generation_config)
+                new_msg = self.parse(responses)
                 
                 # Emit a single chunk event for the full response
                 full_response = new_msg[0].get("content", "")
@@ -442,8 +449,8 @@ class ChainRollout:
                 return new_msg[0]
         else:
             # Non-streaming generation
-            responses = await self.generate_async([current_node.messages.messages], tools=tools, num_return_sequences=1)
-            new_msg = self.parse(responses, tools=self.tools)
+            responses = await self.generate_async([current_node.messages.messages], tools=tools, **generation_config)
+            new_msg = self.parse(responses)
             return new_msg[0]
 
     async def _execute_tool_call(self, tool_call, newest_messages, chain, chain_id, depth, have_set_tools, enable_streaming):
@@ -497,8 +504,14 @@ class ChainRollout:
         if self._reward_fn is not None:
             trajectory = current_node.messages.messages
             final_response = self.extract_final_response(trajectory)
-            other_args = {k: v for k, v in chain.info.items() if k not in ['prediction', 'trajectory', 'id']}
-            chain.info["reward"] = await self._reward_fn(prediction=final_response, **other_args, trajectory=trajectory, id=chain_id)
+            other_args = {k: v for k, v in chain.info.items() if k not in ['final_response', 'trajectory', 'id']}
+            
+            # TODO: move the reward calculation to reward module
+            reward = self._reward_fn(final_response=final_response, **other_args, trajectory=trajectory, id=chain_id)
+            if inspect.iscoroutine(reward):
+                reward = await reward
+
+            chain.info["reward"] = reward
         else:
             chain.info["reward"] = None
             
@@ -512,8 +525,7 @@ class ChainRollout:
 
     async def set_tools(self, id: str, env_args: Dict[str, Any]) -> None:
         for tool in self.tools:
-            if isinstance(tool, Tool):
-                await tool.set_env(id, env_args)
+            await tool.set_env(id, env_args)
 
     def monitor_step(self) -> None:
         messages = self.get_messages()
@@ -620,6 +632,7 @@ class ChainRollout:
         emit(evt)
 
         evt = MetricEvent(
+            sinks=["jsonl"],
             kind="text",
             name="Agent/rollout/info",
             value=json.dumps(serialize_for_json(info), indent=2),

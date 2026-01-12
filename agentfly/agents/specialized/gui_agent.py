@@ -66,7 +66,6 @@ class GUIAgent(BaseAgent):
             template=template,
             system_prompt=GUI_AGENT_SYSTEM_PROMPT,
             tools=tools,
-            max_length=kwargs.get("max_length", 8192),
             **kwargs
         )
         self.action_counter = 0  # Track number of actions taken

@@ -10,6 +10,9 @@ markers = [
 [tool.setuptools]
 packages = ["agentfly"]
 
+[tool.setuptools.package-dir]
+agentfly = "agentfly"
+
 [project]
 name = "AgentFly"
 version = "0.1.0"
@@ -36,6 +39,7 @@ dependencies = [
     "mpmath",
     "wandb",
     "diffusers",
+    "google-genai",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +48,7 @@ verl = [
     "codetiming",
     "datasets",
     "dill",
-    "flash-attn==2.8.3",
+    "flash-attn",
     "hydra-core",
     "liger-kernel",
     "numpy",

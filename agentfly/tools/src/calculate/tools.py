@@ -3,6 +3,15 @@ from sympy import simplify, sympify, Rational
 
 @tool(name="calculator", description="Calculate the result of a mathematical expression.")
 def calculator(expression: str):
+    """
+    Calculate the result of a mathematical expression.
+    
+    Args:
+        expression (str): The mathematical expression to calculate
+        
+    Returns:
+        str: The result of the expression
+    """
     try:
         expr = sympify(expression)
         result = simplify(expr)

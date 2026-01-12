@@ -1,14 +1,18 @@
-## Reward System
+# Reward System
 
-Similar to tools, we can decide whether to use environments in the reward definition. The return should either be a value, or a dictionary containing `reward` as one of keys. 
+We put reward calculation into the agent side instead of trainer side and use a separate *reward* layer for it. This is for severl reasons:
+1. Reward calculation is related to the task itself. Different tasks may need different rewards.
+2. Reward calculation can be designed to be asynchronous for efficiency.
+
+### Definition
+Similar to tools, we can decide whether to use environments in the reward definition. The return should either be a value, or a dictionary containing `reward` as one of keys. We can use decorator `@tool` or inherit from the `BaseReward` class.
 
 ```python
 @reward(name="qa_f1_reward")
-def qa_f1_reward(prediction: str, golden_answer: str, trajectory: List[str]) -> float:
+def qa_f1_reward(final_response: str, golden_answer: str, trajectory: List[str]) -> float:
     """A reward function that uses f1 score as reward value"""
-    response = prediction
-    f1, precision, recall = f1_score(response, golden_answer)
-    em = em_score(response, golden_answer)
+    f1, precision, recall = f1_score(final_response, golden_answer)
+    em = em_score(final_response, golden_answer)
 
     return {
         "reward": f1,
@@ -18,15 +22,27 @@ def qa_f1_reward(prediction: str, golden_answer: str, trajectory: List[str]) -> 
         "recall": recall,
     }
 
+class APIReward(BaseReward):
+    name="api_reward"
+    def __init__(self, api_key):
+        self.api_key = api_key
+
+    def call(query: str):
+
+        # call request with api key
+        result = requests.request(api_key=self.api_key, query=query)
+
+        return result['reward']
+
 @reward(name="webshop_reward", env_cls=WebAgentTextEnv, pool_size=8)
-async def webshop_reward(prediction: str, env: WebAgentTextEnv, task_id: int) -> dict:
+async def webshop_reward(final_response: str, env: WebAgentTextEnv, task_id: int) -> dict:
     """
     Calculates the reward for the WebShop environment based on the environment state. Match the purchased product with the golden answer characteristics.
     Actual logic for reward calculation is in the environment and partially in step method of the environment.
     Adapted from https://arxiv.org/pdf/2207.01206
 
     Args:
-        prediction (str): The agent's predicted action or response. Not used in this reward function.
+        final_response (str): The agent's predicted action or response. Not used in this reward function.
         env (WebAgentTextEnv): The environment instance for the WebShop task.
         task_id (int): The identifier for the current task. Used to match with golden answer.
 
@@ -46,3 +62,46 @@ async def webshop_reward(prediction: str, env: WebAgentTextEnv, task_id: int) ->
         }
 ```
 
+
+## Predefined Fields
+
+When agent uses the reward function, it will detects automatically for three keys: `final_response`, `trajectory`, and `id` and assign these values to rewards.
+
+- `final_response`: The final response the agent generate for the task.
+- `trajectory`: The whole interaction trajectory.
+- `id`: The trajectory id. This will be the within the trajectory. And tools and rewards will share the same id for the same task. So tools and rewards are assigned same environments.
+
+When defining the function, you can set these (except `id`) to your arguments and directly use them in you reward calculation. For `id`, you can give `env` as argument and directly use it. The chain rollout will ensure the reward give the same environment as in tools for the same task.
+
+## Additional Fields
+
+Beside predefined fields, you can give additional fields in your task input. The input take the following format:
+
+```python
+task_messages = {
+    "messages": [
+        "role": "user", "content": "Search the information about AgentFly and write a short summary."
+    ],
+    "length_penalty": True,
+    "max_length": 2048,
+}
+
+await agent.run(
+    messages=task_messages,
+    max_turns=4,
+)
+```
+
+In this example, two additional fields `length_penalty` and `max_length` is defined in the input. And your reward function can be defined with these two fields. After the agent finished the task, it will put these values to the reward. For example,
+
+```python
+@reward(name="summary_reward_with_penalty")
+def summary_reward(final_response, length_penalty, max_length):
+    if length_penalty:
+        if len(final_response) > max_length:
+            return 0.0
+        else:
+            return 1.0
+    else:
+        return 1.0
+```

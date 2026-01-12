@@ -83,8 +83,10 @@ async def req_async(query, n=10):
 async def google_search_serper(query, env: RedisEnv):
     """
     Get relevant information from Google Search. Implemented by Serper API.
+    
     Args:
         query (str): The query to search for.
+
     Returns:
         str: The context from the search results based on snippets.
     """

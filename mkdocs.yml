@@ -1,0 +1,157 @@
+site_name: AgentFly
+site_description: Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, multimodal)
+site_author: AgentFly Team
+site_url: https://agent-one-lab.github.io/AgentFly
+
+repo_name: Agent-One-Lab/AgentFly
+repo_url: https://github.com/Agent-One-Lab/AgentFly
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2025 AgentFly Team
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+  icon:
+    logo: material/fire
+
+plugins:
+  - search
+  - link-preview
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+  - git-authors
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [..]
+          options:
+            docstring_style: google
+            docstring_options:
+              ignore_init_summary: true
+            docstring_section_style: list
+            show_source: false
+            show_root_heading: true
+            show_root_toc_entry: true
+            show_root_full_path: false
+            show_object_full_path: false
+            show_category_heading: true
+            show_if_no_docstring: false
+            members_order: source
+            merge_init_into_class: true
+            heading_level: 2
+            line_length: 80
+            show_signature_annotations: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Quick Start:
+    - start/installation.md
+    - start/first_agent.md
+    - start/first_tool_reward.md
+    - start/first_training.md
+  - Features & Concepts:
+    - features/agent_rollout.md
+    - features/tool_system.md
+    - features/reward_system.md
+    - features/environments.md
+  - API Reference:
+    - api_references/index.md
+    - Agents:
+      - api_references/agents/index.md
+      - api_references/agents/agent.md
+      - api_references/agents/llm_backends.md
+      - api_references/agents/rollout.md
+    - Tools:
+      - api_references/tools/index.md
+      - api_references/tools/tool.md
+      - api_references/tools/predefined_tools.md
+    - Rewards:
+      - api_references/rewards/index.md
+      - api_references/rewards/reward.md
+      - api_references/rewards/predefined_rewards.md
+    - Environments:
+      - api_references/environments/index.md
+      - api_references/environments/environment.md
+      - api_references/environments/predefined_envs.md
+    - Chat Template:
+      - api_references/chat_template/index.md
+      - api_references/chat_template/template.md
+      - api_references/chat_template/chat.md
+    - Training:
+      - api_references/training/index.md
+      - api_references/training/training.md
+  - Examples:
+    - examples/predefined_training_examples.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Agent-One-Lab/AgentFly
+      name: GitHub
+    - icon: fontawesome/solid/cloud
+      link: https://huggingface.co/collections/Agent-One/agentfly-6882061c6cf08537cb66c12b
+      name: HuggingFace
+    - icon: fontawesome/solid/chart-line
+      link: https://wandb.ai/AgentRL/Open
+      name: Weights & Biases
+    - icon: fontawesome/solid/file-pdf
+      link: https://arxiv.org/pdf/2507.14897
+      name: Paper
+
+extra_css:
+  - stylesheets/extra.css
+

@@ -458,15 +458,44 @@ def math_equal_naive(gold_answer, final_answer):
     return gold_answer == final_number
 
 
-@reward(name="math_reward")
-def math_reward(prediction: str, answer: str, **kwargs) -> float:
-    if symbolic_math_equal(prediction, answer):
+@reward(name="math_equal_reward")
+def math_equal_reward(final_response: str, answer: str, **kwargs) -> float:
+    """
+    Calculate the reward for the agent's response based on the mathematical equality.
+    - 1.0 if the agent's predicted answer is mathematically equal to the correct answer
+    - 0.0 otherwise
+    
+    Args:
+        prediction (str): The agent's predicted answer
+        answer (str): The correct answer
+        **kwargs: Additional arguments (ignored)
+
+    Returns:
+        float: The reward value
+    """
+    if symbolic_math_equal(final_response, answer):
         return 1.0
     else:
         return 0.0
 
-@reward(name="math_reward_tool")
-def math_reward_tool(prediction: str, answer: str, trajectory: List[Dict]) -> float:
+@reward(name="math_equal_reward_tool")
+def math_equal_reward_tool(final_response: str, answer: str, trajectory: List[Dict]) -> float:
+    """
+    Calculate the reward for the agent's response based on the mathematical equality and tool usage.
+    - 0.0 if no tool used
+    - 0.1 if tool used but answer incorrect
+    - 1.0 if tool used and answer correct
+    
+    Args:
+        prediction (str): The agent's predicted answer
+        answer (str): The correct answer
+        trajectory (List[Dict]): The agent's conversation trajectory
+
+    Returns:
+        dict: A dictionary containing the reward and accuracy
+            - reward (float): The reward value
+            - acc (float): The accuracy value
+    """
     has_called_tool = False
     for msg in trajectory:
         if msg["role"] == "tool":
@@ -475,7 +504,7 @@ def math_reward_tool(prediction: str, answer: str, trajectory: List[Dict]) -> fl
 
     
     reward = 0.0
-    answer_correct = symbolic_math_equal(prediction, answer)
+    answer_correct = symbolic_math_equal(final_response, answer)
     if not has_called_tool:
         reward = 0.0
     elif has_called_tool and not answer_correct:
@@ -490,7 +519,7 @@ def math_reward_tool(prediction: str, answer: str, trajectory: List[Dict]) -> fl
     }
 
 @reward(name="math_reward_thought_with_tool")
-def math_reward_thought_with_tool(prediction: str, answer: str, trajectory: List[Dict]) -> float:
+def math_reward_thought_with_tool(final_response: str, answer: str, trajectory: List[Dict]) -> float:
     has_called_tool = False
     for msg in trajectory:
         if msg["role"] == "tool":
@@ -511,7 +540,7 @@ def math_reward_thought_with_tool(prediction: str, answer: str, trajectory: List
                 break
     
     reward = 0.0
-    answer_correct = symbolic_math_equal(prediction, answer)
+    answer_correct = symbolic_math_equal(final_response, answer)
     if not has_called_tool:
         reward = 0.0
     elif has_called_tool and not all_have_thought and not answer_correct:
@@ -561,8 +590,8 @@ def parse_thinking_response(response: str):
     
     return thinking, answer
 
-@reward(name="math_reward_think")
-def math_reward_think(prediction: str, answer: str, trajectory: List[Dict]) -> float:
+@reward(name="math_equal_reward_think")
+def math_equal_reward_think(final_response: str, answer: str, trajectory: List[Dict]) -> float:
     """
     This reward function is used to reward the agent for using thinking and tool calling. The reward contains two parts:
     format: if there is <think> in the response, and the agent has called the tool, then the reward is 1.0 if the answer is correct, otherwise 0.1. if there is no <think> or the agent has not called the tool, then the reward is 0.0.
@@ -595,7 +624,7 @@ def math_reward_think(prediction: str, answer: str, trajectory: List[Dict]) -> f
             "acc": 0.0,
         }
     
-    answer_correct = symbolic_math_equal(prediction, answer)
+    answer_correct = symbolic_math_equal(final_response, answer)
     if answer_correct:
         return {
             "reward": 1.0,
@@ -608,8 +637,8 @@ def math_reward_think(prediction: str, answer: str, trajectory: List[Dict]) -> f
         }
 
 
-@reward(name="math_reward_string_equal")
-def math_reward_string_equal(prediction: str, answer: str, trajectory: List[Dict]) -> float:
+@reward(name="math_string_equal_reward_tool")
+def math_string_equal_reward_tool(final_response: str, answer: str, trajectory: List[Dict]) -> float:
 
     def extract_last_number(s: str):
         matches = re.findall(r'\d+', s)  # find all sequences of digits
@@ -623,7 +652,7 @@ def math_reward_string_equal(prediction: str, answer: str, trajectory: List[Dict
     if tool_count < 1:
         return 0.0
     else:
-        prediction = extract_last_number(prediction)
+        prediction = extract_last_number(final_response)
         
         if prediction == answer:
             return 1.0

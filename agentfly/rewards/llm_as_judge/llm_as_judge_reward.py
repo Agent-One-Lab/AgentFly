@@ -2,12 +2,7 @@ from ..reward_base import reward
 from typing import Dict, Any, Optional
 import os
 
-@reward(name="llm_as_judge_reward", llm_config={
-    "backend_type": "transformers",
-    "model_name": os.getenv("LLM_JUDGE_MODEL", "Qwen/Qwen2.5-0.5B"),
-    "max_tokens": 10,
-    "temperature": 0.1
-})
+@reward(name="llm_as_judge_reward")
 def llm_as_judge_reward(prediction: str, golden_answer: str, llm_backend) -> Dict[str, float]:
     """
     Reward function that uses an LLM as a judge to evaluate the quality of predictions.

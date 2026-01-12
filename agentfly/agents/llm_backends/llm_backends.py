@@ -17,6 +17,8 @@ from ...utils.vision import image_to_data_uri
 from ...utils.verl import pad_tensor_to_rank_size
 from vllm import LLM, AsyncLLMEngine, SamplingParams, AsyncEngineArgs
 import openai
+from google import genai
+from google.genai import types
 from ...templates import Chat
 import logging
 import PIL
@@ -24,8 +26,8 @@ import PIL
 logger = logging.getLogger(__name__)
 
 try:
-    from verl.protocol import DataProto
-    from verl.single_controller.ray.base import RayWorkerGroup
+    from agentfly.verl.protocol import DataProto
+    from agentfly.verl.single_controller.ray.base import RayWorkerGroup
 except ImportError:
     print("verl can not be imported.")
     pass
@@ -67,6 +69,14 @@ class LLMBackend:
         """Generate text with streaming support"""
         raise NotImplementedError("Subclasses must implement generate_streaming()")
 
+    def preprocess(self):
+        """Preprocess the backend"""
+        pass
+    
+    def postprocess(self):
+        """Postprocess the backend"""
+        pass
+
 class TransformersBackend(LLMBackend):
     """HuggingFace Transformers implementation for local model inference.
     
@@ -74,13 +84,12 @@ class TransformersBackend(LLMBackend):
     It supports both synchronous and asynchronous text generation with streaming capabilities.
     """
     
-    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+    def __init__(self, model_name_or_path: str, template: str, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
         """Initialize TransformersBackend.
         
         Args:
             model_name_or_path (str): Name or path of the pre-trained model to load.
             template (str): Chat template to use for formatting messages.
-            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
             temperature (float): Sampling temperature for text generation. Defaults to 1.0.
             max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
             **kwargs: Additional configuration parameters.
@@ -88,7 +97,6 @@ class TransformersBackend(LLMBackend):
         super().__init__(**kwargs)
         
         self.model_name = model_name_or_path
-        self.max_length = max_length
         self.temperature = temperature
         self.template = template
         self.max_new_tokens = max_new_tokens
@@ -171,102 +179,6 @@ class TransformersBackend(LLMBackend):
             inputs['input_ids'] = torch.cat([inputs['input_ids'], new_token.unsqueeze(0)], dim=1)
             inputs['attention_mask'] = torch.cat([inputs['attention_mask'], torch.ones(1, 1, device=inputs['attention_mask'].device)], dim=1)
 
-class VLLMBackend(LLMBackend):
-    """vLLM implementation for high-performance model inference.
-    
-    This backend uses the vLLM library for optimized inference of large language models.
-    vLLM provides efficient memory management and high throughput for model serving.
-    """
-    
-    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
-        """Initialize VLLMBackend.
-        
-        Args:
-            model_name_or_path (str): Name or path of the pre-trained model to load.
-            template (str): Chat template to use for formatting messages.
-            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
-            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
-            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
-            **kwargs: Additional configuration parameters.
-        """
-        super().__init__(**kwargs)
-
-        self.model_name = model_name_or_path
-        self.max_length = max_length
-        self.temperature = temperature
-        self.max_new_tokens = max_new_tokens
-        self.template = template
-        # Load model
-        self.llm_engine = LLM(model=self.model_name)
-    
-    def _process_inputs(self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]):
-        inputs = []
-        for prompt, vision_input in zip(prompts, vision_inputs):
-            mixed_inputs = {
-                "prompt": prompt,
-            }
-            if vision_input:
-                mixed_inputs['multi_modal_data'] = vision_input
-            inputs.append(mixed_inputs)
-        return inputs
-
-    
-    def generate(self, messages_list: str, **kwargs) -> str:
-        """Generate text from prompt using vLLM"""
-        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
-        temperature = kwargs.get("temperature", self.temperature)
-        n = kwargs.get("num_return_sequences", 1)
-        sampling_params = SamplingParams(
-            n=n,
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-        )
-
-        prompts, vision_inputs = self.apply_chat_template(messages_list, self.template)
-        inputs = self._process_inputs(prompts, vision_inputs)
-        print(f"inputs: {inputs}")
-        outputs = self.llm_engine.generate(
-            inputs,
-            sampling_params=sampling_params,
-        )
-        response_texts = []
-        for output in outputs:
-            for sequence in output.outputs:
-                response_texts.append(sequence.text)
-        return response_texts
-    
-    def generate_async(self, messages_list: str, **kwargs) -> str:
-        raise NotImplementedError("VLLM backend does not support async generation")
-
-    async def generate_streaming(self, messages_list: List[List[Dict]], streaming_callback: Optional[Callable] = None, **kwargs) -> AsyncGenerator[str, None]:
-        """Generate text with streaming support using vLLM"""
-        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
-        temperature = kwargs.get("temperature", self.temperature)
-        sampling_params = SamplingParams(
-            n=1,
-            max_tokens=max_new_tokens,
-            temperature=temperature,
-        )
-
-        tools = kwargs.get("tools", None)
-        prompts, vision_inputs = self.apply_chat_template(messages_list, self.template, tools=tools)
-        inputs = self._process_inputs(prompts, vision_inputs)
-        
-        # For streaming, we process one input at a time
-        for input_data in inputs:
-            outputs_gen = self.llm_engine.generate(
-                input_data,
-                sampling_params=sampling_params,
-                request_id=str(uuid.uuid4()),
-            )
-            
-            async for output in outputs_gen:
-                for sequence in output.outputs:
-                    # Stream each token
-                    if hasattr(sequence, 'text'):
-                        if streaming_callback:
-                            await streaming_callback(sequence.text)
-                        yield sequence.text
 
 class AsyncVLLMBackend(LLMBackend):
     """Asynchronous vLLM implementation for high-performance model inference.
@@ -275,13 +187,12 @@ class AsyncVLLMBackend(LLMBackend):
     better resource utilization and scalability for concurrent requests.
     """
     
-    def __init__(self, model_name_or_path: str, template: str, max_length: int=None, temperature: float=1.0, max_new_tokens: int=1024, **kwargs):
+    def __init__(self, model_name_or_path: str, template: str, **kwargs):
         """Initialize AsyncVLLMBackend.
         
         Args:
             model_name_or_path (str): Name or path of the pre-trained model to load.
             template (str): Chat template to use for formatting messages.
-            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
             temperature (float): Sampling temperature for text generation. Defaults to 1.0.
             max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
             **kwargs: Additional configuration parameters that will be passed to AsyncEngineArgs.
@@ -289,9 +200,6 @@ class AsyncVLLMBackend(LLMBackend):
         super().__init__(**kwargs)
 
         self.model_name = model_name_or_path
-        self.max_length = max_length
-        self.temperature = temperature
-        self.max_new_tokens = max_new_tokens
         self.template = template
         
         if 'engine_args' in kwargs:
@@ -329,12 +237,12 @@ class AsyncVLLMBackend(LLMBackend):
         
     async def generate_async(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt using vLLM"""
-        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
+        max_tokens = kwargs.get("max_tokens", self.max_tokens)
         temperature = kwargs.get("temperature", self.temperature)
-        n = kwargs.get("num_return_sequences", 1)
+        n = kwargs.get("n", 1)
         sampling_params = SamplingParams(
             n=1,
-            max_tokens=max_new_tokens,
+            max_tokens=max_tokens,
             temperature=temperature,
         )
 
@@ -355,11 +263,12 @@ class AsyncVLLMBackend(LLMBackend):
     
     async def generate_streaming(self, messages_list: List[List[Dict]], **kwargs) -> AsyncGenerator[str, None]:
         """Generate text with streaming support using Async vLLM"""
-        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
+        max_tokens = kwargs.get("max_tokens", self.max_tokens)
         temperature = kwargs.get("temperature", self.temperature)
+        n = kwargs.get("n", 1)
         sampling_params = SamplingParams(
-            n=1,
-            max_tokens=max_new_tokens,
+            n=n,
+            max_tokens=max_tokens,
             temperature=temperature,
         )
 
@@ -389,22 +298,19 @@ class AsyncVerlBackend(LLMBackend):
     complex inference pipelines.
     """
     
-    def __init__(self, llm_engine, model_name_or_path: str, template: str, max_length: int=None, **kwargs):
+    def __init__(self, llm_engine, model_name_or_path: str, template: str, **kwargs):
         """Initialize AsyncVerlBackend.
         
         Args:
             llm_engine: Verl engine instance for distributed inference.
             model_name_or_path (str): Name or path of the pre-trained model to load.
             template (str): Chat template to use for formatting messages.
-            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
             **kwargs: Additional configuration parameters.
         """
         super().__init__(**kwargs)
         self.model_name = model_name_or_path
-        self.max_length = max_length
-        self.template = template
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, 
+            self.model_name,
             trust_remote_code=True,
         )
         self.llm_engine = llm_engine
@@ -479,13 +385,16 @@ class AsyncVerlBackend(LLMBackend):
         tools_list = np.array([tools] * len(messages_list))
         data = {"input_ids": tensors, "raw_prompt": np.array(messages_list), "tools": tools_list}
         
-        n = kwargs.get("num_return_sequences", 1)
-        temperature = kwargs.get("temperature", 1.0)
-        generation_config["temperature"] = temperature
-        generation_config["n"] = n
-        # Only for compatibility with Verl DataProto
+        if "temperature" in kwargs:
+            generation_config["temperature"] = kwargs["temperature"]
+        if "n" in kwargs:
+            generation_config["n"] = kwargs["n"]
+        if "max_tokens" in kwargs:
+            generation_config["max_tokens"] = kwargs["max_tokens"]
+        
+        logger.debug(f"[AsyncVerlBackend] generation_config: {generation_config}")
 
-        batch = DataProto.from_single_dict(data, meta_info={"n": n, "temperature": temperature})
+        batch = DataProto.from_single_dict(data, meta_info={"generation_config": generation_config})
 
         gen_batch_output = await self.llm_engine.generate_sequences_async(batch)
         response_ids = gen_batch_output.batch['responses'].tolist() # np.array of strings with length BS
@@ -496,9 +405,9 @@ class AsyncVerlBackend(LLMBackend):
 
 
 class ClientBackend(LLMBackend):
-    """OpenAI-compatible client backend for remote API inference.
+    """OpenAI-compatible and Google Gemini client backend for remote API inference.
     
-    This backend provides a thin wrapper around OpenAI-compatible chat APIs,
+    This backend provides a thin wrapper around OpenAI-compatible chat APIs and Google Gemini API,
     supporting both synchronous and asynchronous operations. It includes built-in
     rate limiting and retry mechanisms for reliable API communication.
     """
@@ -511,8 +420,6 @@ class ClientBackend(LLMBackend):
         max_requests_per_minute: int = 100,
         timeout: int = 600,
         api_key: str = "EMPTY",
-        max_length: int = None,
-        max_new_tokens: int = 8192,
         **kwargs,
     ):
         """Initialize ClientBackend.
@@ -524,7 +431,6 @@ class ClientBackend(LLMBackend):
             max_requests_per_minute (int): Rate limiting for API requests. Defaults to 100.
             timeout (int): Request timeout in seconds. Defaults to 600.
             api_key (str): API key for authentication. Defaults to "EMPTY" for local servers.
-            max_length (int): Maximum sequence length for input/output. Defaults to 8192.
             max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
             **kwargs: Additional configuration parameters.
         """
@@ -534,9 +440,15 @@ class ClientBackend(LLMBackend):
         self.model_name = model_name_or_path
         self.base_url = base_url
         self.template = template
-        self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
-        self.max_length = max_length
-        self.max_new_tokens = max_new_tokens
+        
+        # Detect if it's a Gemini model
+        self.is_gemini = self._is_gemini_model(model_name_or_path, base_url)
+        
+        if self.is_gemini:
+            # Initialize once to avoid overhead and connection leaks
+            self.gemini_client = genai.Client(api_key=api_key)
+        else:
+            self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
 
         # --- rate limiting (token bucket, 1 r/s = 60 r/m)
         self._tokens = asyncio.Semaphore(max_requests_per_minute)
@@ -545,46 +457,182 @@ class ClientBackend(LLMBackend):
 
         # --- misc
         self.timeout = timeout
+    
+    def _is_gemini_model(self, model_name: str, base_url: str) -> bool:
+        """Check if the model is a Google Gemini model."""
+        gemini_indicators = ["gemini", "generativelanguage.googleapis.com"]
+        model_lower = model_name.lower()
+        base_url_lower = base_url.lower()
+        return any(indicator in model_lower or indicator in base_url_lower for indicator in gemini_indicators)
 
-    # --------------------------------------------------------------------- #
-    # Low‑level single request (runs in threadpool so it doesn't block loop)
-    # --------------------------------------------------------------------- #
-    # @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
-    def _blocking_call(self, messages: List[List[Dict]], **kwargs) -> str:
-        if "num_return_sequences" in kwargs:
-            n = kwargs.pop("num_return_sequences")
-        else:
-            n = 1
+    def _prepare_gemini_payload(self, messages: List[Dict]):
+        """Separates system instructions from chat history and converts to Gemini format."""
+        system_instruction = None
+        contents = []
+        
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            
+            if role == "system":
+                system_instruction = content
+                continue
+            
+            # Convert roles: user -> user, assistant -> model
+            gemini_role = "model" if role == "assistant" else "user"
+            
+            # Handle parts (Text or Image)
+            parts = []
+            if isinstance(content, str):
+                parts.append(types.Part.from_text(text=content))
+            elif isinstance(content, list):
+                for item in content:
+                    if item.get("type") == "text":
+                        parts.append(types.Part.from_text(text=item["text"]))
+                    elif item.get("type") in ["image_url", "image"]:
+                        # Assuming helper converts to PIL or Bytes
+                        img = self._process_image(item) 
+                        parts.append(types.Part.from_image(image=img))
+            
+            contents.append(types.Content(role=gemini_role, parts=parts))
+            
+        return system_instruction, contents
 
-        logger.debug(f"[ClientBackend] model_name: {self.model_name}")
-        logger.debug(f"[ClientBackend] messages: {len(messages)}")
-        logger.debug(f"[ClientBackend] kwargs: {kwargs}")
+    def _blocking_call_gemini(self, messages: List[Dict], **kwargs) -> Dict:
+        """Make a blocking call to Gemini API with full response preservation."""
+        from google.genai import types
+        import json
 
-        # with open(f"{AGENT_DATA_DIR}/debug/messages_{len(messages)}.json", "w") as f:
-        #     json.dump(messages, f, indent=4)
-        # with open(f"{AGENT_DATA_DIR}/debug/args.json", 'w') as f:
-        #     json.dump(kwargs, f, indent=4)
+        system_instruction, contents = self._prepare_gemini_payload(messages)
+        
+        # 1. Prepare all configuration parameters in one place
+        config_kwargs = {}
+        
+        # Standard parameters
+        if "temperature" in kwargs:
+            config_kwargs["temperature"] = kwargs["temperature"]
+        
+        # Map 'n' to 'candidate_count'
+        if "n" in kwargs:
+            config_kwargs["candidate_count"] = kwargs["n"]
+        elif "candidate_count" in kwargs:
+            config_kwargs["candidate_count"] = kwargs["candidate_count"]
+        
+        if "max_tokens" in kwargs:
+            config_kwargs["max_output_tokens"] = kwargs["max_tokens"]
+        elif "max_new_tokens" in kwargs:
+            config_kwargs["max_output_tokens"] = kwargs["max_new_tokens"]
 
+        # FIX: Move tools into the config dictionary
+        if "tools" in kwargs:
+            config_kwargs["tools"] = kwargs["tools"]
+
+        # Safety settings
+        config_kwargs["safety_settings"] = [
+            types.SafetySetting(
+                category=cat,
+                threshold="BLOCK_NONE"
+            ) for cat in [
+                "HARM_CATEGORY_HATE_SPEECH", 
+                "HARM_CATEGORY_HARASSMENT", 
+                "HARM_CATEGORY_SEXUALLY_EXPLICIT", 
+                "HARM_CATEGORY_DANGEROUS_CONTENT"
+            ]
+        ]
+
+        # 2. Create the unified config object
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            **config_kwargs,
+        )
+
+        try:
+            # 3. Call without the 'tools' keyword argument
+            response = self.gemini_client.models.generate_content(
+                model=self.model_name,
+                contents=contents,
+                config=config
+            )
+            
+            # Convert to dictionary using pydantic's model_dump
+            raw_response_dict = response.model_dump(mode='json')
+
+            response_texts = []
+            all_tool_calls = []
+
+            if response.candidates:
+                for candidate in response.candidates:
+                    cand_text = ""
+                    cand_tool_calls = []
+                    
+                    if candidate.content and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            if part.text:
+                                cand_text += part.text
+                            if part.function_call:
+                                func = part.function_call
+                                cand_tool_calls.append({
+                                    "id": None, 
+                                    "type": "function",
+                                    "function": {
+                                        "name": func.name,
+                                        "arguments": json.dumps(func.args) if func.args else "{}"
+                                    }
+                                })
+                    
+                    if not cand_text and not cand_tool_calls:
+                        cand_text = f"[Empty Response: {candidate.finish_reason}]"
+
+                    response_texts.append(cand_text)
+                    all_tool_calls.append(cand_tool_calls if cand_tool_calls else None)
+
+            return {
+                "response_texts": response_texts,
+                "tool_calls": all_tool_calls,
+                "response_dict": raw_response_dict,
+            }
+
+        except Exception as e:
+            logger.error(f"Gemini API Error: {str(e)}")
+            return {
+                "response_texts": [""],
+                "tool_calls": [None],
+                "response_dict": {"error": str(e)},
+            }
+
+    def _blocking_call_openai(self, messages: List[Dict], **kwargs) -> Dict:
+        """Make a blocking call to OpenAI API."""
+        logger.debug(f"[ClientBackend] OpenAI model_name: {self.model_name}")
+        logger.debug(f"[ClientBackend] OpenAI messages: {len(messages)}")
+        logger.debug(f"[ClientBackend] OpenAI kwargs: {kwargs}")
+        
         resp = self.client.chat.completions.create(
             model=self.model_name,
             messages=messages,
             timeout=self.timeout,
-            max_completion_tokens=self.max_new_tokens,
-            n=n,
             **kwargs,
         )
         resp_json = resp.dict()
         logger.debug(f"[ClientBackend] resp_json: {resp_json}")
         response_texts = [choice["message"]["content"] for choice in resp_json["choices"]]
-        tool_calls = [choice["message"]["tool_calls"] for choice in resp_json["choices"]]
+        tool_calls = [choice["message"].get("tool_calls") for choice in resp_json["choices"]]
 
-        if kwargs.get("tool_choice", "none") == "none":
-            return response_texts
+        return {
+            "response_texts": response_texts,
+            "tool_calls": tool_calls,
+            "response_dict": resp_json,
+        }
+
+    # --------------------------------------------------------------------- #
+    # Low‑level single request (runs in threadpool so it doesn't block loop)
+    # --------------------------------------------------------------------- #
+    # @retry(stop=stop_after_attempt(1), wait=wait_exponential(multiplier=1, min=4, max=15))
+    def _blocking_call(self, messages: List[Dict], **kwargs) -> Dict:
+        """Route to appropriate blocking call based on model type."""
+        if self.is_gemini:
+            return self._blocking_call_gemini(messages, **kwargs)
         else:
-            return {
-                "response_texts": response_texts,
-                "tool_calls": tool_calls,
-            }
+            return self._blocking_call_openai(messages, **kwargs)
     
     async def generate_streaming(self, messages: List[List[Dict]], **kwargs) -> AsyncGenerator[str, None]:
         """
@@ -595,7 +643,7 @@ class ClientBackend(LLMBackend):
         for response in response_texts_dicts:
             yield response
 
-    async def _call(self, messages: List[List[Dict]], **kwargs) -> str:
+    async def _call(self, messages: List[Dict], **kwargs) -> Dict:
         # acquire a rate‑limit token
         async with self._tokens:
             loop = asyncio.get_running_loop()
@@ -639,13 +687,18 @@ class ClientBackend(LLMBackend):
 
     def _preprocess_messages_and_args(self, messages_list, **kwargs):
         is_openai_model = False
-        if "gpt" in self.model_name.lower() or "api.openai.com" in self.base_url:
+        if not self.is_gemini and ("gpt" in self.model_name.lower() or "api.openai.com" in self.base_url):
             is_openai_model = True
 
-        messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages, is_openai_model) for messages in messages_list]
+        if not self.is_gemini:
+            messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages, is_openai_model) for messages in messages_list]
         
         if "tools" in kwargs:
-            if is_openai_model:
+            if self.is_gemini:
+                # Gemini handles tools differently - convert to function declarations
+                # This will be handled in the Gemini call if needed
+                pass
+            elif is_openai_model:
                 kwargs['tool_choice'] = "auto"
             else:
                 # For self-deployed models, we will use the response to extract tool calls
@@ -658,6 +711,7 @@ class ClientBackend(LLMBackend):
     def generate(
         self,
         messages: List[List[Dict]] | List[Dict],
+        return_full_response_dict: bool = False,
         **kwargs,
     ) -> List[str] | asyncio.Task:
         """
@@ -682,19 +736,31 @@ class ClientBackend(LLMBackend):
             self._ensure_refiller_running()
             tasks = [asyncio.create_task(self._call(_input, **kwargs)) for _input in messages_list]
             # Flatten the response list
-            response_texts_list_or_dict = await asyncio.gather(*tasks)
-            # return is a dict if tool_choice is not none, otherwise a list of strings
-            if isinstance(response_texts_list_or_dict[0], dict):
-                # Flatten the response list
-                response_texts = [text for response in response_texts_list_or_dict for text in response["response_texts"]]
-                tool_calls = [tool_call for response in response_texts_list_or_dict for tool_call in response["tool_calls"]]
-                return [
-                    {"response_text": response_text, "tool_calls": _tool_calls} for response_text, _tool_calls in zip(response_texts, tool_calls)
-                ]
-            else:
-                response_texts = [text for response in response_texts_list_or_dict for text in response]
-                return response_texts
+            response_dicts = await asyncio.gather(*tasks)
 
+            # Build response structure
+            final_response_dicts = []
+            all_response_texts = []
+            
+            for response_dict in response_dicts:
+                response_texts = response_dict["response_texts"]
+                tool_calls = response_dict["tool_calls"]
+                full_response_dict = response_dict["response_dict"]
+                
+                # Collect all response texts for non-full-response mode
+                all_response_texts.extend(response_texts)
+                
+                # Build the structured response dict
+                final_response_dicts.append({
+                    "response_texts": response_texts,
+                    "tool_calls": tool_calls,
+                    "response_dict": full_response_dict,
+                })
+
+            if return_full_response_dict:
+                return final_response_dicts
+            else:
+                return all_response_texts
         try:
             loop = asyncio.get_running_loop()  # ➊ already inside a loop?
         except RuntimeError:
@@ -704,6 +770,7 @@ class ClientBackend(LLMBackend):
         # --- asynchronous caller: schedule task & hand it back
         # (don't block the caller's event loop)
         return loop.create_task(_runner())
+    
     
 
     async def generate_async(self,

@@ -77,7 +77,7 @@ def tool(
         env_kwargs (dict): The kwargs for the environment class.
         pool_size (int): The size of the pool for the environment.
     """
-    from .tool_base import Tool
+    from .tool_base import BaseTool
     def decorator(func):
         nonlocal name, description
 
@@ -101,7 +101,7 @@ def tool(
         tool_class_name = f"_Tool_{final_name}"
         tool_class = _CallableToolClass(
             tool_class_name,
-            (Tool,),  # Inherit from Tool class - ensures isinstance(tool_class(), Tool) == True
+            (BaseTool,),  # Inherit from Tool class - ensures isinstance(tool_class(), Tool) == True
             {
                 'name': final_name,
                 'description': final_desc,
@@ -120,7 +120,7 @@ def tool(
 
         # auto-registration using Tool.register classmethod
         if auto_register:
-            Tool.register(tool_obj=tool_class, name=final_name, auto_register=True)
+            BaseTool.register(tool_obj=tool_class, name=final_name, auto_register=True)
 
         return tool_class
 

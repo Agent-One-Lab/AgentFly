@@ -1,0 +1,259 @@
+/* Custom styles for AgentFly documentation */
+
+:root {
+    /* Material for MkDocs default is usually 125% (20px) */
+    /* Lowering this value will shrink the entire UI slightly */
+    font-size: 135%; 
+}
+
+/* Custom color theme - change the hex code to your preferred color */
+:root,
+[data-md-color-scheme="default"] {
+    /* Main primary color - used for header, navigation bar, and primary UI elements */
+    --md-primary-fg-color: #815ac0 !important;
+    
+    /* Lighter variant of primary color - used for hover states and highlights */
+    --md-primary-fg-color--light: #a06cd5 !important;
+    
+    /* Darker variant of primary color - used for pressed/active states */
+    --md-primary-fg-color--dark: #6247aa !important;
+    
+    /* Accent color - used for links, buttons, and interactive elements */
+    --md-accent-fg-color: #564592 !important;
+    
+    /* Transparent version of accent color - used for backgrounds and subtle highlights */
+    --md-accent-fg-color--transparent: rgba(199, 125, 255, 0.1) !important;
+    
+    /* Logo styling from index.md */
+    --size: 140px;              /* Size of the logo circle */
+    --gold: #D4AF37;            /* Gold color for logo border */
+}
+
+/* Dark mode custom colors - adjusted to be lighter for better contrast on dark backgrounds */
+[data-md-color-scheme="slate"] {
+    /* Main primary color for dark mode - lighter than light mode for visibility */
+    --md-primary-fg-color: #815ac0 !important;
+    
+    /* Lighter variant for dark mode - used for hover states */
+    --md-primary-fg-color--light: #a06cd5 !important;
+    
+    /* Darker variant for dark mode - used for active states */
+    --md-primary-fg-color--dark: #7B2CBF !important;
+    
+    /* Accent color for dark mode - lighter for better visibility */
+    --md-accent-fg-color: #E0AAFF !important;
+    
+    /* Transparent accent for dark mode - subtle background highlights */
+    --md-accent-fg-color--transparent: rgba(224, 170, 255, 0.1) !important;
+}
+
+/* Force override Material theme colors with custom primary color */
+.md-header {
+    /* Top navigation header background */
+    background-color: var(--md-primary-fg-color) !important;
+}
+
+/* Increase the maximum width of the documentation grid */
+.md-grid {
+    max-width: 90rem; /* Use a wider value for wider content */
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Ensure a 'gutter' on the sides so text doesn't hit the screen edge */
+@media screen and (min-width: 60rem) {
+    .md-grid {
+      padding-left: 2rem;
+      padding-right: 2rem;
+    }
+  }
+
+/* Set maximum width for images to prevent them from being too wide */
+.md-typeset img {
+    /* Maximum width for images - adjust as needed */
+    max-width: 800px !important;
+    /* Align images to the left side */
+    display: block;
+    margin-left: 0;
+    margin-right: auto;
+    /* Maintain aspect ratio */
+    height: auto;
+}
+
+/* Allow images to be smaller if needed, but not exceed max-width */
+.md-typeset img[width] {
+    max-width: min(800px, 100%) !important;
+}
+
+/* For images in markdown content specifically */
+/* .md-content img {
+    max-width: 800px !important;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    height: auto;
+} */
+
+
+
+.md-nav__link--active {
+    /* Active navigation link color in sidebar */
+    color: var(--md-primary-fg-color) !important;
+}
+
+.md-typeset a {
+    /* Regular link color in content */
+    color: var(--md-primary-fg-color) !important;
+}
+
+.md-typeset a:hover {
+    /* Link hover color - uses accent color */
+    color: var(--md-accent-fg-color) !important;
+}
+
+/* Set max-width for grid cards container - wide enough for horizontal layout */
+.grid.cards {
+    max-width: 50em !important;
+    margin-left: 0;
+    margin-right: auto;
+}
+
+/* Constrain individual card items for community cards only */
+.grid.cards.community-cards {
+    grid-template-columns: repeat(auto-fit, minmax(4em, 18em)) !important;
+}
+
+/* Constrain individual card items */
+/* .grid.cards > * {
+    max-width: 18em !important;
+    min-width: 4em !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    flex-basis: 18em !important;
+    flex-grow: 0 !important;
+    flex-shrink: 1 !important;
+} */
+
+/* Target list items specifically for community cards */
+.grid.cards.community-cards > li {
+    max-width: 18em !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* Make images inside community cards scale to fit within card boundaries */
+.grid.cards.community-cards img {
+    /* Images should fit within their card container */
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    /* Ensure images don't exceed card boundaries */
+    object-fit: contain;
+    display: block;
+}
+
+
+.shown_logo {
+    width: var(--size);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 0.1px solid var(--gold);
+    margin: 0 auto;
+    box-shadow: 0 3px 14px rgba(212,175,55,0.35);
+    position: relative;
+    background:
+        radial-gradient(circle at 30% 25%, rgba(255,255,255,.12), transparent 40%),
+        radial-gradient(circle at 70% 75%, rgba(255,255,255,.06), transparent 50%);
+}
+
+.shown_logo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    box-shadow:
+        inset 0 0 0 1.5px rgba(255,255,255,0.18),
+        inset 0 12px 24px rgba(255,255,255,0.06),
+        inset 0 -12px 28px rgba(0,0,0,0.28);
+    pointer-events: none;
+}
+
+.glyph {
+    font-size: 100px;
+    line-height: 1;
+    transform: translateX(1px) translateY(1px);
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,.25));
+    font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",system-ui,sans-serif;
+}
+
+.shown_logo {
+    transition: transform .24s ease;
+}
+
+.shown_logo:hover {
+    transform: translateY(-1px) scale(1.02);
+}
+
+/* ============================================
+   mkdocstrings Styling - Method/Function Names
+   ============================================ */
+
+
+/* Unbold the section headers like Parameters and Returns */
+.doc-section-title {
+    font-weight: normal !important;
+    strong {
+        font-weight: normal !important;
+    }
+}
+
+/* Make method and function names larger and more prominent */
+.md-typeset .doc-function > .doc-heading,
+.md-typeset .doc-method > .doc-heading,
+.md-typeset .doc-property > .doc-heading,
+.md-typeset .doc-attribute > .doc-heading {
+    font-size: 1.3em !important;
+    font-weight: 600 !important;
+    color: var(--md-primary-fg-color) !important;
+    margin-top: 1.5em !important;
+    margin-bottom: 0.5em !important;
+    padding-bottom: 0.3em !important;
+    border-bottom: 2px solid var(--md-accent-fg-color--transparent) !important;
+}
+
+/* Style method/function signatures */
+.md-typeset .doc-function .doc-signature,
+.md-typeset .doc-method .doc-signature {
+    font-size: 1.1em !important;
+    font-weight: 500 !important;
+}
+
+/* Make section headings (Parameters, Returns, etc.) smaller and less prominent */
+.md-typeset .doc-contents h4,
+.md-typeset .doc-contents h5 {
+    font-size: 1em !important;
+    font-weight: 300 !important;
+    color: var(--md-default-fg-color--lighter) !important;
+    margin-top: 1em !important;
+    margin-bottom: 0.5em !important;
+}
+
+/* Ensure method headings are clearly larger than section headings */
+.md-typeset .doc-contents h3 {
+    font-size: 1.25em !important;
+    font-weight: 600 !important;
+    color: var(--md-primary-fg-color) !important;
+}
+
+/* Style class names to be prominent */
+.md-typeset .doc-class > .doc-heading {
+    font-size: 1.5em !important;
+    font-weight: 700 !important;
+    color: var(--md-primary-fg-color) !important;
+    margin-bottom: 1em !important;
+    padding-bottom: 0.5em !important;
+    border-bottom: 3px solid var(--md-primary-fg-color) !important;
+}
+

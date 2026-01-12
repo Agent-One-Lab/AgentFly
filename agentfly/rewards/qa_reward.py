@@ -52,9 +52,24 @@ def em_score(prediction, ground_truth):
 
 
 @reward(name="qa_f1_reward")
-def qa_f1_reward(prediction: str, answer: str, trajectory: List[str]) -> float:
-    # Extract answer from agent's response
-    response = prediction
+def qa_f1_reward(final_response: str, answer: str, trajectory: List[str]) -> float:
+    """
+    Calculate the reward for the agent's response based on the F1 score.
+
+    Args:
+        prediction (str): The agent's predicted answer
+        answer (str): The correct answer
+        trajectory (List[str]): The agent's conversation trajectory
+
+    Returns:
+        dict: A dictionary containing the reward, F1 score, EM score, precision, and recall
+            - reward (float): The reward value
+            - f1 (float): The F1 score
+            - em (float): The EM score
+            - precision (float): The precision score
+            - recall (float): The recall score
+    """
+    response = final_response
     f1, precision, recall = f1_score(response, answer)
     em = em_score(response, answer)
 
@@ -66,12 +81,26 @@ def qa_f1_reward(prediction: str, answer: str, trajectory: List[str]) -> float:
         "recall": recall,
     }
 
-@reward(name="qa_f1_reward_format")
-def qa_f1_reward_format(prediction: str, answer: str, trajectory: List[str]) -> float:
+@reward(name="qa_f1_reward_tool")
+def qa_f1_reward_tool(final_response: str, answer: str, trajectory: List[str]) -> float:
     """
     Calculate the reward for the agent's response based on the F1 score and EM score.
-    The reward is 0.0 if the agent has not called any tool.
-    The reward is the F1 score if the agent has called a tool.
+    - 0.0 if no tool used
+    - 0.1 if tool used but answer incorrect
+    - 1.0 if tool used and answer correct
+    
+    Args:
+        prediction (str): The agent's predicted answer
+        answer (str): The correct answer
+        trajectory (List[str]): The agent's conversation trajectory
+
+    Returns:
+        dict: A dictionary containing the reward, F1 score, EM score, precision, and recall
+            - reward (float): The reward value
+            - f1 (float): The F1 score
+            - em (float): The EM score
+            - precision (float): The precision score
+            - recall (float): The recall score
     """
     has_called_tool = False
     call_tool_count = 0
@@ -91,8 +120,8 @@ def qa_f1_reward_format(prediction: str, answer: str, trajectory: List[str]) -> 
             "recall": 0.0,
         })
     elif call_tool_count > 1:
-        f1, precision, recall = f1_score(prediction, answer)
-        em = em_score(prediction, answer)
+        f1, precision, recall = f1_score(final_response, answer)
+        em = em_score(final_response, answer)
         rewards_dict.update({
             "reward": f1,
             "f1": f1,
@@ -107,7 +136,7 @@ def qa_f1_reward_format(prediction: str, answer: str, trajectory: List[str]) -> 
 
 
 @reward(name="ok_vqa_reward")
-def ok_vqa_reward(prediction: str, answers: List[str], trajectory: List[str]) -> float:
+def ok_vqa_reward(final_response: str, answers: List[str], trajectory: List[str]) -> float:
     """
     Calculate the reward for the agent's response based on the F1 score and EM score.
     The reward is 0.0 if the agent has not called any tool.
@@ -115,14 +144,14 @@ def ok_vqa_reward(prediction: str, answers: List[str], trajectory: List[str]) ->
     """
     f1_scores = []
     for answer in answers:
-        f1, precision, recall = f1_score(prediction, answer)
+        f1, precision, recall = f1_score(final_response, answer)
         f1_scores.append(f1)
     # All answers are the correct answer, take the max f1 score
     return max(f1_scores)
 
 
 @reward(name="infoseek_reward")
-def infoseek_reward(prediction: str, answer: Union[str, List[str]], answer_eval: List[str | Dict], trajectory: List[str]) -> float:
+def infoseek_reward(final_response: str, answer: Union[str, List[str]], answer_eval: List[str | Dict], trajectory: List[str]) -> float:
     # format reward
     call_tool_count = 0
     for msg in trajectory:
@@ -140,7 +169,7 @@ def infoseek_reward(prediction: str, answer: Union[str, List[str]], answer_eval:
         answers.extend(answer_eval)
 
     for _answer in answers:
-        f1, precision, recall = f1_score(prediction, _answer)
+        f1, precision, recall = f1_score(final_response, _answer)
         f1_scores.append(f1)
 
     max_f1_score = max(f1_scores)

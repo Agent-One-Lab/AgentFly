@@ -2,7 +2,7 @@
 
 from typing import List
 from .tool_base import (
-    Tool,
+    BaseTool,
     submit_tool_call
 )
 from .decorator import tool
@@ -17,11 +17,10 @@ from .src.calculate.tools import calculator
 from .src.search.google_search import google_search_serper
 from .src.search.dense_retriever import dense_retrieve
 from .src.search.async_dense_retriever import asyncdense_retrieve
+from .src.scienceworld.tools import scienceworld_explorer
 # from .src.search.http_retriever import http_retrieve
 from .src.webshop.tools import webshop_browser
 from .src.react.tools import answer_qa, answer_math
-from .src.search.async_dense_retriever import asyncdense_retrieve
-from .src.scienceworld.tools import scienceworld_explorer
 from .src.ui.tools import pyautogui_code_generator
 from .registry import TOOL_REGISTRY
 from .registry import (

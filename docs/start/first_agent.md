@@ -13,7 +13,7 @@ agent = HFAgent(
 )
 ```
 
-Then, we can use the agent to do the task for us (or, say "rollout" in reinforcement learning scenario). Our framework is designed to be asynchronous, so we need to use `await`.
+Then, we can use the agent to do the task (or, say *rollout* in reinforcement learning scenario). The main interface is `run` method, which is fully asynchronous. You may use `asyncio.run` or `await` for the method.
 
 ```python
 messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]

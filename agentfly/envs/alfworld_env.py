@@ -28,6 +28,9 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
         train_eval: str = "train",
         batch_size: int = 1,
     ):
+        """
+        Initialize the ALFWorldEnv environment.
+        """
         super().__init__()
         self.image = image
         self.runtime = runtime
@@ -47,7 +50,9 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
         self._current_info = None
         self._current_obs = None
     async def start(self) -> None:
-        """Start the ALFWorld environment container."""
+        """
+        Start the ALFWorld environment container.
+        """
         await self._docker_start(
             image=self.image,
             runtime=self.runtime,
@@ -93,7 +98,8 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
         settings to find this host port and then initializes the `httpx.AsyncClient`
         to communicate with it.
 
-        :raises RuntimeError: If the port mapping cannot be found after the timeout.
+        Raises:
+            RuntimeError: If the port mapping cannot be found after the timeout.
         """
         deadline = time.time() + self.start_timeout
         host_port = None
@@ -159,21 +165,18 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
         This method can start a random episode from a specified split or a
         specific episode identified by its `task_id`.
 
-        :param env_args: A dictionary of arguments. To load a specific task,
+        Args:
+            env_args (Optional[Dict[str, Any]]): A dictionary of arguments. To load a specific task,
                          provide `{'task_id': 'trial_T...'}`. If None, a
                          default example task is used.
-        :type env_args: Optional[Dict[str, Any]]
-        :param split: The data split to use. If None, defaults to `self.train_eval`.
-        :type split: Optional[str]
-        :return: A tuple containing the initial observation string and an info
-                 dictionary.
-        :rtype: Tuple[str, Dict[str, Any]]
-        :raises RuntimeError: If the reset request fails.
+            split (Optional[str]): The data split to use. If None, defaults to `self.train_eval`.
+
+        Returns:
+            Tuple[str, Dict[str, Any]]: A tuple containing the initial observation string and an info dictionary.
+
+        Raises:
+            RuntimeError: If the reset request fails.
         """
-        # if self._episodes >= self.max_episodes:
-        #     await self.aclose()
-        #     await self.start()
-        #     self._episodes = 0
         if env_args is None:
             env_args = {"task_id": "trial_T20190907_212755_456877"}
         
@@ -182,9 +185,7 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
  
         if task_id is None:
             task_id = "trial_T20190909_013611_626994"
-        # print("--------------------------------")
-        # print("task id: ", task_id)
-        # print("--------------------------------")
+
         if split is None:
             split = self.train_eval
             
@@ -254,19 +255,22 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
         """Create and initialize a new ALFWorld environment."""
         env = ALFWorldEnv()
         await env.start()
-        return env    
+        return env
+
+    
     async def step(self, action: str) -> Tuple[str, float, bool, Dict[str, Any]]:
         """
         Takes a single step in the environment by executing an action.
 
-        :param action: The text command to execute in the environment.
-        :type action: str
-        :return: A tuple of (observation, reward, done, info).
-                 - observation (str): The new observation from the environment.
-                 - reward (float): The reward received for the action.
-                 - done (bool): Whether the episode has ended.
-                 - info (dict): A dictionary with auxiliary information.
-        :rtype: Tuple[str, float, bool, Dict[str, Any]]
+        Args:
+            action (str): The text command to execute in the environment.
+
+        Returns:
+            Tuple[str, float, bool, Dict[str, Any]]: A tuple of (observation, reward, done, info).
+                - observation (str): The new observation from the environment.
+                - reward (float): The reward received for the action.
+                - done (bool): Whether the episode has ended.
+                - info (dict): A dictionary with auxiliary information.
         """
         try:
             resp = await self._client.post("/step", json={"action": action})
@@ -295,8 +299,8 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
         """
         Gets the list of admissible (valid) commands for the current state.
 
-        :return: A list of valid action strings. Returns an empty list on failure.
-        :rtype: List[str]
+        Returns:
+            List[str]: A list of valid action strings. Returns an empty list on failure.
         """
         try:
             resp = await self._client.get("/admissible_commands")
@@ -340,13 +344,7 @@ class ALFWorldEnv(BaseEnv, SupportsDocker):
     @staticmethod
     async def acquire():
         """
-        method to create, start, and return a new environment instance.
-
-        This is a convenience method for quickly getting a ready-to-use
-        ALFWorldEnv.
-
-        :return: An initialized and running instance of ALFWorldEnv.
-        :rtype: ALFWorldEnv
+        Create, start, and return a new environment instance.
         """
         env = ALFWorldEnv()
         await env.start()

@@ -12,7 +12,6 @@ import numpy as np
 from ...tools import tool
 from ...utils.vision import image_to_data_uri, image_to_pil, open_image_from_any
 import torch
-from diffusers import QwenImageEditPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +32,7 @@ class QwenImageEditTool:
         self._pipeline = None
 
     def _lazy_init(self):
+        from diffusers import QwenImageEditPipeline
         """Lazy initialization of the pipeline to save memory."""
         if self._pipeline is None:
             print(f"INFO: Loading Qwen-Image-Edit pipeline on {self.device}...")

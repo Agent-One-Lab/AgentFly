@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, List, Optional
 from ..utils.json import jsonish
-from ...tools.tool_base import Tool
+from ...tools import BaseTool
 from ..parsers import extract_tool_calls
 try:
     from verl.protocol import DataProto
@@ -84,7 +84,7 @@ Input: {{"query": "weather in San Francisco today"}}"""
 class ReactAgent(BaseAgent):
     def __init__(self,
             model_name_or_path: str,
-            tools: List[Tool],
+            tools: List[BaseTool],
             task_info: str = None,
             **kwargs
         ):
@@ -104,7 +104,7 @@ class ReactAgent(BaseAgent):
             **kwargs
         )
         
-    def parse(self, responses: List[str], tools: List[Any]) -> List[Dict]:
+    def parse(self, responses: List[str]) -> List[Dict]:
         """
         Generates an assistant message compatible with tool-calling.
         Returns:

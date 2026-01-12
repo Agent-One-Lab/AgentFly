@@ -7,6 +7,16 @@ from ...decorator import tool
 
 @tool(env_cls=ALFWorldEnv, name="alfworld_step", description="Take an action in the ALFWorld environment and return the observation", stateful=True, pool_size=8)
 async def alfworld_step(action: str, env: ALFWorldEnv):
+    """
+    Take an action in the ALFWorld environment and return the observation
+    
+    Args:
+        action (str): The action to take in the environment
+        env (ALFWorldEnv): The ALFWorld environment instance
+        
+    Returns:
+        dict: A dictionary containing the observation, reward, done, and info
+    """
     try:
         obs, reward, done, info = await env.step(action)
         return {

@@ -4,7 +4,7 @@ We have shown how to build an agent, to further customize the training, we need 
 
 **Tool Definition**
 
-Define a tools is simple and easy in AgentFly framework. You simple write a function, and then decorate it with `@tool`. The following example shows the calculator tool we used previously.
+Define a tools is simple and easy in AgentFly framework. You simply write a function, and then decorate it with `@tool`. The following example shows the calculator tool we used previously. You can also inherit a `BaseTool` class to define the tool with more flexibility and complexity (refer to Features section).
 
 ```python
 from agentfly.tools import tool

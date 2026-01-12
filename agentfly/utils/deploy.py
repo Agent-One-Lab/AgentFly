@@ -21,6 +21,7 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization)
     # command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
     command = f"""vllm serve {model_name_or_path} \
 {template_option} \
+--trust-remote-code \
 --tensor-parallel-size {tp} \
 --pipeline-parallel-size {pp} \
 --data-parallel-size {dp} --port {port} \

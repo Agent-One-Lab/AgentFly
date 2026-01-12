@@ -5,7 +5,7 @@ import traceback
 
 from ....envs.python_env import PythonSandboxEnv
 from ...decorator import tool
-from ...tool_base import Tool
+from ...tool_base import BaseTool
 
 def make_request(url, payload, headers, timeout=20):
     """Make a single request to the server"""
@@ -35,8 +35,11 @@ def make_request(url, payload, headers, timeout=20):
 async def code_interpreter(code: str, env: PythonSandboxEnv):
     """
     Run the code in docker container and return the output from stdout or stderr
+    
     Args:
         code (str): The code to run.
+        env (PythonSandboxEnv): The Python sandbox environment instance
+    
     Returns:
         str: The output from stdout or stderr
     """
@@ -48,7 +51,7 @@ async def code_interpreter(code: str, env: PythonSandboxEnv):
         return f"Error: {str(e)}\n{traceback.format_exc()}"
 
 
-class CodeInterpreterTool(Tool):
+class CodeInterpreterTool(BaseTool):
     name = "code_interpreter_tool"
     description = "Run the code in docker container and return the output from stdout or stderr"
     env_cls = PythonSandboxEnv

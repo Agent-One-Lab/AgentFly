@@ -1,10 +1,9 @@
 from collections.abc import Callable
 from typing import TypeVar, Generic
 import asyncio
-from ..env_base import BaseEnv
 from docker.errors import NotFound, APIError
 
-T = TypeVar("T", bound=BaseEnv)
+T = TypeVar("T", bound="BaseEnv")
 
 class WarmPool(Generic[T]):
     def __init__(self, factory: Callable[[], T], size: int):

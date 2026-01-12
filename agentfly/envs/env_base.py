@@ -64,6 +64,14 @@ class SupportsDocker:
     async def _docker_start(self, image: str, runtime: str = "runc", **run_kw):
         """
         Launch the container without blocking the asyncio event-loop.
+
+        Args:
+            image (str): The Docker image to use.
+            runtime (str): The Docker runtime to use.
+            **run_kw: Additional keyword arguments to pass to the container run.
+        
+        Raises:
+            RuntimeError: If the container fails to start.
         """
         # client = docker.from_env()
         client = enroot.from_env()
@@ -94,6 +102,9 @@ class SupportsDocker:
         
 
     async def _docker_stop(self):
+        """
+        Stop the Docker container.
+        """
         if self._container:
             await asyncio.to_thread(self._container.kill)
             self._container = None

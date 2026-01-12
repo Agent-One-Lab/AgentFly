@@ -1,12 +1,12 @@
-# Markdown & MyST
-myst-parser
-# Optional tables
-sphinx-markdown-tables
-# Classic Read-the-Docs look
-sphinx-rtd-theme
-# Sphinx itself is pulled transitively
-sphinx-book-theme
+# MkDocs and Material Theme
+mkdocs>=1.5.0
+mkdocs-material>=9.0.0
 
-# Grid
-sphinx-design
+# API Documentation
+mkdocstrings[python]>=0.24.0
 
+# Markdown Extensions
+pymdown-extensions>=10.0.0
+
+mkdocs-document-dates>=3.3.0
+mkdocs-link-preview-plugin

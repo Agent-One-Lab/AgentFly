@@ -1,8 +1,8 @@
 Agent Rollout
 ==============
-Author: Renxi Wang
 
-Note: The findings discussed here are based on preliminary observations and have not been rigorously validated through controlled experiments.
+!!! warning
+    The findings discussed here are based on preliminary observations and have not been rigorously validated through controlled experiments.
 
 ## Rollout for LLM
 In reinforcement learning, rollout refers to the stage where the LLM generates the responses to queries. The queries and responses will be concatenated later in the training stage, to calculate the advantages and update the LLM. To maximize the trainig efficiency, the rollout stage is a balance between exploration and exploitation. 
@@ -38,8 +38,12 @@ Currently, we adopt chain-based rollout. For each query, we initially generate *
 
 ## Asynchronous Implementation
 
-To make the full rollout pipeline asynchronous, we have to make the generation and tool calling asynchronous.
+To make the full rollout pipeline asynchronous, there are three main components consuming time: *Generation*, *Tool Calling*, and *Reward Calculation*.
 
-For generation, we directly wrap the verl's asynchronous rollout worker.
+- For generation, we directly wrap verl's asynchronous rollout worker.
 
-For tool calling, we define each function to be asynchronous. For tools that require environments, we also ensure the envionment's methods to be asynchronous, which is detailed in our tool system.
+- For tool calling, we define each execution function to be asynchronous. For tools that require environments, we also ensure the envionment's methods to be asynchronous.
+
+- For reward calculation, we adopt similar design as tool for them to be asynchronous.
+
+For details, refer to the specific sections in the documentation.
