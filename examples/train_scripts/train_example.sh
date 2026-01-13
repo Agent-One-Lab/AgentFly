@@ -23,8 +23,9 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 
 model=Qwen/Qwen2.5-3B-Instruct
 template=qwen2.5
 lr=5e-7
-length=256
+max_model_len=8192
 mini_batch_size=64
+max_new_tokens_per_turn=512
 num_chains=8
 num_gpus=1
 
@@ -44,11 +45,11 @@ adv_estimator=grpo
 
 agent_type=hf
 tools="[calculator]"
-reward_name="math_reward_string_equal"
+reward_name="math_equal_reward_tool"
 # reward_name="llm_as_judge_math_reward"
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=3
+max_turns=1
 agent_backend="async_verl"
 project_name="AgentRL"
 total_training_steps=100
@@ -56,18 +57,20 @@ total_training_steps=100
 experiment_name="test_gsm8k"
 # experiment_name="${model}-${agent_type}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_steps}steps-${adv_estimator}"
 
-python3 -m verl.trainer.main_ppo \
+python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
     data.train_files=$train_dataset \
     data.val_files=$val_dataset \
     data.train_batch_size=${mini_batch_size} \
-    agent.init_args.agent_type=$agent_type \
-    agent.tools=$tools \
-    agent.template=$template \
-    agent.model_name_or_path=$model \
+    agent.init_config.agent_type=$agent_type \
+    agent.init_config.tools=$tools \
+    agent.init_config.template=$template \
+    agent.init_config.model_name_or_path=$model \
+    agent.init_config.backend=${agent_backend} \
+    agent.init_config.reward_name=$reward_name \
+    agent.init_config.max_model_len=$max_model_len \
+    agent.generation_config.max_tokens=$max_new_tokens_per_turn \
     agent.max_turns=${max_turns} \
-    agent.backend=${agent_backend} \
-    agent.reward_name=$reward_name \
     agent.num_chains=$num_chains \
     agent.use_agent=True \
     actor_rollout_ref.actor.optim.lr=$lr \

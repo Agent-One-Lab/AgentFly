@@ -133,7 +133,7 @@ python -m agentfly.cli train \
     trainer.project_name=${project_name} \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=8 \
-    trainer.nnodes=1 \
+    trainer.nnodes=${worker_num} \
     trainer.save_freq=50 \
     trainer.test_freq=10 \
     trainer.total_training_steps=$total_training_steps \

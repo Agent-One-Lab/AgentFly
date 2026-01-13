@@ -40,15 +40,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_VLM_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"
 VLM_MODEL_SERVER_IPS = {
-    "Qwen/Qwen3-VL-235B-A22B-Instruct": ["10.24.2.31"],
-    "OpenGVLab/InternVL3_5-241B-A28B": ["10.24.3.227"],
-    "zai-org/GLM-4.6V": ["10.24.0.201"]
+    "Qwen/Qwen3-VL-235B-A22B-Instruct": ["10.24.1.102"],
+    "OpenGVLab/InternVL3_5-241B-A28B": ["10.24.1.82"],
+    # "zai-org/GLM-4.6V": ["10.24.2.80"]
 }
 _VLM_CLIENTS: Dict[Tuple[str, Tuple[str, ...], int, int, int, str], VLMClient] = {}
 DEFAULT_VLM_ENSEMBLE_MODEL_SPECS = [
-    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.2.31"]},
-    {"model": "OpenGVLab/InternVL3_5-241B-A28B", "server_ips": ["10.24.3.227"]},
-    {"model": "zai-org/GLM-4.6V", "server_ips": ["10.24.0.201"]},
+    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.1.102"]},
+    {"model": "OpenGVLab/InternVL3_5-241B-A28B", "server_ips": ["10.24.1.82"]},
+    # {"model": "zai-org/GLM-4.6V", "server_ips": ["10.24.0.201"]},
 ]
 VLM_ENSEMBLE_PROMPT_TEMPLATE = """You are given a video and several visual verification questions. Your task is to judge each question as true or false based only on what can be seen or reasonably inferred from the video. If the visual evidence is insufficient to confirm the statement, or if the statement directly contradicts the video, answer 'false'.
  
@@ -319,8 +319,8 @@ class VideoGenerator:
             return matches[0]
         return None
     
-    def generate_video_from_code(self, code: str, output_path: str) -> bool:
-        """Execute Python code to generate video
+    async def generate_video_from_code(self, code: str, output_path: str) -> bool:
+        """Execute Python code to generate video (async version)
         
         Args:
             code: Python code to execute
@@ -329,6 +329,7 @@ class VideoGenerator:
         Returns:
             True if video generation successful, False otherwise
         """
+        temp_file = None
         try:
             # Create a temporary Python file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -365,39 +366,51 @@ class VideoGenerator:
                 f.write(modified_code)
                 temp_file = f.name
             
-            # Execute the code
+            # Execute the code asynchronously
             # Always pass the output path as an argument so scripts that expect
             # sys.argv[1] or check len(sys.argv) continue without exiting.
-            result = subprocess.run(
-                ['python', temp_file, output_path],
-                capture_output=True,
-                text=True,
-                timeout=120,  # Increased timeout for video generation
+            process = await asyncio.create_subprocess_exec(
+                'python', temp_file, output_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=self.output_dir  # Run in output directory
             )
             
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=120.0  # Increased timeout for video generation
+                )
+            except asyncio.TimeoutError:
+                logger.error("Video generation timed out")
+                process.kill()
+                await process.wait()
+                if temp_file:
+                    try:
+                        os.unlink(temp_file)
+                    except:
+                        pass
+                return False
+            
             # Clean up temp file
-            os.unlink(temp_file)
+            if temp_file:
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
             
             # Check if video was created and is not empty
             if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:  # At least 1KB
                 logger.info(f"Successfully generated video: {output_path} ({os.path.getsize(output_path)} bytes)")
                 return True
             else:
-                logger.error(f"Video generation failed or file too small. stderr: {result.stderr}")
+                stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ''
+                logger.error(f"Video generation failed or file too small. stderr: {stderr_text}")
                 return False
                 
-        except subprocess.TimeoutExpired:
-            logger.error("Video generation timed out")
-            if 'temp_file' in locals():
-                try:
-                    os.unlink(temp_file)
-                except:
-                    pass
-            return False
         except Exception as e:
             logger.error(f"Error generating video: {e}")
-            if 'temp_file' in locals():
+            if temp_file:
                 try:
                     os.unlink(temp_file)
                 except:
@@ -588,7 +601,7 @@ def _true_rate(results: List[Dict], questions_list: List[Dict]) -> float:
 
 @reward(name="vlm_as_judge_pass_reward")
 async def vlm_as_judge_pass_reward(
-    prediction: str, 
+    final_response: str, 
     trajectory: Dict[str, Any] = None,
     vlm_questions: Dict[str, Any] = None,
     vlm_model: Optional[str] = None,
@@ -615,13 +628,13 @@ async def vlm_as_judge_pass_reward(
             # Log incoming data for debugging
             logger.info(f"=" * 60)
             logger.info(f"vlm_as_judge_reward called")
-            logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+            logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
             
             # Print the actual prediction content
             logger.info(f"Prediction content (first 500 chars):")
-            logger.info(f"{prediction[:500] if prediction else 'No prediction'}")
-            if prediction and len(prediction) > 500:
-                logger.info(f"... (truncated, total length: {len(prediction)} chars)")
+            logger.info(f"{final_response[:500] if final_response else 'No prediction'}")
+            if final_response and len(final_response) > 500:
+                logger.info(f"... (truncated, total length: {len(final_response)} chars)")
             
             logger.info(f"vlm_questions parameter: {vlm_questions is not None}")
             logger.info(f"Additional data_fields keys: {list(data_fields.keys())}")
@@ -650,10 +663,10 @@ async def vlm_as_judge_pass_reward(
                 return {"reward": 0.0}
             
             # Extract code from prediction
-            code = video_gen.extract_code_from_response(prediction)
+            code = video_gen.extract_code_from_response(final_response)
             if not code:
                 logger.warning("No Python code found in prediction")
-                logger.warning(f"Prediction was: {prediction[:1000] if prediction else 'None'}")
+                logger.warning(f"Prediction was: {final_response[:1000] if final_response else 'None'}")
                 return {"reward": 0.0}
             
             logger.info(f"Extracted Python code ({len(code)} chars)")
@@ -667,7 +680,7 @@ async def vlm_as_judge_pass_reward(
             video_path = os.path.join(video_gen.output_dir, video_filename)
             
             # Generate video from code
-            success = video_gen.generate_video_from_code(code, video_path)
+            success = await video_gen.generate_video_from_code(code, video_path)
             if not success:
                 logger.error("Failed to generate video from code")
                 return {"reward": 0.0}
@@ -761,7 +774,7 @@ async def vlm_as_judge_pass_reward(
 
 @reward(name="vlm_as_judge_pass_reward_multi_model")
 async def vlm_as_judge_pass_reward_multi_model(
-    prediction: str,
+    final_response: str,
     trajectory: Dict[str, Any] = None,
     vlm_questions: Dict[str, Any] = None,
     vlm_model_specs: Optional[List[Dict[str, Any]]] = None,
@@ -772,7 +785,7 @@ async def vlm_as_judge_pass_reward_multi_model(
     try:
         logger.info(f"=" * 60)
         logger.info("vlm_as_judge_pass_reward_multi_model called")
-        logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+        logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
 
         video_gen = VideoGenerator()
 
@@ -785,15 +798,15 @@ async def vlm_as_judge_pass_reward_multi_model(
             logger.warning("No VLM questions found in data.")
             return {"reward": 0.0}
 
-        code = video_gen.extract_code_from_response(prediction)
+        code = video_gen.extract_code_from_response(final_response)
         if not code:
-            logger.warning("No Python code found in prediction")
+            logger.warning("No Python code found in final_response")
             return {"reward": 0.0}
 
         video_filename = f"video_{uuid.uuid4().hex}.mp4"
         video_path = os.path.join(video_gen.output_dir, video_filename)
 
-        success = video_gen.generate_video_from_code(code, video_path)
+        success = await video_gen.generate_video_from_code(code, video_path)
         if not success:
             logger.error("Failed to generate video from code")
             return {"reward": 0.0}
@@ -998,7 +1011,7 @@ async def vlm_as_judge_pass_reward_multi_model(
 
 @reward(name="vlm_as_judge_reward_multi_model")
 async def vlm_as_judge_reward_multi_model(
-    prediction: str,
+    final_response: str,
     trajectory: Dict[str, Any] = None,
     vlm_questions: Dict[str, Any] = None,
     vlm_model_specs: Optional[List[Dict[str, Any]]] = None,
@@ -1009,7 +1022,7 @@ async def vlm_as_judge_reward_multi_model(
     try:
         logger.info(f"=" * 60)
         logger.info("vlm_as_judge_reward_multi_model called")
-        logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+        logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
 
         video_gen = VideoGenerator()
 
@@ -1022,15 +1035,15 @@ async def vlm_as_judge_reward_multi_model(
             logger.warning("No VLM questions found in data.")
             return {"reward": 0.0}
 
-        code = video_gen.extract_code_from_response(prediction)
+        code = video_gen.extract_code_from_response(final_response)
         if not code:
-            logger.warning("No Python code found in prediction")
+            logger.warning("No Python code found in final_response")
             return {"reward": 0.0}
 
         video_filename = f"video_{uuid.uuid4().hex}.mp4"
         video_path = os.path.join(video_gen.output_dir, video_filename)
 
-        success = video_gen.generate_video_from_code(code, video_path)
+        success = await video_gen.generate_video_from_code(code, video_path)
         if not success:
             logger.error("Failed to generate video from code")
             return {"reward": 0.0}
@@ -1131,7 +1144,7 @@ async def vlm_as_judge_reward_multi_model(
 
 @reward(name="vlm_as_judge_pass_reward_rebuttal")
 async def vlm_as_judge_pass_reward_rebuttal(
-    prediction: str,
+    final_response: str,
     trajectory: Dict[str, Any] = None,
     question: str = None,
     vlm_model: Optional[str] = None,
@@ -1159,7 +1172,7 @@ async def vlm_as_judge_pass_reward_rebuttal(
         # Log incoming data for debugging
         logger.info(f"=" * 60)
         logger.info(f"vlm_as_judge_pass_reward_rebuttal called")
-        logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+        logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
         logger.info(f"Question: {question[:200] if question else 'None'}...")
 
         # Initialize video generator
@@ -1174,10 +1187,10 @@ async def vlm_as_judge_pass_reward_rebuttal(
             return {"reward": 0.0}
 
         # Extract code from prediction
-        code = video_gen.extract_code_from_response(prediction)
+        code = video_gen.extract_code_from_response(final_response)
         if not code:
             logger.warning("No Python code found in prediction")
-            logger.warning(f"Prediction was: {prediction[:1000] if prediction else 'None'}")
+            logger.warning(f"Prediction was: {final_response[:1000] if final_response else 'None'}")
             return {"reward": 0.0}
 
         logger.info(f"Extracted Python code ({len(code)} chars)")
@@ -1187,7 +1200,7 @@ async def vlm_as_judge_pass_reward_rebuttal(
         video_path = os.path.join(video_gen.output_dir, video_filename)
 
         # Generate video from code
-        success = video_gen.generate_video_from_code(code, video_path)
+        success = await video_gen.generate_video_from_code(code, video_path)
         if not success:
             logger.error("Failed to generate video from code")
             return {"reward": 0.0}
@@ -1322,7 +1335,7 @@ Return only the JSON object, no additional text."""
 
 @reward(name="vlm_as_judge_reward")
 async def vlm_as_judge_reward(
-    prediction: str,
+    final_response: str,
     trajectory: Dict[str, Any] = None,
     vlm_questions: Dict[str, Any] = None,
     vlm_model: Optional[str] = None,
@@ -1349,13 +1362,13 @@ async def vlm_as_judge_reward(
         # Log incoming data for debugging
         logger.info(f"=" * 60)
         logger.info(f"vlm_as_judge_reward called")
-        logger.info(f"Prediction length: {len(prediction) if prediction else 0}")
+        logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
         
         # Print the actual prediction content
         logger.info(f"Prediction content (first 500 chars):")
-        logger.info(f"{prediction[:500] if prediction else 'No prediction'}")
-        if prediction and len(prediction) > 500:
-            logger.info(f"... (truncated, total length: {len(prediction)} chars)")
+        logger.info(f"{final_response[:500] if final_response else 'No prediction'}")
+        if final_response and len(final_response) > 500:
+            logger.info(f"... (truncated, total length: {len(final_response)} chars)")
         
         logger.info(f"vlm_questions parameter: {vlm_questions is not None}")
         logger.info(f"Additional data_fields keys: {list(data_fields.keys())}")
@@ -1384,10 +1397,10 @@ async def vlm_as_judge_reward(
             return {"reward": 0.0}
         
         # Extract code from prediction
-        code = video_gen.extract_code_from_response(prediction)
+        code = video_gen.extract_code_from_response(final_response)
         if not code:
             logger.warning("No Python code found in prediction")
-            logger.warning(f"Prediction was: {prediction[:1000] if prediction else 'None'}")
+            logger.warning(f"Prediction was: {final_response[:1000] if final_response else 'None'}")
             return {"reward": 0.0}
         
         logger.info(f"Extracted Python code ({len(code)} chars)")
@@ -1401,7 +1414,7 @@ async def vlm_as_judge_reward(
         video_path = os.path.join(video_gen.output_dir, video_filename)
         
         # Generate video from code
-        success = video_gen.generate_video_from_code(code, video_path)
+        success = await video_gen.generate_video_from_code(code, video_path)
         if not success:
             logger.error("Failed to generate video from code")
             return {"reward": 0.0}

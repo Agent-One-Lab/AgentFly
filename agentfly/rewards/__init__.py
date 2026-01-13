@@ -24,4 +24,3 @@ from .vlm_as_judge.vlm_as_judge_reward import (
     vlm_as_judge_reward,
     vlm_as_judge_reward_multi_model,
 )
-from .llm_as_judge.llm_as_judge_video_reward import llm_as_judge_video_reward
