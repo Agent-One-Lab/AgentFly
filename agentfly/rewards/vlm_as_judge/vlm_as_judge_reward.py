@@ -899,24 +899,6 @@ async def vlm_as_judge_pass_reward_multi_model(
             logger.error("Failed to generate video from code")
             return {"reward": 0.0}
 
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
-
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
-
         prompt_text = create_vlm_prompt_from_template(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
             variables={"all_questions": all_questions},
@@ -1132,24 +1114,6 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3(
             logger.error("Failed to generate video from code")
             return {"reward": 0.0}
 
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
-
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
-
         prompt_text = create_vlm_prompt_from_template(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
             variables={"all_questions": all_questions},
@@ -1337,6 +1301,18 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
     video_path = None
     reward_score = 0.0
     vlm_judge_score = 0.0
+    code_extraction_score = 0.0
+    code_rendering_score = 0.0
+    video_opening_score = 0.0
+
+    def _ladder_payload() -> Dict[str, float]:
+        return {
+            "reward": reward_score,
+            "vlm_judge": vlm_judge_score,
+            "code_extraction": code_extraction_score,
+            "code_rendering": code_rendering_score,
+            "video_opening": video_opening_score,
+        }
     try:
         logger.info(f"=" * 60)
         logger.info("vlm_as_judge_pass_reward_multi_model_ladder called")
@@ -1351,13 +1327,14 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
         all_questions, _, questions_list = extract_vlm_questions_from_data(all_data)
         if not questions_list:
             logger.warning("No VLM questions found in data.")
-            return {"reward": 0.0, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
 
         code = video_gen.extract_code_from_response(final_response)
         if not code:
             logger.warning("No Python code found in final_response")
-            return {"reward": 0.0, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
         reward_score += LADDER_CODE_EXTRACTION_REWARD
+        code_extraction_score = 1.0
 
         video_filename = f"video_{uuid.uuid4().hex}.mp4"
         video_path = os.path.join(video_gen.output_dir, video_filename)
@@ -1365,31 +1342,15 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
         success = await video_gen.generate_video_from_code(code, video_path)
         if not success:
             logger.error("Failed to generate video from code")
-            return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
         reward_score += LADDER_CODE_RENDER_REWARD
+        code_rendering_score = 1.0
 
         if not _can_open_video(video_path):
             logger.error("Failed to open generated video")
-            return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
         reward_score += LADDER_VIDEO_OPEN_REWARD
-
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
-
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
+        video_opening_score = 1.0
 
         prompt_text = create_vlm_prompt_from_template(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
@@ -1403,10 +1364,7 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
         model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
         if not model_specs:
             logger.error("No VLM model specs configured for ensemble.")
-            return {
-                "reward": reward_score,
-                "vlm_judge": vlm_judge_score,
-            }
+            return _ladder_payload()
 
         async def _run_model(spec: Dict[str, Any], spec_index: int) -> Dict[str, Any]:
             model_name = spec["model"]
@@ -1534,7 +1492,7 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
                     "endpoints": model_results,
                 }
             )
-            return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
 
         pass_votes = sum(1 for result in available_results if result["passed"])
         fail_votes = len(available_results) - pass_votes
@@ -1556,13 +1514,13 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
                 "endpoints": model_results,
             }
         )
-        return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+        return _ladder_payload()
 
     except Exception as e:
         logger.error(f"Error in vlm_as_judge_pass_reward_multi_model_ladder: {e}")
         import traceback
         traceback.print_exc()
-        return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+        return _ladder_payload()
     finally:
         if video_path:
             try:
@@ -1583,6 +1541,12 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
     video_path = None
     reward_score = 0.0
     vlm_judge_score = 0.0
+
+    def _ladder_payload() -> Dict[str, float]:
+        return {
+            "reward": reward_score,
+            "vlm_judge": vlm_judge_score,
+        }
     try:
         logger.info(f"=" * 60)
         logger.info("vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder called")
@@ -1597,12 +1561,12 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
         all_questions, _, questions_list = extract_vlm_questions_from_data(all_data)
         if not questions_list:
             logger.warning("No VLM questions found in data.")
-            return {"reward": 0.0, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
 
         code = video_gen.extract_code_from_response(final_response)
         if not code:
             logger.warning("No Python code found in final_response")
-            return {"reward": 0.0, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
         reward_score += LADDER_CODE_EXTRACTION_REWARD
 
         video_filename = f"video_{uuid.uuid4().hex}.mp4"
@@ -1611,31 +1575,13 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
         success = await video_gen.generate_video_from_code(code, video_path)
         if not success:
             logger.error("Failed to generate video from code")
-            return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
         reward_score += LADDER_CODE_RENDER_REWARD
 
         if not _can_open_video(video_path):
             logger.error("Failed to open generated video")
-            return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
         reward_score += LADDER_VIDEO_OPEN_REWARD
-
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
-
-        expected_indices = [
-            str(question.get("index", "")).strip()
-            for question in questions_list
-            if str(question.get("index", "")).strip()
-        ]
-        if not expected_indices:
-            expected_indices = [str(i + 1) for i in range(len(questions_list))]
-        expected_index_set = set(expected_indices)
 
         prompt_text = create_vlm_prompt_from_template(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
@@ -1649,7 +1595,7 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
         model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
         if not model_specs:
             logger.error("No VLM model specs configured for ensemble.")
-            return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
 
         async def _run_model(spec: Dict[str, Any], spec_index: int) -> Dict[str, Any]:
             model_name = spec["model"]
@@ -1777,7 +1723,7 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
                     "endpoints": model_results,
                 }
             )
-            return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+            return _ladder_payload()
 
         pass_votes = sum(1 for result in available_results if result["passed"])
         if pass_votes >= 1:
@@ -1799,13 +1745,13 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
                 "endpoints": model_results,
             }
         )
-        return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+        return _ladder_payload()
 
     except Exception as e:
         logger.error(f"Error in vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder: {e}")
         import traceback
         traceback.print_exc()
-        return {"reward": reward_score, "vlm_judge": vlm_judge_score}
+        return _ladder_payload()
     finally:
         if video_path:
             try:
