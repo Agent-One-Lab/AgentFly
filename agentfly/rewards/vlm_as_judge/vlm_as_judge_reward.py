@@ -1,6 +1,7 @@
 """VLM as Judge Reward Function for AgentFly RL Training"""
 
 import os
+import sys
 import re
 import json
 import uuid
@@ -41,11 +42,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_VLM_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"
 VLM_MODEL_SERVER_IPS = {
-
+    "Qwen/Qwen3-VL-235B-A22B-Instruct": ["10.24.2.31", "10.24.0.201"],
+    "OpenGVLab/InternVL3_5-241B-A28B": ["10.24.3.227"],
 }
 _VLM_CLIENTS: Dict[Tuple[str, Tuple[str, ...], int, int, int, str], VLMClient] = {}
 DEFAULT_VLM_ENSEMBLE_MODEL_SPECS = [
-
+    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.2.31"]},
+    {"model": "OpenGVLab/InternVL3_5-241B-A28B", "server_ips": ["10.24.3.227"]},
+    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.0.201"]},
 ]
 VLM_ENSEMBLE_PROMPT_TEMPLATE = """You are given a video and several visual verification questions. Your task is to judge each question as true or false based only on what can be seen or reasonably inferred from the video. If the visual evidence is insufficient to confirm the statement, or if the statement directly contradicts the video, answer 'false'.
  
@@ -368,6 +372,7 @@ class VideoGenerator:
         """
         temp_file = None
         try:
+            os.makedirs(self.output_dir, exist_ok=True)
             # Create a temporary Python file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 # Modify code to use the specified output path
@@ -407,7 +412,7 @@ class VideoGenerator:
             # Always pass the output path as an argument so scripts that expect
             # sys.argv[1] or check len(sys.argv) continue without exiting.
             process = await asyncio.create_subprocess_exec(
-                'python', temp_file, output_path,
+                sys.executable, temp_file, output_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.output_dir  # Run in output directory
@@ -446,7 +451,14 @@ class VideoGenerator:
                 return False
                 
         except Exception as e:
-            logger.error(f"Error generating video: {e}")
+            if isinstance(e, FileNotFoundError):
+                logger.error(
+                    "Error generating video: %s (missing: %s)",
+                    e,
+                    getattr(e, "filename", None),
+                )
+            else:
+                logger.error(f"Error generating video: {e}")
             if temp_file:
                 try:
                     os.unlink(temp_file)
