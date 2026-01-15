@@ -111,6 +111,12 @@ class AutoAgent:
 
         if "use_agent" in agent_kwargs:
             agent_kwargs.pop("use_agent")
+        # Remove runtime-only fields not used by agent __init__
+        for key in ("max_turns", "num_chains", "log_file"):
+            agent_kwargs.pop(key, None)
+        # Only ReactAgent consumes task_info
+        if str(agent_type).lower() != "react":
+            agent_kwargs.pop("task_info", None)
         
         agent = agent_class(**agent_kwargs)
 

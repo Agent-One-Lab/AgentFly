@@ -1,6 +1,9 @@
 from .vlm_as_judge_reward import (
     vlm_as_judge_reward,
     vlm_as_judge_pass_reward,
+    vlm_as_judge_pass_reward_multi_model_pass_at_3,
+    vlm_as_judge_pass_reward_multi_model_ladder,
+    vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder,
     VideoGenerator,
     extract_vlm_questions_from_data,
     calculate_weighted_reward,
