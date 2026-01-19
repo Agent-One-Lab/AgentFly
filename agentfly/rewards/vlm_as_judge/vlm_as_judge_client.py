@@ -17,6 +17,33 @@ from ... import AGENT_HOME
 logger = logging.getLogger(__name__)
 
 
+def _get_retry_settings() -> tuple[int, float]:
+    retry_seconds_env = os.getenv("VLM_CLIENT_RETRY_SECONDS")
+    if retry_seconds_env is None:
+        retry_seconds_env = os.getenv("VLM_CLIENT_WAIT_SECONDS")
+
+    retry_interval_env = os.getenv("VLM_CLIENT_RETRY_INTERVAL")
+    if retry_interval_env is None:
+        retry_interval_env = os.getenv("VLM_CLIENT_POLL_INTERVAL")
+
+    try:
+        retry_seconds = int(retry_seconds_env) if retry_seconds_env is not None else -1
+    except (TypeError, ValueError):
+        retry_seconds = -1
+
+    try:
+        retry_interval = float(retry_interval_env) if retry_interval_env is not None else 1.0
+    except (TypeError, ValueError):
+        retry_interval = 1.0
+
+    if retry_seconds < 0:
+        retry_seconds = -1
+    if retry_interval <= 0:
+        retry_interval = 1.0
+
+    return retry_seconds, retry_interval
+
+
 def _resolve_server_status_dir() -> str:
     """Resolve the directory that contains vLLM server status JSON files.
 
@@ -195,24 +222,39 @@ class VLMClient:
         self.client_manager = RoundRobinClient(server_ips, port, api_key, timeout_seconds, rate_limiters)
 
     async def single_call(self, inputs, model, **kwargs):
-        try:
-            client, rate_limiter = await self.client_manager.get_next_available_client()
+        retry_seconds, retry_interval = _get_retry_settings()
+        start_time = time.monotonic()
+        attempt = 0
+        while True:
+            attempt += 1
             try:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=inputs,
-                    timeout=self.timeout_seconds,
-                    **kwargs
+                client, rate_limiter = await self.client_manager.get_next_available_client()
+                try:
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=inputs,
+                        timeout=self.timeout_seconds,
+                        **kwargs
+                    )
+                    return response.choices[0].message.content
+                finally:
+                    await rate_limiter.release()
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Request timed out after %ss (attempt %d)",
+                    self.timeout_seconds,
+                    attempt,
                 )
-                return response.choices[0].message.content
-            finally:
-                await rate_limiter.release()
-        except asyncio.TimeoutError:
-            logger.error(f"Request timed out after {self.timeout_seconds}s")
-            return None
-        except Exception as e:
-            logger.error(f"Error processing request: {e}")
-            return None
+            except Exception as e:
+                logger.error("Error processing request (attempt %d): %s", attempt, e)
+
+            if retry_seconds == 0:
+                return None
+
+            if retry_seconds > 0 and (time.monotonic() - start_time) >= retry_seconds:
+                return None
+
+            await asyncio.sleep(retry_interval)
 
     async def process_all_inputs(self, inputs_list, num_generations=1, model=None, **kwargs):
         all_tasks = []
@@ -461,6 +503,67 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
     Tries strict JSON first; then looks for fenced JSON blocks and
     substring-extracts list/object payloads.
     """
+    def _has_unquoted_colon(value: str) -> bool:
+        in_string = False
+        escaped = False
+        for ch in value:
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if ch == ":" and not in_string:
+                return True
+        return False
+
+    def _fix_bare_string_fields(value: str) -> str:
+        lines = value.splitlines()
+        fixed_lines = []
+        changed = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('"') and (stripped.endswith('"') or stripped.endswith('",')):
+                if not _has_unquoted_colon(stripped):
+                    indent = line[:len(line) - len(line.lstrip())]
+                    has_comma = stripped.endswith(",")
+                    raw_value = stripped[:-1].strip() if has_comma else stripped
+                    fixed_lines.append(
+                        f'{indent}"question": {raw_value}{"," if has_comma else ""}'
+                    )
+                    changed = True
+                    continue
+            fixed_lines.append(line)
+        return "\n".join(fixed_lines) if changed else value
+
+    def _fix_missing_object_braces(value: str) -> str:
+        lines = value.splitlines()
+        fixed_lines = []
+        in_object = False
+        changed = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("{"):
+                in_object = True
+                fixed_lines.append(line)
+                continue
+            if stripped.startswith("}"):
+                in_object = False
+                fixed_lines.append(line)
+                continue
+            if stripped.startswith('"index"') and not in_object:
+                indent = line[:len(line) - len(line.lstrip())]
+                fixed_lines.append(f"{indent}{{")
+                fixed_lines.append(line)
+                in_object = True
+                changed = True
+                continue
+            fixed_lines.append(line)
+        return "\n".join(fixed_lines) if changed else value
+
     def _coerce_list(value: Any) -> Optional[List[Dict[str, Any]]]:
         if isinstance(value, list):
             return value
@@ -507,4 +610,14 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
         parsed = _try_parse(candidate)
         if parsed is not None:
             return parsed
+        fixed_candidate = _fix_bare_string_fields(candidate)
+        if fixed_candidate != candidate:
+            parsed = _try_parse(fixed_candidate)
+            if parsed is not None:
+                return parsed
+        brace_fixed = _fix_missing_object_braces(fixed_candidate)
+        if brace_fixed != fixed_candidate:
+            parsed = _try_parse(brace_fixed)
+            if parsed is not None:
+                return parsed
     raise ValueError("Failed to parse VLM JSON list from output")

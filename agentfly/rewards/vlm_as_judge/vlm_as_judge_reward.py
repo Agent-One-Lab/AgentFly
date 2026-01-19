@@ -24,6 +24,12 @@ try:
         create_vlm_prompt_from_template,
         _extract_json_list,
     )
+    try:
+        from ..utils.monitor import MetricEvent, emit
+    except Exception:
+        MetricEvent = None  # type: ignore[assignment]
+        def emit(*args, **kwargs):  # type: ignore[no-redef]
+            return None
 except ImportError:  # Running as a script without package context
     import sys
     # Add repo root to sys.path so absolute imports work when invoked directly
@@ -37,19 +43,25 @@ except ImportError:  # Running as a script without package context
         create_vlm_prompt_custom,
         DEFAULT_VLM_PROMPT_TEMPLATE,
     )
+    try:
+        from agentfly.utils.monitor import MetricEvent, emit
+    except Exception:
+        MetricEvent = None  # type: ignore[assignment]
+        def emit(*args, **kwargs):  # type: ignore[no-redef]
+            return None
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_VLM_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"
 VLM_MODEL_SERVER_IPS = {
-    "Qwen/Qwen3-VL-235B-A22B-Instruct": ["10.24.2.31", "10.24.0.201"],
-    "OpenGVLab/InternVL3_5-241B-A28B": ["10.24.3.227"],
+    "Qwen/Qwen3-VL-235B-A22B-Instruct": ["10.24.24.28", "10.24.0.61"],
+    "OpenGVLab/InternVL3_5-241B-A28B": ["10.24.1.154"],
 }
 _VLM_CLIENTS: Dict[Tuple[str, Tuple[str, ...], int, int, int, str], VLMClient] = {}
 DEFAULT_VLM_ENSEMBLE_MODEL_SPECS = [
-    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.2.31"]},
-    {"model": "OpenGVLab/InternVL3_5-241B-A28B", "server_ips": ["10.24.3.227"]},
-    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.0.201"]},
+    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.24.28"]},
+    {"model": "OpenGVLab/InternVL3_5-241B-A28B", "server_ips": ["10.24.1.154"]},
+    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.0.61"]},
 ]
 VLM_ENSEMBLE_PROMPT_TEMPLATE = """You are given a video and several visual verification questions. Your task is to judge each question as true or false based only on what can be seen or reasonably inferred from the video. If the visual evidence is insufficient to confirm the statement, or if the statement directly contradicts the video, answer 'false'.
  
@@ -104,6 +116,30 @@ def _log_vlm_raw_output(model_name: str, output_text: str, reason: str, force: b
     else:
         log_fn = logger.warning
     log_fn("VLM raw output (%s) for model '%s':\n%s", reason, model_name, output_text)
+
+
+
+
+def _format_video_uri(path: str) -> str:
+    if not path:
+        return ""
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", path):
+        return path
+    return f"file://{os.path.abspath(path)}"
+
+
+def _build_vlm_messages(video_path: str, prompt_text: str) -> List[Dict[str, Any]]:
+    video_uri = _format_video_uri(video_path)
+
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "video_url", "video_url": {"url": video_uri}},
+                {"type": "text", "text": prompt_text},
+            ],
+        },
+    ]
 
 
 def _normalize_server_ips(value: Optional[Any]) -> Optional[List[str]]:
@@ -222,7 +258,7 @@ def _get_vlm_wait_settings() -> Tuple[int, float]:
         poll_interval = 1.0
 
     if wait_seconds < 0:
-        wait_seconds = 0
+        wait_seconds = -1
     if poll_interval <= 0:
         poll_interval = 1.0
 
@@ -233,6 +269,11 @@ async def _wait_for_vlm_availability(client: VLMClient) -> bool:
     wait_seconds, poll_interval = _get_vlm_wait_settings()
     if wait_seconds == 0:
         return client.is_available()
+    if wait_seconds < 0:
+        while True:
+            if client.is_available():
+                return True
+            await asyncio.sleep(poll_interval)
 
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
@@ -336,7 +377,10 @@ class VideoGenerator:
         """
         # Prefer a shared directory accessible by the VLM server if provided.
         if output_dir is None:
-            output_dir = os.getenv("VLM_SHARED_VIDEO_DIR", "/tmp/vlm_videos")
+            output_dir = os.getenv(
+                "VLM_SHARED_VIDEO_DIR",
+                "/mnt/weka/shrd/ad/haonan.li/ViPhy/tmp/vlm_judge",
+            )
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
     
@@ -703,6 +747,235 @@ def _true_rate(results: List[Dict], questions_list: List[Dict]) -> float:
     return true_count / len(questions_list)
 
 
+def _build_question_result_map(results: List[Dict[str, Any]]) -> Dict[str, Optional[bool]]:
+    result_map: Dict[str, Optional[bool]] = {}
+    if not results:
+        return result_map
+    for result in results:
+        idx = str(result.get("index", "")).strip()
+        if not idx:
+            continue
+        result_map[idx] = _result_is_true(result.get("result"))
+    return result_map
+
+
+def _calculate_vlm_agreement_stats(
+    result_maps: List[Dict[str, Optional[bool]]],
+    questions_list: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    total_questions = 0
+    complete_questions = 0
+    agreement_count = 0
+    disagreement_count = 0
+    agreement_true_count = 0
+    agreement_false_count = 0
+    disagreement_2_true_1_false = 0
+    disagreement_2_false_1_true = 0
+    missing_count = 0
+
+    for question in questions_list:
+        idx = str(question.get("index", "")).strip()
+        if not idx:
+            continue
+        total_questions += 1
+
+        votes: List[bool] = []
+        missing = False
+        for result_map in result_maps:
+            if idx not in result_map:
+                missing = True
+                break
+            vote = result_map.get(idx)
+            if vote is None:
+                missing = True
+                break
+            votes.append(vote)
+
+        if missing or len(votes) != len(result_maps):
+            missing_count += 1
+            continue
+
+        complete_questions += 1
+        true_votes = sum(1 for vote in votes if vote)
+        false_votes = len(votes) - true_votes
+
+        if true_votes == len(votes) or false_votes == len(votes):
+            agreement_count += 1
+            if true_votes == len(votes):
+                agreement_true_count += 1
+            else:
+                agreement_false_count += 1
+        else:
+            disagreement_count += 1
+            if len(votes) == 3:
+                if true_votes == 2:
+                    disagreement_2_true_1_false += 1
+                elif true_votes == 1:
+                    disagreement_2_false_1_true += 1
+
+    coverage_rate = complete_questions / total_questions if total_questions else 0.0
+    agreement_rate = agreement_count / complete_questions if complete_questions else 0.0
+    disagreement_rate = disagreement_count / complete_questions if complete_questions else 0.0
+
+    return {
+        "questions_total": total_questions,
+        "questions_complete": complete_questions,
+        "missing_count": missing_count,
+        "agreement_count": agreement_count,
+        "disagreement_count": disagreement_count,
+        "agreement_rate": agreement_rate,
+        "disagreement_rate": disagreement_rate,
+        "agreement_true_count": agreement_true_count,
+        "agreement_false_count": agreement_false_count,
+        "disagreement_2_true_1_false": disagreement_2_true_1_false,
+        "disagreement_2_false_1_true": disagreement_2_false_1_true,
+    }
+
+
+def _format_model_label(model_result: Dict[str, Any]) -> str:
+    model_name = model_result.get("model") or "unknown_model"
+    server_ips = model_result.get("server_ips") or []
+    if server_ips:
+        return f"{model_name}@{server_ips[0]}"
+    return model_name
+
+
+def _sanitize_metric_label(label: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", label)
+    return cleaned.strip("_") or "unknown"
+
+
+def _calculate_vlm_per_model_stats(
+    model_results: List[Dict[str, Any]],
+    questions_list: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    per_model: Dict[str, Dict[str, Any]] = {}
+    model_entries: List[Dict[str, Any]] = []
+
+    for result in model_results:
+        label = _format_model_label(result)
+        entry = {
+            "label": label,
+            "model": result.get("model"),
+            "server_ips": result.get("server_ips"),
+            "result_map": result.get("result_map", {}),
+        }
+        model_entries.append(entry)
+        per_model[label] = {
+            "questions_total": 0,
+            "answered_count": 0,
+            "missing_count": 0,
+            "agree_with_majority_count": 0,
+            "disagree_with_majority_count": 0,
+            "no_majority_count": 0,
+            "agree_with_majority_rate": 0.0,
+            "disagree_with_majority_rate": 0.0,
+        }
+
+    for question in questions_list:
+        idx = str(question.get("index", "")).strip()
+        if not idx:
+            continue
+
+        votes: Dict[str, bool] = {}
+        for entry in model_entries:
+            result_map = entry["result_map"]
+            if idx not in result_map:
+                continue
+            vote = result_map.get(idx)
+            if vote is None:
+                continue
+            votes[entry["label"]] = vote
+
+        true_votes = sum(1 for vote in votes.values() if vote)
+        false_votes = len(votes) - true_votes
+        if len(votes) >= 2 and true_votes != false_votes:
+            majority = true_votes > false_votes
+        else:
+            majority = None
+
+        for entry in model_entries:
+            label = entry["label"]
+            stats = per_model[label]
+            stats["questions_total"] += 1
+            result_map = entry["result_map"]
+            if idx not in result_map or result_map.get(idx) is None:
+                stats["missing_count"] += 1
+                continue
+            stats["answered_count"] += 1
+            if majority is None:
+                stats["no_majority_count"] += 1
+                continue
+            if result_map[idx] == majority:
+                stats["agree_with_majority_count"] += 1
+            else:
+                stats["disagree_with_majority_count"] += 1
+
+    for label, stats in per_model.items():
+        compared = stats["agree_with_majority_count"] + stats["disagree_with_majority_count"]
+        if compared:
+            stats["agree_with_majority_rate"] = stats["agree_with_majority_count"] / compared
+            stats["disagree_with_majority_rate"] = stats["disagree_with_majority_count"] / compared
+
+    return per_model
+
+
+def _emit_vlm_agreement_metrics(stats: Dict[str, Any], step: Optional[int] = None) -> None:
+    if MetricEvent is None:
+        return
+    metric_keys = [
+        "questions_total",
+        "questions_complete",
+        "missing_count",
+        "agreement_count",
+        "disagreement_count",
+        "agreement_rate",
+        "disagreement_rate",
+    ]
+    for key in metric_keys:
+        value = stats.get(key)
+        if value is None:
+            continue
+        emit(
+            MetricEvent(
+                kind="scalar",
+                name=f"Reward/vlm_judge/{key}",
+                value=value,
+                step=step,
+            )
+        )
+
+
+def _emit_vlm_per_model_metrics(
+    per_model_stats: Dict[str, Dict[str, Any]],
+    step: Optional[int] = None,
+) -> None:
+    if MetricEvent is None:
+        return
+    metric_keys = [
+        "answered_count",
+        "missing_count",
+        "agree_with_majority_count",
+        "disagree_with_majority_count",
+        "agree_with_majority_rate",
+        "disagree_with_majority_rate",
+    ]
+    for label, stats in per_model_stats.items():
+        safe_label = _sanitize_metric_label(label)
+        for key in metric_keys:
+            value = stats.get(key)
+            if value is None:
+                continue
+            emit(
+                MetricEvent(
+                    kind="scalar",
+                    name=f"Reward/vlm_judge/model/{safe_label}/{key}",
+                    value=value,
+                    step=step,
+                )
+            )
+
+
 @reward(name="vlm_as_judge_pass_reward")
 async def vlm_as_judge_pass_reward(
     final_response: str, 
@@ -794,7 +1067,7 @@ async def vlm_as_judge_pass_reward(
             # Run VLM evaluation directly since we're already async
             client = _get_vlm_client(
                 model=model_name,
-                timeout_seconds=120,
+                timeout_seconds=600,
                 server_ips=server_ips,
             )
             
@@ -806,12 +1079,7 @@ async def vlm_as_judge_pass_reward(
             # Create VLM prompt
             prompt_text = create_vlm_prompt(summarize, all_questions)
             
-            # Build message using <video> tag in text content to match server expectations
-            user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-            messages = [{
-                "role": "user",
-                "content": user_text
-            }]
+            messages = _build_vlm_messages(video_path, prompt_text)
             
             # Process the request
             responses = await client.process_all_inputs(
@@ -915,10 +1183,7 @@ async def vlm_as_judge_pass_reward_multi_model(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
             variables={"all_questions": all_questions},
         )
-        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-        messages = [
-            {"role": "user", "content": user_text},
-        ]
+        messages = _build_vlm_messages(video_path, prompt_text)
 
         model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
         if not model_specs:
@@ -931,7 +1196,7 @@ async def vlm_as_judge_pass_reward_multi_model(
             try:
                 client = _get_vlm_client(
                     model=model_name,
-                    timeout_seconds=120,
+                    timeout_seconds=600,
                     server_ips=server_ips,
                 )
 
@@ -1130,10 +1395,7 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
             variables={"all_questions": all_questions},
         )
-        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-        messages = [
-            {"role": "user", "content": user_text},
-        ]
+        messages = _build_vlm_messages(video_path, prompt_text)
 
         model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
         if not model_specs:
@@ -1146,7 +1408,7 @@ async def vlm_as_judge_pass_reward_multi_model_pass_at_3(
             try:
                 client = _get_vlm_client(
                     model=model_name,
-                    timeout_seconds=120,
+                    timeout_seconds=600,
                     server_ips=server_ips,
                 )
 
@@ -1316,6 +1578,13 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
     code_extraction_score = 0.0
     code_rendering_score = 0.0
     video_opening_score = 0.0
+    agreement_count = 0
+    disagreement_count = 0
+    agreement_rate = 0.0
+    disagreement_rate = 0.0
+    missing_count = 0
+    questions_total = 0
+    questions_complete = 0
 
     def _ladder_payload() -> Dict[str, float]:
         return {
@@ -1324,10 +1593,303 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
             "code_extraction": code_extraction_score,
             "code_rendering": code_rendering_score,
             "video_opening": video_opening_score,
+            "vlm_agreement_count": agreement_count,
+            "vlm_disagreement_count": disagreement_count,
+            "vlm_agreement_rate": agreement_rate,
+            "vlm_disagreement_rate": disagreement_rate,
+            "vlm_missing_count": missing_count,
+            "vlm_questions_total": questions_total,
+            "vlm_questions_complete": questions_complete,
         }
     try:
         logger.info(f"=" * 60)
         logger.info("vlm_as_judge_pass_reward_multi_model_ladder called")
+        logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
+
+        video_gen = VideoGenerator()
+
+        all_data = dict(data_fields)
+        if vlm_questions is not None:
+            all_data["vlm_questions"] = vlm_questions
+
+        all_questions, _, questions_list = extract_vlm_questions_from_data(all_data)
+        if not questions_list:
+            logger.warning("No VLM questions found in data.")
+            return _ladder_payload()
+        questions_total = len(questions_list)
+
+        code = video_gen.extract_code_from_response(final_response)
+        if not code:
+            logger.warning("No Python code found in final_response")
+            return _ladder_payload()
+        reward_score += LADDER_CODE_EXTRACTION_REWARD
+        code_extraction_score = 1.0
+
+        video_filename = f"video_{uuid.uuid4().hex}.mp4"
+        video_path = os.path.join(video_gen.output_dir, video_filename)
+
+        success = await video_gen.generate_video_from_code(code, video_path)
+        if not success:
+            logger.error("Failed to generate video from code")
+            return _ladder_payload()
+        reward_score += LADDER_CODE_RENDER_REWARD
+        code_rendering_score = 1.0
+
+        if not _can_open_video(video_path):
+            logger.error("Failed to open generated video")
+            return _ladder_payload()
+        reward_score += LADDER_VIDEO_OPEN_REWARD
+        video_opening_score = 1.0
+
+        prompt_text = create_vlm_prompt_from_template(
+            VLM_ENSEMBLE_PROMPT_TEMPLATE,
+            variables={"all_questions": all_questions},
+        )
+        messages = _build_vlm_messages(video_path, prompt_text)
+
+        model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
+        if not model_specs:
+            logger.error("No VLM model specs configured for ensemble.")
+            return _ladder_payload()
+
+        async def _run_model(spec: Dict[str, Any], spec_index: int) -> Dict[str, Any]:
+            model_name = spec["model"]
+            server_ips = spec.get("server_ips")
+            try:
+                client = _get_vlm_client(
+                    model=model_name,
+                    timeout_seconds=600,
+                    server_ips=server_ips,
+                )
+
+                if not await _wait_for_vlm_availability(client):
+                    logger.error("VLM client not available for model '%s'", model_name)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "client_unavailable",
+                    }
+
+                responses = await client.process_all_inputs(
+                    [messages],
+                    model=model_name,
+                    temperature=0,
+                )
+
+                if not responses or not responses[0] or not responses[0][0]:
+                    if _env_flag_enabled("VLM_LOG_RAW_OUTPUT"):
+                        logger.warning(
+                            "VLM raw responses for model '%s' were empty: %s",
+                            model_name,
+                            responses,
+                        )
+                    logger.error("No response from VLM server for model '%s'", model_name)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "empty_response",
+                    }
+
+                output_text = responses[0][0]
+                _log_vlm_raw_output(model_name, output_text, "response")
+                try:
+                    results = _extract_json_list(output_text)
+                except Exception as exc:
+                    logger.error("Failed to parse VLM results for model '%s': %s", model_name, exc)
+                    _log_vlm_raw_output(model_name, output_text, "parse_error", force=True)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "parse_error",
+                    }
+
+                if not results:
+                    logger.error("Empty VLM results for model '%s'", model_name)
+                    _log_vlm_raw_output(model_name, output_text, "no_results", force=True)
+                    return {
+                        "index": spec_index,
+                        "model": model_name,
+                        "server_ips": server_ips,
+                        "passed": None,
+                        "endpoint_reward": None,
+                        "error": "no_results",
+                    }
+
+                passed = _all_true_pass(results, questions_list)
+                result_map = _build_question_result_map(results)
+                return {
+                    "index": spec_index,
+                    "model": model_name,
+                    "server_ips": server_ips,
+                    "passed": passed,
+                    "endpoint_reward": 1.0 if passed else 0.0,
+                    "result_map": result_map,
+                    "error": None,
+                }
+            except Exception as exc:
+                logger.error("Error running VLM model '%s': %s", model_name, exc)
+                return {
+                    "index": spec_index,
+                    "model": model_name,
+                    "server_ips": server_ips,
+                    "passed": None,
+                    "endpoint_reward": None,
+                    "error": str(exc),
+                }
+
+        tasks = [_run_model(spec, idx) for idx, spec in enumerate(model_specs, start=1)]
+        model_results = await asyncio.gather(*tasks)
+        failed_results = [r for r in model_results if r["passed"] is None]
+        if failed_results:
+            failed_summary = ", ".join(
+                f"{result['model']}:{result.get('error')}" for result in failed_results
+            )
+            logger.error(
+                "VLM ensemble all-or-nothing: %d/%d models failed (%s); dropping partial results.",
+                len(failed_results),
+                len(model_specs),
+                failed_summary,
+            )
+            available_results = []
+        else:
+            available_results = model_results
+
+        required_responses = len(model_specs)
+        if len(available_results) < required_responses:
+            logger.error(
+                "Only %d/%d VLM models returned results; need at least %d.",
+                len(available_results),
+                len(model_specs),
+                required_responses,
+            )
+            model_results_log = []
+            for result in model_results:
+                result_log = dict(result)
+                result_log.pop("result_map", None)
+                model_results_log.append(result_log)
+            _append_vlm_ensemble_log(
+                {
+                    "timestamp": time.time(),
+                    "reward": reward_score,
+                    "available": len(available_results),
+                    "required": required_responses,
+                    "endpoints": model_results_log,
+                }
+            )
+            return _ladder_payload()
+
+        result_maps = [result.get("result_map", {}) for result in available_results]
+        agreement_stats = _calculate_vlm_agreement_stats(result_maps, questions_list)
+        agreement_count = agreement_stats["agreement_count"]
+        disagreement_count = agreement_stats["disagreement_count"]
+        agreement_rate = agreement_stats["agreement_rate"]
+        disagreement_rate = agreement_stats["disagreement_rate"]
+        missing_count = agreement_stats["missing_count"]
+        questions_total = agreement_stats["questions_total"]
+        questions_complete = agreement_stats["questions_complete"]
+        _emit_vlm_agreement_metrics(agreement_stats)
+        per_model_stats = _calculate_vlm_per_model_stats(available_results, questions_list)
+        _emit_vlm_per_model_metrics(per_model_stats)
+        logger.info(
+            "VLM agreement stats: total=%d complete=%d agreement=%d disagreement=%d missing=%d "
+            "agreement_rate=%.3f disagreement_rate=%.3f",
+            questions_total,
+            questions_complete,
+            agreement_count,
+            disagreement_count,
+            missing_count,
+            agreement_rate,
+            disagreement_rate,
+        )
+
+        pass_votes = sum(1 for result in available_results if result["passed"])
+        fail_votes = len(available_results) - pass_votes
+        if pass_votes > fail_votes:
+            reward_score += LADDER_VLM_REWARD
+            vlm_judge_score = 1.0
+        logger.info(
+            "Ladder VLM evaluation completed. Pass votes: %d/%d. Reward: %.3f",
+            pass_votes,
+            len(available_results),
+            reward_score,
+        )
+        for label, stats in per_model_stats.items():
+            logger.info(
+                "VLM model stats (%s): answered=%d missing=%d agree=%d disagree=%d agree_rate=%.3f",
+                label,
+                stats["answered_count"],
+                stats["missing_count"],
+                stats["agree_with_majority_count"],
+                stats["disagree_with_majority_count"],
+                stats["agree_with_majority_rate"],
+            )
+        model_results_log = []
+        for result in model_results:
+            result_log = dict(result)
+            result_log.pop("result_map", None)
+            model_results_log.append(result_log)
+        _append_vlm_ensemble_log(
+            {
+                "timestamp": time.time(),
+                "reward": reward_score,
+                "available": len(available_results),
+                "required": required_responses,
+                "endpoints": model_results_log,
+                "agreement": agreement_stats,
+                "agreement_per_model": per_model_stats,
+            }
+        )
+        return _ladder_payload()
+
+    except Exception as e:
+        logger.error(f"Error in vlm_as_judge_pass_reward_multi_model_ladder: {e}")
+        import traceback
+        traceback.print_exc()
+        return _ladder_payload()
+    finally:
+        if video_path:
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
+
+
+@reward(name="vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder")
+async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
+    final_response: str,
+    trajectory: Dict[str, Any] = None,
+    vlm_questions: Dict[str, Any] = None,
+    vlm_model_specs: Optional[List[Dict[str, Any]]] = None,
+    **data_fields,
+) -> Dict[str, float]:
+    """VLM as Judge ladder pass@N reward using multiple models."""
+    video_path = None
+    reward_score = 0.0
+    vlm_judge_score = 0.0
+    code_extraction_score = 0.0
+    code_rendering_score = 0.0
+    video_opening_score = 0.0
+
+    def _ladder_payload() -> Dict[str, float]:
+        return {
+            "reward": reward_score,
+            "vlm_judge": vlm_judge_score,
+            "code_extraction_score": code_extraction_score,
+            "code_rendering_score": code_rendering_score,
+            "video_opening_score": video_opening_score,
+        }
+    try:
+        logger.info(f"=" * 60)
+        logger.info("vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder called")
         logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
 
         video_gen = VideoGenerator()
@@ -1368,10 +1930,7 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
             variables={"all_questions": all_questions},
         )
-        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-        messages = [
-            {"role": "user", "content": user_text},
-        ]
+        messages = _build_vlm_messages(video_path, prompt_text)
 
         model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
         if not model_specs:
@@ -1384,7 +1943,7 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
             try:
                 client = _get_vlm_client(
                     model=model_name,
-                    timeout_seconds=120,
+                    timeout_seconds=600,
                     server_ips=server_ips,
                 )
 
@@ -1473,21 +2032,20 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
         tasks = [_run_model(spec, idx) for idx, spec in enumerate(model_specs, start=1)]
         model_results = await asyncio.gather(*tasks)
         failed_results = [r for r in model_results if r["passed"] is None]
+        available_results = [r for r in model_results if r["passed"] is not None]
         if failed_results:
             failed_summary = ", ".join(
                 f"{result['model']}:{result.get('error')}" for result in failed_results
             )
             logger.error(
-                "VLM ensemble all-or-nothing: %d/%d models failed (%s); dropping partial results.",
+                "VLM ensemble partial: %d/%d models failed (%s); using %d available.",
                 len(failed_results),
                 len(model_specs),
                 failed_summary,
+                len(available_results),
             )
-            available_results = []
-        else:
-            available_results = model_results
 
-        required_responses = len(model_specs)
+        required_responses = 1
         if len(available_results) < required_responses:
             logger.error(
                 "Only %d/%d VLM models returned results; need at least %d.",
@@ -1501,237 +2059,7 @@ async def vlm_as_judge_pass_reward_multi_model_ladder(
                     "reward": reward_score,
                     "available": len(available_results),
                     "required": required_responses,
-                    "endpoints": model_results,
-                }
-            )
-            return _ladder_payload()
-
-        pass_votes = sum(1 for result in available_results if result["passed"])
-        fail_votes = len(available_results) - pass_votes
-        if pass_votes > fail_votes:
-            reward_score += LADDER_VLM_REWARD
-            vlm_judge_score = 1.0
-        logger.info(
-            "Ladder VLM evaluation completed. Pass votes: %d/%d. Reward: %.3f",
-            pass_votes,
-            len(available_results),
-            reward_score,
-        )
-        _append_vlm_ensemble_log(
-            {
-                "timestamp": time.time(),
-                "reward": reward_score,
-                "available": len(available_results),
-                "required": required_responses,
-                "endpoints": model_results,
-            }
-        )
-        return _ladder_payload()
-
-    except Exception as e:
-        logger.error(f"Error in vlm_as_judge_pass_reward_multi_model_ladder: {e}")
-        import traceback
-        traceback.print_exc()
-        return _ladder_payload()
-    finally:
-        if video_path:
-            try:
-                os.remove(video_path)
-            except Exception:
-                pass
-
-
-@reward(name="vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder")
-async def vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder(
-    final_response: str,
-    trajectory: Dict[str, Any] = None,
-    vlm_questions: Dict[str, Any] = None,
-    vlm_model_specs: Optional[List[Dict[str, Any]]] = None,
-    **data_fields,
-) -> Dict[str, float]:
-    """VLM as Judge ladder pass@N reward using multiple models."""
-    video_path = None
-    reward_score = 0.0
-    vlm_judge_score = 0.0
-
-    def _ladder_payload() -> Dict[str, float]:
-        return {
-            "reward": reward_score,
-            "vlm_judge": vlm_judge_score,
-        }
-    try:
-        logger.info(f"=" * 60)
-        logger.info("vlm_as_judge_pass_reward_multi_model_pass_at_3_ladder called")
-        logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
-
-        video_gen = VideoGenerator()
-
-        all_data = dict(data_fields)
-        if vlm_questions is not None:
-            all_data["vlm_questions"] = vlm_questions
-
-        all_questions, _, questions_list = extract_vlm_questions_from_data(all_data)
-        if not questions_list:
-            logger.warning("No VLM questions found in data.")
-            return _ladder_payload()
-
-        code = video_gen.extract_code_from_response(final_response)
-        if not code:
-            logger.warning("No Python code found in final_response")
-            return _ladder_payload()
-        reward_score += LADDER_CODE_EXTRACTION_REWARD
-
-        video_filename = f"video_{uuid.uuid4().hex}.mp4"
-        video_path = os.path.join(video_gen.output_dir, video_filename)
-
-        success = await video_gen.generate_video_from_code(code, video_path)
-        if not success:
-            logger.error("Failed to generate video from code")
-            return _ladder_payload()
-        reward_score += LADDER_CODE_RENDER_REWARD
-
-        if not _can_open_video(video_path):
-            logger.error("Failed to open generated video")
-            return _ladder_payload()
-        reward_score += LADDER_VIDEO_OPEN_REWARD
-
-        prompt_text = create_vlm_prompt_from_template(
-            VLM_ENSEMBLE_PROMPT_TEMPLATE,
-            variables={"all_questions": all_questions},
-        )
-        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-        messages = [
-            {"role": "user", "content": user_text},
-        ]
-
-        model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
-        if not model_specs:
-            logger.error("No VLM model specs configured for ensemble.")
-            return _ladder_payload()
-
-        async def _run_model(spec: Dict[str, Any], spec_index: int) -> Dict[str, Any]:
-            model_name = spec["model"]
-            server_ips = spec.get("server_ips")
-            try:
-                client = _get_vlm_client(
-                    model=model_name,
-                    timeout_seconds=120,
-                    server_ips=server_ips,
-                )
-
-                if not await _wait_for_vlm_availability(client):
-                    logger.error("VLM client not available for model '%s'", model_name)
-                    return {
-                        "index": spec_index,
-                        "model": model_name,
-                        "server_ips": server_ips,
-                        "passed": None,
-                        "endpoint_reward": None,
-                        "error": "client_unavailable",
-                    }
-
-                responses = await client.process_all_inputs(
-                    [messages],
-                    model=model_name,
-                    temperature=0,
-                )
-
-                if not responses or not responses[0] or not responses[0][0]:
-                    if _env_flag_enabled("VLM_LOG_RAW_OUTPUT"):
-                        logger.warning(
-                            "VLM raw responses for model '%s' were empty: %s",
-                            model_name,
-                            responses,
-                        )
-                    logger.error("No response from VLM server for model '%s'", model_name)
-                    return {
-                        "index": spec_index,
-                        "model": model_name,
-                        "server_ips": server_ips,
-                        "passed": None,
-                        "endpoint_reward": None,
-                        "error": "empty_response",
-                    }
-
-                output_text = responses[0][0]
-                _log_vlm_raw_output(model_name, output_text, "response")
-                try:
-                    results = _extract_json_list(output_text)
-                except Exception as exc:
-                    logger.error("Failed to parse VLM results for model '%s': %s", model_name, exc)
-                    _log_vlm_raw_output(model_name, output_text, "parse_error", force=True)
-                    return {
-                        "index": spec_index,
-                        "model": model_name,
-                        "server_ips": server_ips,
-                        "passed": None,
-                        "endpoint_reward": None,
-                        "error": "parse_error",
-                    }
-
-                if not results:
-                    logger.error("Empty VLM results for model '%s'", model_name)
-                    _log_vlm_raw_output(model_name, output_text, "no_results", force=True)
-                    return {
-                        "index": spec_index,
-                        "model": model_name,
-                        "server_ips": server_ips,
-                        "passed": None,
-                        "endpoint_reward": None,
-                        "error": "no_results",
-                    }
-
-                passed = _all_true_pass(results, questions_list)
-                return {
-                    "index": spec_index,
-                    "model": model_name,
-                    "server_ips": server_ips,
-                    "passed": passed,
-                    "endpoint_reward": 1.0 if passed else 0.0,
-                    "error": None,
-                }
-            except Exception as exc:
-                logger.error("Error running VLM model '%s': %s", model_name, exc)
-                return {
-                    "index": spec_index,
-                    "model": model_name,
-                    "server_ips": server_ips,
-                    "passed": None,
-                    "endpoint_reward": None,
-                    "error": str(exc),
-                }
-
-        tasks = [_run_model(spec, idx) for idx, spec in enumerate(model_specs, start=1)]
-        model_results = await asyncio.gather(*tasks)
-        failed_results = [r for r in model_results if r["passed"] is None]
-        if failed_results:
-            failed_summary = ", ".join(
-                f"{result['model']}:{result.get('error')}" for result in failed_results
-            )
-            logger.error(
-                "VLM ensemble all-or-nothing: %d/%d models failed (%s); dropping partial results.",
-                len(failed_results),
-                len(model_specs),
-                failed_summary,
-            )
-            available_results = []
-        else:
-            available_results = model_results
-
-        required_responses = len(model_specs)
-        if len(available_results) < required_responses:
-            logger.error(
-                "Only %d/%d VLM models returned results; need at least %d.",
-                len(available_results),
-                len(model_specs),
-                required_responses,
-            )
-            _append_vlm_ensemble_log(
-                {
-                    "timestamp": time.time(),
-                    "reward": reward_score,
-                    "available": len(available_results),
-                    "required": required_responses,
+                    "expected_total": len(model_specs),
                     "endpoints": model_results,
                 }
             )
@@ -1815,10 +2143,7 @@ async def vlm_as_judge_reward_multi_model(
             VLM_ENSEMBLE_PROMPT_TEMPLATE,
             variables={"all_questions": all_questions},
         )
-        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-        messages = [
-            {"role": "user", "content": user_text},
-        ]
+        messages = _build_vlm_messages(video_path, prompt_text)
 
         model_specs = _resolve_vlm_model_specs(vlm_model_specs, data_fields)
         if not model_specs:
@@ -1831,7 +2156,7 @@ async def vlm_as_judge_reward_multi_model(
             try:
                 client = _get_vlm_client(
                     model=model_name,
-                    timeout_seconds=120,
+                    timeout_seconds=600,
                     server_ips=server_ips,
                 )
 
@@ -1969,7 +2294,7 @@ async def vlm_as_judge_pass_reward_rebuttal(
         # Run VLM evaluation
         client = _get_vlm_client(
             model=model_name,
-            timeout_seconds=120,
+            timeout_seconds=600,
             server_ips=server_ips,
         )
 
@@ -2004,12 +2329,7 @@ Provide your judgment as a JSON object with:
 
 Return only the JSON object, no additional text."""
 
-        # Build message using <video> tag
-        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-        messages = [{
-            "role": "user",
-            "content": user_text
-        }]
+        messages = _build_vlm_messages(video_path, prompt_text)
 
         # Process the request
         responses = await client.process_all_inputs(
@@ -2179,7 +2499,7 @@ async def vlm_as_judge_reward(
         # Run VLM evaluation directly since we're already async
         client = _get_vlm_client(
             model=model_name,
-            timeout_seconds=120,
+            timeout_seconds=600,
             server_ips=server_ips,
         )
         
@@ -2191,12 +2511,7 @@ async def vlm_as_judge_reward(
         # Create VLM prompt
         prompt_text = create_vlm_prompt(summarize, all_questions)
         
-        # Build message using <video> tag in text content to match server expectations
-        user_text = f"<video>{video_path}</video>\n\n{prompt_text}"
-        messages = [{
-            "role": "user",
-            "content": user_text
-        }]
+        messages = _build_vlm_messages(video_path, prompt_text)
         
         # Process the request
         responses = await client.process_all_inputs(
