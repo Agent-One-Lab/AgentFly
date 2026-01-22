@@ -122,7 +122,7 @@ await code_interpreter(
         if n <= 1:
             return n
         return fibonacci(n-1) + fibonacci(n-2)
-    
+
     # Cache some results
     fib_cache = {i: fibonacci(i) for i in range(10)}
     ''',
@@ -156,7 +156,7 @@ result = await code_interpreter(
     code='''
     with open('data.txt', 'r') as f:
         lines = f.readlines()
-    
+
     print(f"File has {len(lines)} lines")
     for i, line in enumerate(lines, 1):
         print(f"Line {i}: {line.strip()}")
@@ -174,7 +174,7 @@ from agentfly.agents.react.react_agent import ReactAgent
 from agentfly.rewards.code_reward import code_reward_test
 
 # Task information for the agent
-task_info = """Execute Python code to solve computational problems. 
+task_info = """Execute Python code to solve computational problems.
 Use code_interpreter to run calculations, analysis, and data processing tasks."""
 
 # Initialize ReactAgent with code_interpreter tool
@@ -198,4 +198,3 @@ await react_agent.run_async(
     num_chains=1
 )
 ```
-

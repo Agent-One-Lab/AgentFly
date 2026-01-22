@@ -1,5 +1,3 @@
-import asyncio
-import time
 from agentfly.tools import code_interpreter
 import pytest
 
@@ -11,18 +9,18 @@ def test_code_schema():
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_code_run():
-    result = await code_interpreter(code='print("A print test")', id='demo')
+    result = await code_interpreter(code='print("A print test")', id="demo")
     print(result)
-    await code_interpreter.release(id='demo')
-    print('done')
+    await code_interpreter.release(id="demo")
+    print("done")
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_code_hang():
-    result = await code_interpreter(code='while True:\n  pass', id='demo')
+    result = await code_interpreter(code="while True:\n  pass", id="demo")
     print(result)
-    await code_interpreter.release(id='demo')
-    print('done')
+    await code_interpreter.release(id="demo")
+    print("done")
 
 
 # @pytest.mark.asyncio(loop_scope="session")
@@ -42,7 +40,7 @@ async def test_double_release():
     await code_interpreter(id="x", code="print('hi')")
     # manual double call
     await code_interpreter.release(id="x")
-    await code_interpreter.release(id="x")   # must return instantly
+    await code_interpreter.release(id="x")  # must return instantly
 
 
 # @pytest.mark.asyncio(loop_scope="session")

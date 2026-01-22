@@ -54,4 +54,3 @@ Alternatively, you can customize the installation by following these steps:
     ```bash
     conda install conda-forge::redis-server==7.4.0
     ```
-

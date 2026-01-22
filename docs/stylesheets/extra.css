@@ -3,7 +3,7 @@
 :root {
     /* Material for MkDocs default is usually 125% (20px) */
     /* Lowering this value will shrink the entire UI slightly */
-    font-size: 135%; 
+    font-size: 135%;
 }
 
 /* Custom color theme - change the hex code to your preferred color */
@@ -11,19 +11,19 @@
 [data-md-color-scheme="default"] {
     /* Main primary color - used for header, navigation bar, and primary UI elements */
     --md-primary-fg-color: #815ac0 !important;
-    
+
     /* Lighter variant of primary color - used for hover states and highlights */
     --md-primary-fg-color--light: #a06cd5 !important;
-    
+
     /* Darker variant of primary color - used for pressed/active states */
     --md-primary-fg-color--dark: #6247aa !important;
-    
+
     /* Accent color - used for links, buttons, and interactive elements */
     --md-accent-fg-color: #564592 !important;
-    
+
     /* Transparent version of accent color - used for backgrounds and subtle highlights */
     --md-accent-fg-color--transparent: rgba(199, 125, 255, 0.1) !important;
-    
+
     /* Logo styling from index.md */
     --size: 140px;              /* Size of the logo circle */
     --gold: #D4AF37;            /* Gold color for logo border */
@@ -33,16 +33,16 @@
 [data-md-color-scheme="slate"] {
     /* Main primary color for dark mode - lighter than light mode for visibility */
     --md-primary-fg-color: #815ac0 !important;
-    
+
     /* Lighter variant for dark mode - used for hover states */
     --md-primary-fg-color--light: #a06cd5 !important;
-    
+
     /* Darker variant for dark mode - used for active states */
     --md-primary-fg-color--dark: #7B2CBF !important;
-    
+
     /* Accent color for dark mode - lighter for better visibility */
     --md-accent-fg-color: #E0AAFF !important;
-    
+
     /* Transparent accent for dark mode - subtle background highlights */
     --md-accent-fg-color--transparent: rgba(224, 170, 255, 0.1) !important;
 }
@@ -256,4 +256,3 @@
     padding-bottom: 0.5em !important;
     border-bottom: 3px solid var(--md-primary-fg-color) !important;
 }
-

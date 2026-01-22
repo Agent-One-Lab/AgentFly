@@ -49,7 +49,7 @@ class APITool(BaseTool)
 
         Args:
             query (str): query to use for the tool
-        
+
         Returns:
             observation: observation string
         """
@@ -69,7 +69,7 @@ class CustomAgent(BaseAgent):
 
     def processing_query(self, query):
         return query
-    
+
     @tool(name="specialized_tool")
     async def specialized_tool(self, query: str):
         query = self.processing_query(query)
@@ -95,7 +95,7 @@ We define two types of tools:
             Args:
                 a (int): The first number.
                 b (int): The second number which should be a non-negative integer.
-            
+
             Returns:
                 int: The sum of a and b.
             """
@@ -136,5 +136,3 @@ When calling the tool, if it is a stateful tool, we need to specify an `id` argu
 result = await code_interpreter("print('Hello World')", id="12345")
 await code_interpreter.release(id="12345")
 ```
-
-

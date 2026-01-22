@@ -2,6 +2,7 @@ from agentfly.envs import PythonSandboxEnv
 import asyncio
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_env_run():
     env = PythonSandboxEnv()
@@ -9,6 +10,7 @@ async def test_env_run():
     observation = await env.step("print('Hello, World!')")
     assert observation == "Hello, World!\n"
     await env.aclose()
+
 
 @pytest.mark.asyncio
 async def test_env_async_step():
@@ -18,6 +20,7 @@ async def test_env_async_step():
     observations = await asyncio.gather(*tasks)
     assert observations == [f"{i}\n" for i in range(10)]
     await env.aclose()
+
 
 # @pytest.mark.asyncio
 # async def test_env_keep_state():
@@ -35,4 +38,3 @@ async def test_env_async_step():
 #     observation = await env.step(code)
 #     assert observation == 'test\n', f"Observation: {observation}"
 #     await env.aclose()
-

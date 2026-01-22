@@ -19,7 +19,7 @@ def add(a: int, b: int = 1) -> int:
     Args:
         a (int): The first number.
         b (int): The second number which should be a non-negative integer.
-    
+
     Returns:
         int: The sum of a and b.
     """
@@ -47,15 +47,15 @@ class ImageEditingAgent(BaseAgent):
             tools=tools,
             **kwargs
         )
-    
+
     @tool(
         name="auto_inpaint_image",
         description="Automatically detect objects and inpaint them in one operation."
     )
     async def auto_inpaint_image_tool(
         self,
-        image_id: str, 
-        detect_prompt: str, 
+        image_id: str,
+        detect_prompt: str,
         prompt: str,
         # ... other parameters
     ) -> str:
@@ -125,46 +125,46 @@ class ImageProcessingAgent(BaseAgent):
     def __init__(self, model_name_or_path: str, **kwargs):
         self._image_cache = {}
         self._processing_history = []
-        
+
         # Define tools as instance methods
         tools = [
             self.process_image_tool,
             self.cache_image_tool,
             self.get_history_tool
         ]
-        
+
         super().__init__(
             model_name_or_path=model_name_or_path,
             tools=tools,
             **kwargs
         )
-    
+
     @tool(name="process_image", description="Process an image with various filters")
     async def process_image_tool(self, image_id: str, filter_type: str) -> str:
         # Access instance state
         if image_id not in self._image_cache:
             return "Error: Image not found in cache"
-        
+
         # Call instance methods
         image = self._get_cached_image(image_id)
         processed = self._apply_filter(image, filter_type)
-        
+
         # Update instance state
         self._processing_history.append({
             "image_id": image_id,
             "filter": filter_type,
             "timestamp": time.time()
         })
-        
+
         return f"Image {image_id} processed with {filter_type} filter"
-    
+
     @tool(name="get_history", description="Get processing history")
     async def get_history_tool(self) -> str:
         return json.dumps(self._processing_history)
-    
+
     def _get_cached_image(self, image_id: str):
         return self._image_cache[image_id]
-    
+
     def _apply_filter(self, image, filter_type: str):
         # Implementation details
         pass
@@ -177,44 +177,44 @@ class DatabaseAgent(BaseAgent):
     def __init__(self, model_name_or_path: str, database_url: str, **kwargs):
         self._db_connection = self._connect_to_db(database_url)
         self._query_cache = {}
-        
+
         tools = [
             self.query_database_tool,
             self.insert_data_tool,
             self.get_cache_stats_tool
         ]
-        
+
         super().__init__(
             model_name_or_path=model_name_or_path,
             tools=tools,
             **kwargs
         )
-    
+
     @tool(name="query_database", description="Execute a SQL query")
     async def query_database_tool(self, sql_query: str, use_cache: bool = True) -> str:
         # Check cache first
         if use_cache and sql_query in self._query_cache:
             return f"Cached result: {self._query_cache[sql_query]}"
-        
+
         # Execute query using instance connection
         result = self._execute_query(sql_query)
-        
+
         # Cache result
         if use_cache:
             self._query_cache[sql_query] = result
-        
+
         return result
-    
+
     @tool(name="insert_data", description="Insert data into database")
     async def insert_data_tool(self, table: str, data: dict) -> str:
         # Use instance database connection
         success = self._insert_record(table, data)
         return f"Data inserted successfully: {success}"
-    
+
     def _connect_to_db(self, url: str):
         # Implementation details
         pass
-    
+
     def _execute_query(self, query: str):
         # Implementation details
         pass

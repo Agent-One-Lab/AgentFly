@@ -45,4 +45,3 @@ For HTTP-based integration, see the [HTTP Server](http_server.md) documentation.
 * **Timeout Protection**: Configurable execution timeouts to prevent infinite loops
 * **Resource Management**: CPU and memory limits for safe execution
 * **Automatic Recovery**: Built-in error handling and container restart capabilities
-

@@ -50,9 +50,8 @@ class CustomAgent(BaseAgent):
     def parse(self, response):
         # Custom parsing logic
         pass
-    
+
     def generate(self, messages):
         # Custom generation logic
         pass
 ```
-

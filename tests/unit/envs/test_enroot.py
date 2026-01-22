@@ -1,5 +1,3 @@
-from agentfly.envs import from_env
-
 # Commented out because it's not working on github actions (status is 'exited')
 # def test_enroot_client():
 #     client = from_env()
@@ -10,4 +8,3 @@ from agentfly.envs import from_env
 #     assert container.attrs["State"]["Running"] == True
 
 #     container.kill()
-

@@ -21,7 +21,6 @@ print(result)
 ## Key Features
 
 * **Dense Vector Search**: E5-base-v2 embeddings for semantic similarity
-* **FAISS Indexing**: Efficient similarity search across large document corpora  
+* **FAISS Indexing**: Efficient similarity search across large document corpora
 * **Async Performance**: Optimized for concurrent queries
 * **Auto Loading**: Automatic model and corpus initialization
-

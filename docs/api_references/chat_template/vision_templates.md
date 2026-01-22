@@ -39,13 +39,13 @@ vision_template = register_template(
         system_message="You are a vision-capable AI assistant.",
         user_template="User: {content}\n",
         assistant_template="Assistant: {content}\n",
-        
+
         # Vision configuration
         vision_start="<|vision_start|>",
         vision_end="<|vision_end|>",
         image_token="<|image_pad|>",
         video_token="<|video_pad|>",
-        
+
         stop_words=["\n"]
     )
 )
@@ -65,13 +65,13 @@ vision_tool_template = register_template(
         user_template_with_tools="User: {content}\n\nTools: {tools}\n",
         assistant_template="Assistant: {content}\n",
         tool_template="Tool: {observation}\n",
-        
+
         # Vision configuration
         vision_start="<|vision_start|>",
         vision_end="<|vision_end|>",
         image_token="<|image_pad|>",
         video_token="<|video_pad|>",
-        
+
         stop_words=["\n"]
     )
 )
@@ -119,10 +119,10 @@ def _register_vision_processor(self):
     """Automatically register a vision processor for this template"""
     if self.image_token or self.video_token:
         from .vision_processor import VisionProcessorConfig, register_processor
-        
+
         # Determine model type based on template name
         model_type = self._infer_model_type()
-        
+
         # Create vision config
         config = VisionProcessorConfig(
             model_type=model_type,
@@ -133,7 +133,7 @@ def _register_vision_processor(self):
             processor_class="AutoProcessor",
             expansion_strategy="patch_based"
         )
-        
+
         # Register the processor
         register_processor(self.name, config)
 ```
@@ -146,7 +146,7 @@ The system automatically infers the appropriate vision processor based on templa
 def _infer_model_type(self) -> str:
     """Infer model type from template name"""
     name_lower = self.name.lower()
-    
+
     if "qwen" in name_lower:
         return "qwen_vl"
     elif "llava" in name_lower:
@@ -420,35 +420,35 @@ final_inputs = vision_processor.process_for_llm(
 ```python
 def calculate_image_tokens(self, image_data, processor):
     """Calculate tokens needed for an image"""
-    
+
     if "pixel_values" in image_data:
         # Try grid-based calculation first (HuggingFace method)
         if "image_grid_thw" in image_data:
             grid_info = image_data["image_grid_thw"]
             grid_prod = grid_info.prod().item()
-            
+
             # Get merge_size from processor
             merge_size = getattr(processor, "merge_size", 1)
             merge_length = merge_size ** 2
-            
+
             num_image_tokens = grid_prod // merge_length
             return max(1, num_image_tokens)
-        
+
         # Fallback to patch-based calculation
         height, width = get_image_size(image_data["pixel_values"][0])
         image_seqlen = (height // processor.patch_size) * (width // processor.patch_size)
-        
+
         # Add additional tokens if specified
         if hasattr(processor, 'num_additional_image_tokens'):
             image_seqlen += processor.num_additional_image_tokens
-        
+
         # Adjust for feature selection strategy
-        if (hasattr(processor, 'vision_feature_select_strategy') and 
+        if (hasattr(processor, 'vision_feature_select_strategy') and
             processor.vision_feature_select_strategy == "default"):
             image_seqlen -= 1
-        
+
         return image_seqlen
-    
+
     return 1
 ```
 
@@ -457,29 +457,29 @@ def calculate_image_tokens(self, image_data, processor):
 ```python
 def calculate_video_tokens(self, video_data, processor):
     """Calculate tokens needed for a video"""
-    
+
     if "pixel_values" in video_data:
         video_tensor = video_data["pixel_values"][0]
-        
+
         if len(video_tensor.shape) > 3:  # Has frame dimension
             num_frames = video_tensor.shape[0]
             height, width = get_image_size(video_tensor[0])
             frame_seqlen = (height // processor.patch_size) * (width // processor.patch_size)
-            
+
             # Add additional tokens if specified
             if hasattr(processor, 'num_additional_image_tokens'):
                 frame_seqlen += processor.num_additional_image_tokens
-            
+
             # Adjust for feature selection strategy
-            if (hasattr(processor, 'vision_feature_select_strategy') and 
+            if (hasattr(processor, 'vision_feature_select_strategy') and
                 processor.vision_feature_select_strategy == "default"):
                 frame_seqlen -= 1
-            
+
             return frame_seqlen * num_frames
         else:
             # Single frame video
             return self.calculate_image_tokens(video_data, processor)
-    
+
     return 1
 ```
 
@@ -492,7 +492,7 @@ from agentfly.agents.templates.vision_processor import VisionProcessor, VisionPr
 
 class CustomVisionProcessor(VisionProcessor):
     """Custom vision processor for specific needs"""
-    
+
     def preprocess_images(self, images, processor):
         """Custom image preprocessing"""
         # Custom preprocessing logic
@@ -501,20 +501,20 @@ class CustomVisionProcessor(VisionProcessor):
             # Apply custom transformations
             processed_image = self._custom_transform(image)
             processed_images.append(processed_image)
-        
+
         # Use processor's image processor
         image_processor = getattr(processor, "image_processor", None)
         if image_processor is None:
             raise ValueError("Image processor not found")
-        
+
         return image_processor(processed_images, return_tensors="pt")
-    
+
     def calculate_image_tokens(self, image_data, processor):
         """Custom token calculation"""
         # Custom token calculation logic
         base_tokens = super().calculate_image_tokens(image_data, processor)
         return base_tokens * 2  # Example: double the tokens
-    
+
     def expand_vision_tokens(self, prompt, images, videos, processor):
         """Custom token expansion"""
         # Custom expansion logic
@@ -600,27 +600,27 @@ from agentfly.templates.constants import ToolPlacement
 # Create a comprehensive vision template
 vision_template = Template(
     name="comprehensive-vision",
-    
+
     # Basic templates
     system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
     system_message="You are a comprehensive vision-capable AI assistant.",
-    
+
     # Tool support
     system_template_with_tools="<|im_start|>system\n{system_message}\n\nAvailable Tools:\n{tools}<|im_end|>\n",
     user_template="<|im_start|>user\n{content}<|im_end|>\n",
     user_template_with_tools="<|im_start|>user\n{content}\n\nTools: {tools}<|im_end|>\n",
     assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
     tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",
-    
+
     # Vision support
     vision_start="<|vision_start|>",
     vision_end="<|vision_end|>",
     image_token="<|image_pad|>",
     video_token="<|video_pad|>",
-    
+
     # Stop words
     stop_words=["<|im_end|>"],
-    
+
     # Tool policy
     tool_policy=ToolPolicy(
         placement=ToolPlacement.SYSTEM,

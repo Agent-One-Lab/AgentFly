@@ -37,4 +37,3 @@ For HTTP-based integration, see the [HTTP Server](http_server.md) documentation.
 * **HTTP API**: RESTful interface for language-agnostic integration
 * **Comprehensive State Access**: Full access to observations, admissible commands, and environment state
 * **Automatic Recovery**: Built-in error handling and container restart capabilities
-

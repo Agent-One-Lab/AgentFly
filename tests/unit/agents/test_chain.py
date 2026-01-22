@@ -1,5 +1,4 @@
-import pytest
-from agentfly.agents.chain.chain_base import Chain, Node, ChainRollout
+from agentfly.agents.chain.chain_base import Chain, Node
 from agentfly.agents.utils.messages import Messages
 
 
@@ -11,7 +10,7 @@ def test_node_creation():
         observation="Test observation",
         messages=Messages.from_turns([{"role": "user", "content": "test"}]),
     )
-    
+
     assert node.is_terminal == False
     assert node.type == "Thought"
     assert node.description == "This is a test thought"
@@ -26,11 +25,11 @@ def test_node_to_json():
         type="Action",
         description="google_search",
         observation="Test result",
-        messages=[{"role": "user", "content": "test"}]
+        messages=[{"role": "user", "content": "test"}],
     )
-    
+
     json_data = node.to_json(use_messages=True)
-    
+
     assert json_data["is_terminal"] == False
     assert json_data["type"] == "Action"
     assert json_data["description"] == "google_search"
@@ -41,32 +40,32 @@ def test_node_to_json():
 
 def test_chain_creation():
     chain = Chain(info={"question": "test question"})
-    
+
     assert chain.info["question"] == "test question"
     assert chain.root is None
 
 
 def test_chain_add_node():
     chain = Chain(info={"question": "test question"})
-    
+
     # Add root node
     root = chain.add_node(
         type="Thought",
         description="Initial thought",
         messages=Messages.from_turns([{"role": "user", "content": "test"}]),
     )
-    
+
     assert chain.root == root
     assert root.type == "Thought"
     assert root.description == "Initial thought"
-    
+
     # Add child node
     child = chain.add_node(
         type="Action",
         description="google_search",
         messages=Messages.from_turns([{"role": "user", "content": "test"}]),
     )
-    
+
     assert len(root.children) == 1
     assert root.children[0] == child
     assert child.parent == root
@@ -75,13 +74,19 @@ def test_chain_add_node():
 
 def test_chain_to_json():
     chain = Chain(info={"question": "test question"})
-    chain.add_node(type="Thought", description="Initial thought", messages=Messages.from_turns([{"role": "user", "content": "test"}]))
-    chain.add_node(type="Action", description="google_search", messages=Messages.from_turns([{"role": "user", "content": "test"}]))
-    
+    chain.add_node(
+        type="Thought",
+        description="Initial thought",
+        messages=Messages.from_turns([{"role": "user", "content": "test"}]),
+    )
+    chain.add_node(
+        type="Action",
+        description="google_search",
+        messages=Messages.from_turns([{"role": "user", "content": "test"}]),
+    )
+
     json_data = chain.to_json()
-    
+
     assert len(json_data) == 2
     assert json_data[0]["type"] == "Thought"
     assert json_data[1]["type"] == "Action"
-
-

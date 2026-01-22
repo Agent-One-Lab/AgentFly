@@ -67,7 +67,7 @@ tools = [
 **Formatted Prompt**
 
 <span class="system"> </span>: formatted system prompt; <span class="user"> </span>: formatted user message; <span class="assistant"> </span>: formatted assistant message; <span class="tool"> </span>: formatted tool message;
- 
+
 1. When combined, these create the complete prompt:
 
 <span class="system">System: You are a helpful assistant.</span>

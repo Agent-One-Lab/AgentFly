@@ -1,7 +1,3 @@
-from agentfly.tools import submit_tool_call, tool
-import pytest
-import asyncio
-
 # @pytest.mark.asyncio(loop_scope="session")
 # async def test_tool_call_by_name_predefined():
 #     tool_name = "code_interpreter"
@@ -18,10 +14,7 @@ import asyncio
 #     @tool(name=tool_name, description="Add two numbers")
 #     def add_numbers(a: int, b: int):
 #         return a + b
-    
+
 #     result = await submit_tool_call(tool_name, {"a": 2, "b": 3})
-    
+
 #     assert result["observation"] == '5', f"Expected 5 but got {result['observation']}"
-
-
-

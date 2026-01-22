@@ -11,4 +11,3 @@ AgentFly provides a flexible reward system for training agents with reinforcemen
 - [Math Reward](math_reward.md) - Mathematical reasoning rewards
 - [QA Reward](qa_reward.md) - Question answering rewards
 - [AlfWorld Reward](alfworld_reward.md) - AlfWorld environment rewards
-

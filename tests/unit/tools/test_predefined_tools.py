@@ -1,6 +1,3 @@
-from agentfly.tools import code_interpreter
-import pytest
-
 # @pytest.mark.asyncio
 # async def test_code_interpreter():
 #     code = "print('Hello, world!')"

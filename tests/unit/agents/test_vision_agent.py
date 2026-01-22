@@ -16,7 +16,7 @@ async def test_vision_agent():
         tools=tools,
         template="qwen2.5-vl",
         task_info=task_info,
-        backend="async_vllm"
+        backend="async_vllm",
     )
 
     messages = [
@@ -29,21 +29,19 @@ async def test_vision_agent():
                             "type": "image",
                             "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
                         },
-                        {"type": "text", "text": "There is an animal in the image. What is it? Also, search the information about this animal."}
+                        {
+                            "type": "text",
+                            "text": "There is an animal in the image. What is it? Also, search the information about this animal.",
+                        },
                     ],
                 },
             ]
         }
     ]
 
-
-    await react_agent.run(
-        max_turns=3,
-        messages=messages,
-        num_chains=10
-    )
+    await react_agent.run(max_turns=3, messages=messages, num_chains=10)
     messages_list = react_agent.get_messages()
-    messages = messages_list[0]['messages']
+    messages = messages_list[0]["messages"]
     for message in messages:
         print(f"{message['role']}: {message['content']}")
     inputs, other_info_list = react_agent.tokenize_trajectories()

@@ -87,7 +87,7 @@ async def math_code_reward(prediction: str, env: PythonSandboxEnv) -> dict:
     """Reward function for mathematical computation tasks"""
     try:
         result = await env.step(prediction)
-        
+
         # Check if output contains expected mathematical result
         if "3.14159" in result or "math.pi" in prediction:
             return {"reward": 1.0, "output": result}
@@ -95,8 +95,7 @@ async def math_code_reward(prediction: str, env: PythonSandboxEnv) -> dict:
             return {"reward": 0.5, "output": result}  # Partial credit
         else:
             return {"reward": 0.0, "output": result}
-            
+
     except Exception as e:
         return {"reward": 0.0, "output": str(e)}
 ```
-

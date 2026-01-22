@@ -18,6 +18,3 @@ Compared to tools and rewards, environments are more complex since we need envir
 - `reset`: (asynchronous) Reset the environment to initial state. This is to avoid the restart while still obtaining a new environment.
 - `step`: Main interface to interact with the environment (e.g. for code interpreter, execute the code and return results).
 - `aclose` (asynchronous) Close the environment.
-
-
-

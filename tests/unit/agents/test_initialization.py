@@ -1,4 +1,3 @@
-from agentfly.agents.agent_base import BaseAgent
 from agentfly.agents.specialized.code_agent import CodeAgent
 from agentfly.agents.react.react_agent import ReactAgent
 from agentfly.agents.specialized.think_agent import ThinkAgent
@@ -18,21 +17,22 @@ def test_agent_initialization_backend(backend: str):
             "Qwen/Qwen2.5-3B-Instruct",
             tools=tools,
             template=None if backend == "client" else "qwen2.5",
-            backend=backend
+            backend=backend,
         )
         print("Agent initialized successfully")
     except Exception as e:
         print(f"Error initializing agent: {str(e)}")
         raise
-    
+
     # Verify the agent was initialized correctly
     assert agent.backend == backend
     assert agent.tools == tools
     assert agent.model_name_or_path == "Qwen/Qwen2.5-3B-Instruct"
-    
+
     # Test basic methods
     messages = agent.get_messages()
     assert isinstance(messages, list)
+
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("backend", ["async_vllm", "client"])
@@ -42,9 +42,9 @@ def test_code_agent_initialization(backend: str):
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
         template=None if backend == "client" else "qwen2.5",
-        backend=backend
+        backend=backend,
     )
-    
+
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("backend", ["async_vllm", "client"])
@@ -56,13 +56,14 @@ def test_react_agent_initialization(backend: str):
         tools=tools,
         template=None if backend == "client" else "qwen2.5",
         task_info=task_info,
-        backend=backend
+        backend=backend,
     )
-    
+
     # Check system prompt contains task info and tools
     assert task_info in agent.system_prompt
     assert "google_search" in agent.system_prompt
     assert "answer" in agent.system_prompt
+
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("backend", ["async_vllm", "client"])
@@ -72,5 +73,5 @@ def test_think_agent_initialization(backend: str):
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
         template=None if backend == "client" else "qwen2.5",
-        backend=backend
+        backend=backend,
     )

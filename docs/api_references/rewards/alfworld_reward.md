@@ -24,7 +24,7 @@ Dict[str, Any]: Dictionary containing:
 
 **Decorator Configuration:**
 - **name**: "alfworld_episode_reward"
-- **env_cls**: ALFWorldEnv  
+- **env_cls**: ALFWorldEnv
 - **pool_size**: 8
 
 ## Technical Details
@@ -62,4 +62,3 @@ print(result)  # {"reward": 0.0} or {"reward": 1.0} if task completed
 - Requires active ALFWorld environment instance
 - Uses environment's internal reward mechanism
 - Suitable for episodic task evaluation
-

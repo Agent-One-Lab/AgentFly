@@ -35,14 +35,14 @@ It is in ShareGPT/OpenAI's input messages, and will look like something to this:
 {
     'messages': [
         {
-            'role': 'user', 
+            'role': 'user',
             'content': [{'type': 'text', 'text': 'What is the result of 1 + 1?'}]
-        }, 
+        },
         {
             'role': 'assistant',
             'content': [
                 {'type': 'text', 'text': '<tool_call>\n{"name": "calculator", "arguments": {"expression": "1 + 1"}}\n</tool_call>'}
-            ], 
+            ],
             'tool_calls': [
                     {
                         'id': None, 'type': 'function',
@@ -60,9 +60,9 @@ It is in ShareGPT/OpenAI's input messages, and will look like something to this:
             'content': [
                 {'type': 'text', 'text': '2'}
             ]
-        }, 
+        },
         {
-            'role': 'assistant', 
+            'role': 'assistant',
             'content': [
                 {'type': 'text', 'text': 'The result of 1 + 1 is 2.'}
             ],

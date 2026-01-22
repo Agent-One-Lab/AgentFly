@@ -21,7 +21,7 @@ The Retrieval tools provide semantic search capabilities for document retrieval 
 async def asyncdense_retrieve(query: str)
 ```
 
-**Description:** 
+**Description:**
 
 Retrieves relevant documents from a Wikipedia corpus using dense vector embeddings and semantic similarity search. Automatically initializes the retriever model and FAISS index on first use.
 
@@ -37,11 +37,11 @@ Tool result dict with:
 
     ```
     ### 1: [Document 1 content]
-    ### 2: [Document 2 content] 
+    ### 2: [Document 2 content]
     ### 3: [Document 3 content]
     ```
 
-- **status** (str): "success" 
+- **status** (str): "success"
 - **name** (str): "asyncdense_retrieve"
 - **arguments** (dict): Input parameters used
 - **info** (dict): Additional metadata
@@ -75,14 +75,14 @@ docs = await asyncdense_retrieve("How does photosynthesis work?")
 
 ```python
 @tool(
-    name="dense_retrieve", 
-    description="Use a dense retriever to retrieve documents from a corpus.", 
+    name="dense_retrieve",
+    description="Use a dense retriever to retrieve documents from a corpus.",
     max_length=4096
 )
 async def dense_retrieve(query: str)
 ```
 
-**Description:** 
+**Description:**
 
 Retrieves relevant documents from a Wikipedia corpus using dense vector embeddings and semantic similarity search. Similar to asyncdense_retrieve with slightly different internal implementation.
 
@@ -98,12 +98,12 @@ Tool result dict with:
 
     ```
     ### 1: [Document 1 content]
-    ### 2: [Document 2 content] 
+    ### 2: [Document 2 content]
     ### 3: [Document 3 content]
     ```
 
 - **status** (str): "success"
-- **name** (str): "dense_retrieve" 
+- **name** (str): "dense_retrieve"
 - **arguments** (dict): Input parameters used
 - **info** (dict): Additional metadata
 
@@ -126,7 +126,6 @@ print(result["observation"])
 ## Technical Details
 
 **Model:** intfloat/e5-base-v2 (768-dim embeddings)
-**Corpus:** Wikipedia-18 (18M+ passages)  
+**Corpus:** Wikipedia-18 (18M+ passages)
 **Index:** FAISS Flat index
 **Memory:** ~2-8GB RAM required
-

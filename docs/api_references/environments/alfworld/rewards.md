@@ -64,7 +64,7 @@ print(f"Rewards: {rewards}")
 ```python
 # Simple reward function usage
 reward_result = await alfworld_episode_reward(
-    prediction="take apple", 
+    prediction="take apple",
     env=env
 )
 print(f"Reward: {reward_result['reward']}")
@@ -83,7 +83,7 @@ print(result)
 The reward function is configured with:
 
 * **Pool size**: 8 ALFWorld environments
-* **Environment class**: ALFWorldEnv  
+* **Environment class**: ALFWorldEnv
 * **Concurrent evaluations**: Supported through pool management
 
 ## Reward Values Interpretation
@@ -106,4 +106,3 @@ The reward function includes debug output to help track evaluation:
 ```
 
 This output shows when the reward is calculated and the actual reward value received from the environment.
-

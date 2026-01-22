@@ -9,9 +9,8 @@ markers = [
 
 [tool.setuptools]
 packages = ["agentfly"]
+package-dir = {"" = "src"}
 
-[tool.setuptools.package-dir]
-agentfly = "agentfly"
 
 [project]
 name = "AgentFly"

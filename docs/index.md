@@ -19,7 +19,7 @@ Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, mu
 ## Resources
 
 === "AgentFly Paper 📜"
-    
+
     <div class="grid cards" markdown>
 
     -   :material-file-document-outline: __AgentFly: Extensible and Scalable Reinforcement Learning for LM Agents__
@@ -40,10 +40,10 @@ Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, mu
         ---
 
         Code repository in GitHub.
-        
+
         [:octicons-arrow-right-24: Explore Code](https://github.com/Agent-One-Lab/AgentFly)
     </div>
-    
+
 
 === "Weights & Biases 📈"
 
@@ -54,7 +54,7 @@ Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, mu
         ---
 
         The training curves, parameters, rewards, and trajectories.
-        
+
         [:octicons-arrow-right-24: Training](https://wandb.ai/AgentRL/Open)
     </div>
 
@@ -67,13 +67,13 @@ Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, mu
         ---
 
         Check out the models on Hugging Face. Agent for code interpreter, retrieval, ScienceWorld, WebShop, etc.
-        
+
         [:octicons-arrow-right-24: Explore Model](https://huggingface.co/collections/Agent-One/agentfly-6882061c6cf08537cb66c12b)
     </div>
 
 === "Tutorials 📚"
 
-    
+
     <div class="grid cards" markdown>
 
     -   :material-book-open-variant: __Tutorials__
@@ -82,7 +82,7 @@ Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, mu
 
         Check out the tutorials on how to build agents, tools, rewards, and start training.
 
-        
+
         [:octicons-arrow-right-24: Read More](start/first_agent.md)
     </div>
 
@@ -107,4 +107,3 @@ Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, mu
     ![Discord QR Code](https://agent-one-lab.github.io/assets/agentfly/discord.png)
 
 </div>
-

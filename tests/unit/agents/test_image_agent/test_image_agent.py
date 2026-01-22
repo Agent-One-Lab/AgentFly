@@ -1,13 +1,14 @@
 from agentfly.agents import ImageEditingAgent
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_image_agent():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
         backend="async_vllm",
-        streaming="console"
+        streaming="console",
     )
     messages_list = [
         {
@@ -20,22 +21,19 @@ async def test_image_agent():
                             # "image_url": {
                             #     "url": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
                             # }
-                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
                         },
                         {
                             "type": "text",
-                            "text": "Find what animal is in the image, then inpaint it with a cat."
-                        }
-                    ]
+                            "text": "Find what animal is in the image, then inpaint it with a cat.",
+                        },
+                    ],
                 }
             ]
         }
     ]
     await agent.run(
-        messages=messages_list,
-        max_turns=4,
-        num_chains=1,
-        enable_streaming=True
+        messages=messages_list, max_turns=4, num_chains=1, enable_streaming=True
     )
     agent.print_messages(index=0)
 

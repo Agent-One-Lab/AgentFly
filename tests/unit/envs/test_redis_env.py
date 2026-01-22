@@ -1,7 +1,3 @@
-import asyncio
-from agentfly.envs import RedisEnv
-import pytest
-
 # @pytest.mark.asyncio
 # async def test_redis_env_acquire():
 #     env = await RedisEnv.acquire()
@@ -30,4 +26,3 @@ import pytest
 #     for i in range(len(results)):
 #         print(results[i])
 #     await env.aclose()
-

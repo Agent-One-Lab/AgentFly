@@ -13,54 +13,127 @@ from transformers import AutoTokenizer
 import torch
 from agentfly.templates.templates import Chat
 
+
 @pytest.mark.parametrize("template", ["qwen3"])
-@pytest.mark.parametrize("messages", [
+@pytest.mark.parametrize(
+    "messages",
     [
-        {"role": "user", "content": "Hello, how are you?"},
-        {"role": "assistant", "content": "I am fine, thank you."},
-        {"role": "user", "content": "Want to play a game?"},
-        {"role": "assistant", "content": "Sure, what game?"},
+        [
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I am fine, thank you."},
+            {"role": "user", "content": "Want to play a game?"},
+            {"role": "assistant", "content": "Sure, what game?"},
+        ],
+        [
+            {"role": "user", "content": "Hello, how are you?"},
+            {
+                "role": "assistant",
+                "content": "<think> This is test thinking content. </think> I am fine, thank you.",
+            },
+        ],
+        [
+            {"role": "user", "content": "Help me to calculate 3 times 5."},
+            {
+                "role": "assistant",
+                "content": """{"name": "multiply", "arguments": {"x": 3, "y": 5}}""",
+            },
+            {"role": "tool", "content": "15"},
+        ],
+        [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I am fine, thank you."},
+            {"role": "user", "content": "What is 3 times 5?"},
+            {"role": "assistant", "content": "15"},
+            {"role": "user", "content": "OK, what is 3 times 6?"},
+            {
+                "role": "assistant",
+                "content": "<think> This is test thinking content. </think> 18",
+            },
+        ],
     ],
+)
+@pytest.mark.parametrize(
+    "tools",
     [
-        {"role": "user", "content": "Hello, how are you?"},
-        {"role": "assistant", "content": "<think> This is test thinking content. </think> I am fine, thank you."},
+        None,
+        [
+            {
+                "type": "function",
+                "function": {
+                    "name": "multiply",
+                    "description": "A function that multiplies two numbers",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "x": {
+                                "type": "number",
+                                "description": "The first number to multiply",
+                            },
+                            "y": {
+                                "type": "number",
+                                "description": "The second number to multiply",
+                            },
+                        },
+                        "required": ["x", "y"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "multiply",
+                    "description": "A function that multiplies two numbers",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "x": {
+                                "type": "number",
+                                "description": "The first number to multiply",
+                            },
+                            "y": {
+                                "type": "number",
+                                "description": "The second number to multiply",
+                            },
+                        },
+                        "required": ["x", "y"],
+                    },
+                },
+            },
+        ],
     ],
-    [
-        {"role": "user", "content": "Help me to calculate 3 times 5."},
-        {"role": "assistant", "content": '''{"name": "multiply", "arguments": {"x": 3, "y": 5}}'''},
-        {"role": "tool", "content": "15"},
-    ],
-    [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Hello, how are you?"},
-        {"role": "assistant", "content": "I am fine, thank you."},
-        {"role": "user", "content": "What is 3 times 5?"},
-        {"role": "assistant", "content": "15"},
-        {"role": "user", "content": "OK, what is 3 times 6?"},
-        {"role": "assistant", "content": "<think> This is test thinking content. </think> 18"},
-    ],
-])
-@pytest.mark.parametrize("tools", [
-    None,
-    [
-        {"type": "function", "function": {"name": "multiply", "description": "A function that multiplies two numbers", "parameters": {"type": "object", "properties": {"x": {"type": "number", "description": "The first number to multiply"}, "y": {"type": "number", "description": "The second number to multiply"}}, "required": ["x", "y"]}}},
-        {"type": "function", "function": {"name": "multiply", "description": "A function that multiplies two numbers", "parameters": {"type": "object", "properties": {"x": {"type": "number", "description": "The first number to multiply"}, "y": {"type": "number", "description": "The second number to multiply"}}, "required": ["x", "y"]}}},
-    ]
-])
+)
 @pytest.mark.parametrize("add_generation_prompt", [False, True])
 @pytest.mark.parametrize("enable_thinking", [True, False])
-def test_template_tokenize(template, messages, tools, add_generation_prompt, enable_thinking):
+def test_template_tokenize(
+    template, messages, tools, add_generation_prompt, enable_thinking
+):
     template_tokenizer_mapping = {
         "qwen3": "Qwen/Qwen3-32B",
     }
-    tokenizer = AutoTokenizer.from_pretrained(template_tokenizer_mapping[template], trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        template_tokenizer_mapping[template], trust_remote_code=True
+    )
 
     chat = Chat(template, messages, tools=tools)
-    prompt = chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools, enable_thinking=enable_thinking)
+    prompt = chat.prompt(
+        add_generation_prompt=add_generation_prompt,
+        tools=tools,
+        enable_thinking=enable_thinking,
+    )
 
     hf_inputs = tokenizer(prompt, return_tensors="pt")
 
-    implemented_inputs = tokenize_conversation(messages, tokenizer, template, max_length=4096, tools=tools, add_generation_prompt=add_generation_prompt, return_tensors="pt", enable_thinking=enable_thinking)
+    implemented_inputs = tokenize_conversation(
+        messages,
+        tokenizer,
+        template,
+        max_length=4096,
+        tools=tools,
+        add_generation_prompt=add_generation_prompt,
+        return_tensors="pt",
+        enable_thinking=enable_thinking,
+    )
 
     assert torch.equal(hf_inputs["input_ids"], implemented_inputs["input_ids"]), f"""template: {template}
 messages: {messages}

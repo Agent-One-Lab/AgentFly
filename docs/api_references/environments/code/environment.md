@@ -99,4 +99,3 @@ await env.reset()
 result = await env.step("print(x)")
 # Output: NameError: name 'x' is not defined
 ```
-

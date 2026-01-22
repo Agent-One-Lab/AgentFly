@@ -44,9 +44,9 @@ task_info="Navigate the ALFWorld environment and complete tasks by interacting w
 entropy_coeff=0.01  # Higher entropy for exploration
 kl_loss_type=mse
 agent_type=react
-max_turns=10  
+max_turns=10
 prompt_template="qwen2.5-no-system-tool"
-total_training_steps=150 
+total_training_steps=150
 project_name="AgentFly-AlfWorld-RPP-1024"
 
 python3 -m verl.trainer.main_ppo \

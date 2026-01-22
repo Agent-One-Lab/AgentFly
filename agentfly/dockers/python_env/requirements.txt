@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-pydantic
-sympy
-numpy
-tenacity
-requests
-beautifulsoup4

@@ -8,4 +8,3 @@ The foundation class for all agents in AgentFly:
     options:
       show_root_heading: true
       show_inheritance: true
-

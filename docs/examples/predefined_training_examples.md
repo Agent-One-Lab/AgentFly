@@ -40,7 +40,7 @@ To run any of the agent demos, use the pytest command with the `-s` flag to see 
 # Example: Run the Code Agent demo
 pytest agentfly/tests/docs/examples/test_react_agents.py::test_code_agent -s
 
-# Example: Run the VLM QA Agent demo  
+# Example: Run the VLM QA Agent demo
 pytest agentfly/tests/docs/examples/test_react_agents.py::test_react_vqa_agent -s
 ```
 
@@ -66,7 +66,7 @@ Training curves and metrics are logged to WandB for each experiment.
 </p>
 
 
-<a href="https://wandb.ai/AgentRL/Open" target="_blank" 
+<a href="https://wandb.ai/AgentRL/Open" target="_blank"
    style="
      display: inline-flex;
      align-items: center;
@@ -83,11 +83,7 @@ Training curves and metrics are logged to WandB for each experiment.
    "
    onmouseover="this.style.background='#e9ecef'; this.style.transform='translateY(-1px)';"
    onmouseout="this.style.background='#f6f8fa'; this.style.transform='none';">
-  <img src="https://wandb.ai/logo.svg" alt="WandB Logo" 
+  <img src="https://wandb.ai/logo.svg" alt="WandB Logo"
        style="height: 20px; margin-right: 8px;" />
   View Training Curves on WandB
 </a>
-
-
-
-

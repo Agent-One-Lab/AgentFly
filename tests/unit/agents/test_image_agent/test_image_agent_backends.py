@@ -3,6 +3,7 @@ from agentfly.agents import ImageEditingAgent
 from agentfly.agents.llm_backends import ClientConfig, AsyncVLLMConfig
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_image_agent_client():
     agent = ImageEditingAgent(
@@ -11,7 +12,7 @@ async def test_image_agent_client():
         backend_config=ClientConfig(
             base_url="http://localhost:8000/v1",
         ),
-        streaming="console"
+        streaming="console",
     )
     messages_list = [
         {
@@ -21,22 +22,19 @@ async def test_image_agent_client():
                     "content": [
                         {
                             "type": "image",
-                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
                         },
                         {
                             "type": "text",
-                            "text": "Find what animal is in the image, then inpaint it with a cat."
-                        }
-                    ]
+                            "text": "Find what animal is in the image, then inpaint it with a cat.",
+                        },
+                    ],
                 }
             ]
         }
     ]
     await agent.run(
-        messages=messages_list,
-        max_turns=4,
-        num_chains=1,
-        enable_streaming=True
+        messages=messages_list, max_turns=4, num_chains=1, enable_streaming=True
     )
     agent.print_messages(index=0)
 
@@ -50,7 +48,7 @@ async def test_image_agent_openai():
             base_url="https://api.openai.com/v1",
             api_key=os.getenv("OPENAI_API_KEY"),
         ),
-        streaming="console"
+        streaming="console",
     )
     messages_list = [
         {
@@ -60,22 +58,19 @@ async def test_image_agent_openai():
                     "content": [
                         {
                             "type": "image",
-                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
                         },
                         {
                             "type": "text",
-                            "text": "Find what animal is in the image, then inpaint it with a cat."
-                        }
-                    ]
+                            "text": "Find what animal is in the image, then inpaint it with a cat.",
+                        },
+                    ],
                 }
             ]
         }
     ]
     await agent.run(
-        messages=messages_list,
-        max_turns=5,
-        num_chains=1,
-        enable_streaming=True
+        messages=messages_list, max_turns=5, num_chains=1, enable_streaming=True
     )
     agent.print_messages(index=0)
 
@@ -87,11 +82,10 @@ async def test_image_agent_async_vllm():
         template="qwen2.5-vl-system-tool",
         backend="async_vllm",
         backend_config=AsyncVLLMConfig(
-            pipeline_parallel_size=4, # Use pp = 4
-            gpu_memory_utilization=0.5
-
+            pipeline_parallel_size=4,  # Use pp = 4
+            gpu_memory_utilization=0.5,
         ),
-        streaming="console"
+        streaming="console",
     )
     messages_list = [
         {
@@ -104,21 +98,18 @@ async def test_image_agent_async_vllm():
                             # "image_url": {
                             #     "url": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
                             # }
-                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
+                            "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
                         },
                         {
                             "type": "text",
-                            "text": "Find what animal is in the image, then inpaint it with a cat."
-                        }
-                    ]
+                            "text": "Find what animal is in the image, then inpaint it with a cat.",
+                        },
+                    ],
                 }
             ]
         }
     ]
     await agent.run(
-        messages=messages_list,
-        max_turns=4,
-        num_chains=1,
-        enable_streaming=True
+        messages=messages_list, max_turns=4, num_chains=1, enable_streaming=True
     )
     agent.print_messages(index=0)

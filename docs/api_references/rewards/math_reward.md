@@ -40,12 +40,12 @@ def math_reward_tool(prediction: str, answer: str, trajectory: List[Dict]) -> di
 
 **Parameters:**
 - **prediction** (str): Agent's predicted answer
-- **answer** (str): Correct mathematical answer  
+- **answer** (str): Correct mathematical answer
 - **trajectory** (List[Dict]): Agent's conversation trajectory
 
 **Returns:**
 dict: Dictionary containing:
-- **reward** (float): 
+- **reward** (float):
     - 0.0 if no tool used
     - 0.1 if tool used but answer incorrect
     - 1.0 if tool used and answer correct
@@ -150,4 +150,3 @@ print(result)  # {"reward": 1.0, "acc": 1.0}
 - Process-based reward for tool usage
 - Training structured reasoning behaviors
 - Multi-step mathematical reasoning assessment
-

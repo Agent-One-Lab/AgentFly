@@ -54,4 +54,3 @@ def structured_tool(query: str, limit: int = 10):
     # Tool implementation
     pass
 ```
-

@@ -98,7 +98,7 @@ This example shows how ALFWorld tools are used with a ReactAgent and LLM (Qwen2.
 ```python
 from agentfly.agents.react.react_agent import ReactAgent
 from agentfly.tools.src.alfworld.tools import (
-    alfworld_step, 
+    alfworld_step,
     alfworld_get_admissible_commands,
     alfworld_get_task_objective
 )
@@ -166,7 +166,6 @@ await react_agent.run_async(
 ### Pool Sizes and Statefulness
 
 * **alfworld_step**: Pool size 8, stateless - For frequent action execution
-* **alfworld_reset**: Pool size 32, stateful - For episode initialization  
+* **alfworld_reset**: Pool size 32, stateful - For episode initialization
 * **alfworld_get_admissible_commands**: Pool size 8, stateless - For state queries
 * **alfworld_get_task_objective**: Pool size 8, stateless - For task information
-

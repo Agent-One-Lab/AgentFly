@@ -12,4 +12,3 @@ Complete API reference for AgentFly components.
 - [Environments](environments/index.md) - Environment implementations
 - [Chat Template](chat_template/index.md) - Chat template system
 - [Training](training/index.md) - Training agents with reinforcement learning
-

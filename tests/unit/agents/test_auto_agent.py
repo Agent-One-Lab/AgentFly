@@ -10,11 +10,11 @@ def test_auto_agent_from_config_react():
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "template": None,
         "tools": ["google_search", "answer"],
-        "backend": "client"
+        "backend": "client",
     }
-    
+
     agent = AutoAgent.from_config(config)
-    
+
     assert isinstance(agent, ReactAgent)
     assert agent.model_name_or_path == "Qwen/Qwen2.5-3B-Instruct"
     assert agent.template is None
@@ -28,11 +28,11 @@ def test_auto_agent_from_config_code():
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "template": None,
         "tools": ["code_interpreter"],
-        "backend": "client"
+        "backend": "client",
     }
-    
+
     agent = AutoAgent.from_config(config)
-    
+
     assert isinstance(agent, CodeAgent)
     assert agent.model_name_or_path == "Qwen/Qwen2.5-3B-Instruct"
     assert len(agent.tools) == 1
@@ -46,10 +46,11 @@ def test_auto_agent_from_pretrained():
         template=None,
         tools=["google_search", "answer"],
         debug=True,
-        backend="client"
+        backend="client",
     )
-    
+
     assert isinstance(agent, ReactAgent)
+
 
 def test_auto_agent_with_reward():
     config = {
@@ -58,11 +59,11 @@ def test_auto_agent_with_reward():
         "template": None,
         "tools": ["google_search", "answer"],
         "reward_name": "qa_f1_reward",
-        "backend": "client"
+        "backend": "client",
     }
-    
+
     agent = AutoAgent.from_config(config)
-    
+
     assert hasattr(agent, "_reward_fn")
     assert agent._reward_fn is not None
 
@@ -73,20 +74,19 @@ def test_auto_agent_invalid_type():
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "template": None,
         "tools": ["google_search", "answer"],
-        "backend": "client"
+        "backend": "client",
     }
-    
+
     with pytest.raises(ValueError):
         AutoAgent.from_config(config)
 
 
 def test_auto_agent_missing_params():
-    
     config = {
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "tools": ["google_search", "answer"],
-        "backend": "client"
+        "backend": "client",
     }
-    
+
     with pytest.raises(ValueError):
         AutoAgent.from_config(config)

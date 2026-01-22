@@ -101,4 +101,3 @@ The system follows a **three-step rendering process**:
 ## Contributing
 
 The template system is designed to be extensible. See [Custom Templates](custom_templates.md) for guidance on adding new template types and processors.
-

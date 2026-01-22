@@ -357,7 +357,7 @@ async def main():
         ),
         streaming="console"
     )
-    
+
     # Option 2: Local Server
     # agent = ImageEditingAgent(
     #     model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
@@ -367,7 +367,7 @@ async def main():
     #     ),
     #     streaming="console"
     # )
-    
+
     # Option 3: OpenAI
     # agent = ImageEditingAgent(
     #     model_name_or_path="gpt-4o-mini",
@@ -398,14 +398,14 @@ async def main():
             ]
         }
     ]
-    
+
     await agent.run(
         messages=messages_list,
         max_turns=4,
         num_chains=1,
         enable_streaming=True
     )
-    
+
     agent.print_messages(index=0)
 
 if __name__ == "__main__":

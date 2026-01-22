@@ -202,12 +202,12 @@ https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
 If you used our code or find it helpful, please cite:
 ```
 @misc{wang2025agentfly,
-      title={AgentFly: Extensible and Scalable Reinforcement Learning for LM Agents}, 
+      title={AgentFly: Extensible and Scalable Reinforcement Learning for LM Agents},
       author={Renxi Wang and Rifo Ahmad Genadi and Bilal El Bouardi and Yongxin Wang and Fajri Koto and Zhengzhong Liu and Timothy Baldwin and Haonan Li},
       year={2025},
       eprint={2507.14897},
       archivePrefix={arXiv},
       primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2507.14897}, 
+      url={https://arxiv.org/abs/2507.14897},
 }
 ```

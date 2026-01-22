@@ -20,26 +20,18 @@ async def test_code_agent_end_to_end():
     answer2 = "3"
     messages = [
         {
-            "messages": [
-                {"role": "user", "content": f"{question1}"}
-            ],
+            "messages": [{"role": "user", "content": f"{question1}"}],
             "question": f"{question1}",
-            "answer": f"{answer1}"
+            "answer": f"{answer1}",
         },
         {
-            "messages": [
-                {"role": "user", "content": f"{question2}"}
-            ],
+            "messages": [{"role": "user", "content": f"{question2}"}],
             "question": f"{question2}",
-            "answer": f"{answer2}"
-        }
+            "answer": f"{answer2}",
+        },
     ]
 
-    await agent.run(
-        max_turns=4,
-        messages=messages,
-        num_chains=2
-    )
+    await agent.run(max_turns=4, messages=messages, num_chains=2)
 
     messages = agent.get_messages()
     print(messages)

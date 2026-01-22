@@ -51,7 +51,7 @@ for ((i = 1; i < worker_num; i++)); do
     echo "Starting WORKER $i at $node_i"
     srun --nodes=1 --ntasks=1 -w "$node_i" --export=ALL \
         ${CONDA_BIN_PATH}ray start --address "$address_head" \
-        --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --block &    
+        --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --block &
 done
 sleep 10
 

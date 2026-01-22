@@ -1,12 +1,13 @@
 from agentfly.tools import scienceworld_explorer
 import pytest
-import asyncio
+
 
 @pytest.mark.asyncio
 async def test_science_world_explorer():
-    result = await scienceworld_explorer(action='look around', id='testlook')
-    assert result['status'] == 'success'
-    await scienceworld_explorer.release(id='testlook')
+    result = await scienceworld_explorer(action="look around", id="testlook")
+    assert result["status"] == "success"
+    await scienceworld_explorer.release(id="testlook")
+
 
 # @pytest.mark.asyncio
 # async def test_pool_async_calls():

@@ -1,14 +1,14 @@
 from agentfly.tools import tool
-from agentfly.envs import PythonSandboxEnv
-import pytest
+
 
 def test_base_tool():
     @tool(name="test_tool", description="test tool")
     def test_tool(name="test_tool"):
         return "test"
-    
+
     assert test_tool.name == "test_tool"
     print(test_tool.schema)
+
 
 # @pytest.mark.asyncio(loop_scope="session")
 # async def test_stateful_tool():
@@ -17,7 +17,7 @@ def test_base_tool():
 #         env = current_env.get()
 #         obs = await env.step(code)
 #         return obs
-    
+
 #     assert test_tool.name == "test_tool"
 #     print(test_tool.schema)
 

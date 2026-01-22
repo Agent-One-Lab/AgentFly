@@ -48,12 +48,12 @@ def math_reward_string_equal(prediction: str, answer: str, trajectory: List[Dict
     for msg in trajectory:
         if msg["role"] == "tool":
             tool_count += 1
-    
+
     if tool_count < 1:
         return 0.0
     else:
         prediction = extract_last_number(prediction)
-        
+
         if prediction == answer:
             return 1.0
         else:
@@ -97,4 +97,3 @@ rewards = agent.rewards
 print(trajectories)
 print(rewards)
 ```
-

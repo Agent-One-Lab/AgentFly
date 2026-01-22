@@ -75,4 +75,3 @@ The ALFWorldEnv class accepts the following configuration parameters:
 * **host_ip**: Host IP for port mapping (default: ``127.0.0.1``)
 * **container_port**: Container internal port (default: ``8000``)
 * **start_timeout**: Startup timeout in seconds (default: ``120.0``)
-

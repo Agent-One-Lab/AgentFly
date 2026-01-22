@@ -94,4 +94,3 @@ The server can be configured using environment variables:
 * **ALFWORLD_CONFIG**: Path to ALFWorld config file (default: ``/srv/base_config.yaml``)
 * **TRAIN_EVAL**: Default data split (default: ``train``)
 * **BATCH_SIZE**: Batch size for ALFWorld environment (default: ``1``)
-

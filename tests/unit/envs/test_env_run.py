@@ -2,7 +2,6 @@ import asyncio
 import time
 from agentfly.envs import PythonSandboxEnv
 import pytest
-import requests
 
 
 # @pytest.fixture
@@ -25,14 +24,14 @@ async def test_python_sandbox_env():
     await env.aclose()
 
 
-
 N_REQUESTS = 1_00
+
 
 @pytest.mark.asyncio
 async def test_python_sandbox_env_concurrent_requests():
     # Record time
     start_time = time.time()
-    env = PythonSandboxEnv(max_episodes=2)   # only one reset needed
+    env = PythonSandboxEnv(max_episodes=2)  # only one reset needed
     await env.start()
     await env.reset()
 
@@ -51,6 +50,7 @@ async def test_python_sandbox_env_concurrent_requests():
 
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")
+
 
 # N_ENVS       = 1000     # total environments you want to exercise
 # MAX_PARALLEL = 32    # how many containers may run at the same time

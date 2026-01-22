@@ -1,5 +1,3 @@
-import asyncio
-import time
 from agentfly.tools import CodeInterpreterTool
 import pytest
 

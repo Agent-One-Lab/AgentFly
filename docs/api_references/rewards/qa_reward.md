@@ -66,7 +66,7 @@ dict: Dictionary containing:
 
 **F1 Score Calculation:**
 - Token-based overlap between prediction and ground truth
-- Precision = common_tokens / prediction_tokens  
+- Precision = common_tokens / prediction_tokens
 - Recall = common_tokens / ground_truth_tokens
 - F1 = 2 * (precision * recall) / (precision + recall)
 
@@ -114,4 +114,3 @@ print(result)
 - **Exact Match**: Strict evaluation requiring perfect answers
 - **Precision**: Relevance of prediction tokens
 - **Recall**: Coverage of ground truth tokens
-

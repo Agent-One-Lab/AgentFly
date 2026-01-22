@@ -79,7 +79,7 @@ class CustomToolFormatter(ToolFormatter):
                 formatted += f"Parameters: {func['parameters']}\n"
                 formatted_tools.append(formatted)
         return "\n---\n".join(formatted_tools)
-    
+
     def jinja(self):
         """Jinja template for custom formatting"""
         return """{% for tool in tools %}
@@ -105,21 +105,21 @@ from agentfly.templates.tool_policy import ToolContentProcessor
 
 class ToolFilterProcessor(ToolContentProcessor):
     """Filter tools based on certain criteria"""
-    
+
     def __init__(self, allowed_categories=None):
         self.allowed_categories = allowed_categories or []
-    
+
     def __call__(self, tool):
         """Filter tool based on category"""
         if not self.allowed_categories:
             return tool
-        
+
         # Check if tool has category and it's allowed
         tool_category = tool.get("category", "general")
         if tool_category in self.allowed_categories:
             return tool
         return None
-    
+
     def jinja(self):
         """Jinja template for filtering"""
         return "{{ tool if tool.category in ['allowed_category1', 'allowed_category2'] else none }}"
@@ -187,15 +187,15 @@ from agentfly.templates.system_policy import SystemContentProcessor
 
 class EnvironmentAwareProcessor(SystemContentProcessor):
     """Add environment information to system messages"""
-    
+
     def __init__(self, environment="production"):
         self.environment = environment
-    
+
     def __call__(self, system_message):
         """Add environment context"""
         env_info = f"[Environment: {self.environment}]"
         return f"{env_info}\n{system_message}"
-    
+
     def jinja(self):
         """Jinja template for environment awareness"""
         return """[Environment: {{ environment | default('production') }}]
@@ -264,21 +264,21 @@ conditional_template = Template(
 ```python
 def create_dynamic_template(base_name, capabilities):
     """Create template based on capabilities"""
-    
+
     # Base templates
     system_base = "You are a helpful assistant."
     user_base = "User: {content}"
     assistant_base = "Assistant: {content}"
-    
+
     # Add tool support if needed
     if "tools" in capabilities:
         system_base += "\n\nYou have access to tools: {tools}"
         user_base += "\n\nAvailable tools: {tools}"
-    
+
     # Add vision support if needed
     if "vision" in capabilities:
         system_base += "\n\nYou can process images and videos."
-    
+
     return Template(
         name=f"{base_name}-{'-'.join(capabilities)}",
         system_template=system_base,
@@ -352,12 +352,12 @@ specialized_template = Template(
 ```python
 class ToolValidator:
     """Validate tool definitions"""
-    
+
     @staticmethod
     def validate_tool(tool):
         """Validate a single tool"""
         required_fields = ["function", "name", "parameters"]
-        
+
         if "function" in tool:
             func = tool["function"]
             for field in required_fields:
@@ -367,7 +367,7 @@ class ToolValidator:
             for field in required_fields:
                 if field not in tool:
                     raise ValueError(f"Missing required field: {field}")
-        
+
         return tool
 
 # Use validator in tool policy
