@@ -1,8 +1,7 @@
 import traceback
 
-from ...decorator import tool
-
 from ....envs.scienceworld_env import ScienceWorldEnv
+from ...decorator import tool
 
 
 @tool(

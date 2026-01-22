@@ -1,8 +1,7 @@
 import traceback
 
-from ...decorator import tool
-
 from ....envs.webshop_text_env import WebAgentTextEnv
+from ...decorator import tool
 
 END_BUTTON = "Buy Now"
 NEXT_PAGE = "Next >"

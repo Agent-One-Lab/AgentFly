@@ -1,6 +1,7 @@
 import asyncio
-from .warm_pool import WarmPool
 from typing import TYPE_CHECKING
+
+from .warm_pool import WarmPool
 
 if TYPE_CHECKING:
     from ..env_base import BaseEnv

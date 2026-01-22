@@ -1,8 +1,10 @@
-import subprocess
-import redis
-import socket
 import asyncio
 import os
+import socket
+import subprocess
+
+import redis
+
 from .env_base import BaseEnv
 
 global_redis_env = None

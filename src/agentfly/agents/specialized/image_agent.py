@@ -1,15 +1,17 @@
+import json
 import logging
 import random
 import re
-
-from ..utils.json import jsonish
-from ..agent_base import BaseAgent
 from typing import Dict, List
-import json
-from PIL import Image
-from ...tools import tool
-from ...utils.vision import image_to_data_uri, image_to_pil, open_image_from_any
+
 import torch
+from PIL import Image
+
+from ...tools import tool
+from ...utils.vision import (image_to_data_uri, image_to_pil,
+                             open_image_from_any)
+from ..agent_base import BaseAgent
+from ..utils.json import jsonish
 
 logger = logging.getLogger(__name__)
 

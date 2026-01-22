@@ -8,22 +8,14 @@ import inspect
 import math
 import urllib.parse
 import urllib.request
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from io import BytesIO
-from typing import (
-    TYPE_CHECKING,
-    BinaryIO,
-    Literal,
-    Optional,
-    TypedDict,
-    Union,
-    List,
-    Dict,
-    Any,
-)
-from abc import ABC, abstractmethod
+from typing import (TYPE_CHECKING, Any, BinaryIO, Dict, List, Literal,
+                    Optional, TypedDict, Union)
 
 import numpy as np
+import PIL
 import torch
 from PIL.Image import Image as ImageObject
 from transformers.image_utils import get_image_size, to_numpy_array
@@ -266,7 +258,6 @@ class PatchBasedProcessor(VisionProcessor):
 
     def _load_image_from_input(self, image_input) -> "ImageObject":
         """Load image from various input formats including URL and base64"""
-        from PIL import Image
 
         # Handle PIL Image objects directly
         if hasattr(image_input, "width") and hasattr(image_input, "height"):
@@ -279,7 +270,7 @@ class PatchBasedProcessor(VisionProcessor):
                 try:
                     with urllib.request.urlopen(image_input) as response:
                         image_data = response.read()
-                    return Image.open(BytesIO(image_data))
+                    return PIL.Image.open(BytesIO(image_data))
                 except Exception as e:
                     raise ValueError(
                         f"Failed to load image from URL {image_input}: {e}"
@@ -294,7 +285,7 @@ class PatchBasedProcessor(VisionProcessor):
                     # Extract the base64 part after the comma
                     base64_data = image_input.split(",", 1)[1]
                     image_data = base64.b64decode(base64_data)
-                    return Image.open(BytesIO(image_data))
+                    return PIL.Image.open(BytesIO(image_data))
                 except Exception as e:
                     raise ValueError(f"Failed to decode base64 image: {e}")
 
@@ -302,29 +293,29 @@ class PatchBasedProcessor(VisionProcessor):
                 # Likely a raw base64 string (common for PNG images starting with iVBORw0KGgo)
                 try:
                     image_data = base64.b64decode(image_input)
-                    return Image.open(BytesIO(image_data))
+                    return PIL.Image.open(BytesIO(image_data))
                 except Exception as e:
                     raise ValueError(f"Failed to decode base64 image: {e}")
 
             # Assume it's a file path
             else:
                 print(f"Loading image from file path: {image_input}")
-                return Image.open(image_input)
+                return PIL.Image.open(image_input)
 
         # Handle bytes
         elif isinstance(image_input, bytes):
-            return Image.open(BytesIO(image_input))
+            return PIL.Image.open(BytesIO(image_input))
 
         # Handle file-like objects
         elif hasattr(image_input, "read"):
-            return Image.open(image_input)
+            return PIL.Image.open(image_input)
 
         # Handle dict format
         elif isinstance(image_input, dict):
             if image_input.get("bytes") is not None:
-                return Image.open(BytesIO(image_input["bytes"]))
+                return PIL.Image.open(BytesIO(image_input["bytes"]))
             elif image_input.get("path") is not None:
-                return Image.open(image_input["path"])
+                return PIL.Image.open(image_input["path"])
             else:
                 raise ValueError("Invalid image dict format")
 

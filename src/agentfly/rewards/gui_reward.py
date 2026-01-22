@@ -1,14 +1,15 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
+import ast
+import json
 import logging
 import re
-import json
-import ast
 from typing import Dict, List, Tuple
 
+from ..utils.ui_action_parser import (IMAGE_FACTOR,
+                                      parse_action_to_structure_output)
 from .reward_base import reward
-from ..utils.ui_action_parser import parse_action_to_structure_output, IMAGE_FACTOR
 
 logger = logging.getLogger(__name__)
 

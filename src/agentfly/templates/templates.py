@@ -1,23 +1,21 @@
-from collections import defaultdict
-from copy import deepcopy
 import dataclasses
 import json
-from typing import List, Any, Dict, Union, Tuple
 import logging
+from collections import defaultdict
+from copy import deepcopy
+from typing import Any, Dict, List, Tuple, Union
+
 import torch
 from transformers import PreTrainedTokenizer
+
 from ..utils.vision import open_image_from_any
-from .vision_processor import is_vision_template
-from .tool_policy import (
-    JsonCompactFormatter,
-    JsonIndentedFormatter,
-    ToolMainContentProcessor,
-)
-from .system_policy import Llama32DateProcessor, SystemPolicy
 from .assistant_policy import AssistantPolicy, Qwen25AssistantContentProcessor
-from .tool_policy import ToolPolicy
-from .constants import ToolPlacement, Role
+from .constants import Role, ToolPlacement
 from .global_policy import GlobalPolicy
+from .system_policy import Llama32DateProcessor, SystemPolicy
+from .tool_policy import (JsonCompactFormatter, JsonIndentedFormatter,
+                          ToolMainContentProcessor, ToolPolicy)
+from .vision_processor import is_vision_template
 
 logger = logging.getLogger(__name__)
 
@@ -687,8 +685,8 @@ class Template:
             f"[Template] Encoding with vision processor for template: {self.name}"
         )
         """Encode with vision processor handling proper alignment"""
-        from .vision_processor import get_processor
         from .utils import extract_vision_inputs_from_messages
+        from .vision_processor import get_processor
 
         # Get vision processor
         vision_processor = get_processor(self.name)

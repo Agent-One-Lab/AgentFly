@@ -1,7 +1,8 @@
 import json
-from typing import Any, List, Tuple
-from ..agent_base import BaseAgent
 import re
+from typing import Any, List, Tuple
+
+from ..agent_base import BaseAgent
 
 
 def extract_python_code_markdown(text):

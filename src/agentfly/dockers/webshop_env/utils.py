@@ -2,7 +2,8 @@ import bisect
 import hashlib
 import logging
 import random
-from os.path import dirname, abspath, join
+from os.path import abspath, dirname, join
+
 from bs4 import BeautifulSoup
 
 BASE_DIR = dirname(abspath(__file__))

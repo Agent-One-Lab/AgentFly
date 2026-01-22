@@ -24,19 +24,21 @@ Implementation notes
 """
 
 from __future__ import annotations
+
 import asyncio
 import os
 import pathlib
 import shlex
 import shutil
+import socket
 import subprocess
 import time
 import uuid
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional
-from ... import ENROOT_HOME, ENROOT_DEBUG
-import socket
+from typing import Any, Dict, List, Optional
+
+from ... import ENROOT_DEBUG, ENROOT_HOME
 
 
 def _allocate_free_port() -> str:

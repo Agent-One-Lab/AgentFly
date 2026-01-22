@@ -1,25 +1,19 @@
 import json
-from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from ast import literal_eval
-import string
-
 import logging
 import os
-from utils import init_basedir, get_file_path, get_base_dir
-from goal import get_goals, get_reward
 import random
-from engine import (
-    load_products,
-    init_search_engine,
-    get_top_n_product_from_keywords,
-    map_action_to_html,
-    get_product_per_page,
-    convert_web_app_string_to_var,
-    END_BUTTON,
-)
-from fastapi.responses import RedirectResponse, FileResponse, JSONResponse
+import string
+from ast import literal_eval
+
+from engine import (END_BUTTON, convert_web_app_string_to_var,
+                    get_product_per_page, get_top_n_product_from_keywords,
+                    init_search_engine, load_products, map_action_to_html)
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from goal import get_goals, get_reward
+from utils import get_base_dir, get_file_path, init_basedir
 
 logger = logging.getLogger(__name__)
 app = FastAPI()

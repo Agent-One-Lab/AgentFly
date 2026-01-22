@@ -1,9 +1,11 @@
 import os
-from .faiss_indexer import Indexer
+
 import datasets
-from transformers import AutoTokenizer, AutoModel
 from torch import Tensor
+from transformers import AutoModel, AutoTokenizer
+
 from ...decorator import tool
+from .faiss_indexer import Indexer
 
 
 def load_corpus(corpus_path: str):

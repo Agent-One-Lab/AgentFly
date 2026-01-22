@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Coroutine, Any
+from typing import Any, Coroutine
 
 # ---------- one global background loop ----------
 _loop_holder = {"loop": None, "thread": None}

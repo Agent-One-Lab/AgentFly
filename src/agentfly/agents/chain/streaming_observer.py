@@ -1,12 +1,13 @@
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, AsyncGenerator, Set
 from enum import Enum
-import time
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+
 from termcolor import colored
-from .utils.vision import open_image_from_any
-from ...utils.vision import display_image
+
+from ...utils.vision import display_image, open_image_from_any
 
 
 class StreamEventType(Enum):

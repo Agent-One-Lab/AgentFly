@@ -1,7 +1,7 @@
-import re
 import inspect
-from copy import deepcopy
 import logging
+import re
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 

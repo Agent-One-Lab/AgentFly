@@ -1,13 +1,14 @@
 from typing import Any, Callable, Dict, List, Optional, Type
-from .specialized.think_agent import ThinkAgent
-from .specialized.openai_agent import OpenAIAgent
+
+from ..rewards.reward_base import get_reward_from_name
 from ..tools import get_tools_from_names
 from .agent_base import BaseAgent
 from .react.react_agent import ReactAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
 from .specialized.hf_agent import HFAgent
-from ..rewards.reward_base import get_reward_from_name
+from .specialized.openai_agent import OpenAIAgent
+from .specialized.think_agent import ThinkAgent
 
 
 class AutoAgent:

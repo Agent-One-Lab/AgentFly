@@ -1,6 +1,9 @@
 from __future__ import annotations
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Union
+
 from copy import deepcopy
+from typing import (Any, Dict, Iterable, List, Mapping, MutableMapping,
+                    Sequence, Union)
+
 import numpy as np
 
 Part = Dict[

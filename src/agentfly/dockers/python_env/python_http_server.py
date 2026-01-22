@@ -3,9 +3,10 @@ import asyncio
 import os
 import signal
 import sys
+from subprocess import PIPE
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from subprocess import PIPE
 
 MAX_WALL = 10  # wall-clock seconds per snippet
 CHILD_MEM = 1 * 2**30  # 1 GiB  (match cgroup limit outside!)

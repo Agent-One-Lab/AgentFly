@@ -1,10 +1,11 @@
 import json
-from typing import Dict, List, Optional
-from ...tools import BaseTool
-from ..parsers import extract_tool_calls
-from ..agent_base import BaseAgent
-import re
 import logging
+import re
+from typing import Dict, List, Optional
+
+from ...tools import BaseTool
+from ..agent_base import BaseAgent
+from ..parsers import extract_tool_calls
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

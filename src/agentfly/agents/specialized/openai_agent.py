@@ -1,11 +1,13 @@
-from typing import Any, Dict, List, Union
-from openai import OpenAI
 import asyncio
+import json
+from typing import Any, Dict, List, Union
+
+from openai import OpenAI
+
 from ...tools import answer_qa
 from ...tools.decorator import tool
 from ..agent_base import BaseAgent
 from ..llm_backends.backend_configs import ClientConfig
-import json
 
 
 class OpenAIAgent(BaseAgent):

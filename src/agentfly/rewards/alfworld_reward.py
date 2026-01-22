@@ -1,6 +1,7 @@
+from typing import Any, Dict
+
 from ..envs.alfworld_env import ALFWorldEnv
 from .reward_base import reward
-from typing import Dict, Any
 
 
 @reward(

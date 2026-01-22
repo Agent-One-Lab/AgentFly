@@ -1,6 +1,7 @@
-from typing import Optional
-from ..agent_base import BaseAgent
 import logging
+from typing import Optional
+
+from ..agent_base import BaseAgent
 
 logger = logging.getLogger(__file__)
 

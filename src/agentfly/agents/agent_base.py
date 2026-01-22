@@ -1,32 +1,30 @@
+import inspect
+import json
+import logging
+import os
 from abc import ABC
 from collections import defaultdict
-import inspect
 from datetime import datetime
-import json
-from ..tools.tool_base import BaseTool
-from .utils.messages import MessagesList
-from ..templates.templates import get_template
-from .llm_backends import (
-    AsyncVLLMBackend,
-    AsyncVerlBackend,
-    ClientBackend,
-    TransformersBackend,
-)
-from termcolor import colored
-from .llm_backends.backend_configs import BACKEND_CONFIGS
 from typing import Any, Callable, Dict, List, Optional, Union
+
 import numpy as np
 import torch
+from termcolor import colored
+
 from ..templates import tokenize_conversations
-from .chain.chain_base import ChainRollout
-import os
-import logging
-from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
-from .utils.tokenizer import create_processor, create_tokenizer
+from ..templates.templates import get_template
+from ..tools.tool_base import BaseTool
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
+from .chain.chain_base import ChainRollout
+from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
+from .llm_backends import (AsyncVerlBackend, AsyncVLLMBackend, ClientBackend,
+                           TransformersBackend)
+from .llm_backends.backend_configs import BACKEND_CONFIGS
+from .utils.messages import MessagesList
+from .utils.tokenizer import create_processor, create_tokenizer
 
 try:
-    from .verl.protocol import DataProto
+    from ..verl.protocol import DataProto
 except ImportError:
     print("verl can not be imported.")
     pass

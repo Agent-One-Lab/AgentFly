@@ -1,6 +1,6 @@
 from typing import List
-from ..tool_base import BaseTool
 
+from ..tool_base import BaseTool
 
 TOOL_REGISTRY = {}
 

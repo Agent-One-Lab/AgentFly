@@ -3,9 +3,11 @@
 
 import json
 import logging
-from typing import List, Any, Dict
+from typing import Any, Dict, List
+
+from ...utils.ui_action_parser import (IMAGE_FACTOR,
+                                       parse_action_to_structure_output)
 from ..agent_base import BaseAgent
-from ...utils.ui_action_parser import parse_action_to_structure_output, IMAGE_FACTOR
 
 logger = logging.getLogger(__name__)
 

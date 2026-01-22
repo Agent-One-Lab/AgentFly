@@ -1,7 +1,8 @@
 import gzip
 import os
-from huggingface_hub import hf_hub_download
 import shutil
+
+from huggingface_hub import hf_hub_download
 
 
 def download_tool_data(tool_name: str):

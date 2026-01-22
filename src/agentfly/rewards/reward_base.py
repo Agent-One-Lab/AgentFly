@@ -1,8 +1,9 @@
 import asyncio
 import inspect
-from typing import List, Optional, Callable
-from ..envs.manager.env_manager import EnvironmentManager
+from typing import Callable, List, Optional
+
 from ..envs.env_base import BaseEnv
+from ..envs.manager.env_manager import EnvironmentManager
 
 # Global reward registry
 REWARD_REGISTRY = {}

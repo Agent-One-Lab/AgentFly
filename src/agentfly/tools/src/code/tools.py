@@ -1,6 +1,7 @@
 import json
-import requests
 import traceback
+
+import requests
 
 from ....envs.python_env import PythonSandboxEnv
 from ...decorator import tool

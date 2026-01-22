@@ -1,8 +1,10 @@
 import asyncio
 import time
-import httpx
-from .env_base import BaseEnv, SupportsDocker
 from typing import Union
+
+import httpx
+
+from .env_base import BaseEnv, SupportsDocker
 
 
 class ScienceWorldEnv(BaseEnv, SupportsDocker):

@@ -2,13 +2,15 @@
 This module is used to collect trajectories from the agent.
 """
 
-from typing import Dict, List
 import asyncio
 import json
 import os
-from ..agents.llm_backends.backend_configs import ClientConfig
-from ..agents import HFAgent
+from typing import Dict, List
+
 import click
+
+from ..agents import HFAgent
+from ..agents.llm_backends.backend_configs import ClientConfig
 
 
 def gather_responses(trajectories: List[Dict]):

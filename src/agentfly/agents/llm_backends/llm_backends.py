@@ -5,25 +5,27 @@ This module provides a unified interface to different LLM implementations.
 
 import asyncio
 import copy
-from functools import partial
-from typing import Dict, List, Optional, Callable, AsyncGenerator
+import logging
 import uuid
+from functools import partial
+from typing import AsyncGenerator, Callable, Dict, List, Optional
+
 import numpy as np
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from ...utils.vision import image_to_data_uri
-from vllm import AsyncLLMEngine, SamplingParams, AsyncEngineArgs
 import openai
+import PIL
+import torch
 from google import genai
 from google.genai import types
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
+
 from ...templates import Chat
-import logging
-import PIL
+from ...utils.vision import image_to_data_uri
 
 logger = logging.getLogger(__name__)
 
 try:
-    from .verl.protocol import DataProto
+    from ...verl.protocol import DataProto
 except ImportError:
     print("verl can not be imported.")
     pass
@@ -560,8 +562,9 @@ class ClientBackend(LLMBackend):
 
     def _blocking_call_gemini(self, messages: List[Dict], **kwargs) -> Dict:
         """Make a blocking call to Gemini API with full response preservation."""
-        from google.genai import types
         import json
+
+        from google.genai import types
 
         system_instruction, contents = self._prepare_gemini_payload(messages)
 

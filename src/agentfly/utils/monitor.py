@@ -13,17 +13,19 @@ coupling and lets you toggle sinks at runtime.
 
 import abc
 import asyncio
+import base64
 import contextlib
+import io
 import json
 import os
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
-import wandb
-from PIL import Image
-import io
-import base64
+
 import numpy as np
+from PIL import Image
+
+import wandb
 
 
 @dataclass(slots=True)

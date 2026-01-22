@@ -1,10 +1,11 @@
 import itertools
 import random
-import spacy
 from collections import defaultdict
+
+import spacy
+from normalize import normalize_color
 from rich import print
 from thefuzz import fuzz
-from normalize import normalize_color
 
 nlp = spacy.load("en_core_web_sm")
 

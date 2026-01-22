@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from ...decorator import tool
+
 from ....utils.ui_action_parser import parsing_response_to_pyautogui_code
+from ...decorator import tool
 
 # Default image dimensions for UI interactions
 DEFAULT_IMAGE_HEIGHT = 1080
@@ -73,9 +74,10 @@ def capture_screenshot(**kwargs) -> str:
         Base64 encoded screenshot or error message
     """
     try:
-        import pyautogui
         import base64
         from io import BytesIO
+
+        import pyautogui
 
         # Take screenshot
         screenshot = pyautogui.screenshot()

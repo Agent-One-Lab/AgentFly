@@ -1,20 +1,22 @@
-import os
 import asyncio
+import hashlib
+import multiprocessing
+import os
+import pickle
+import threading
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-import multiprocessing
-import hashlib
-import pickle
-from collections import deque
-from torch import Tensor
-import torch
-from torch.quantization import quantize_dynamic
+
 import datasets
-from transformers import AutoTokenizer, AutoModel
-from .faiss_indexer import Indexer
-from ...decorator import tool
 import numpy as np
-import threading
+import torch
+from torch import Tensor
+from torch.quantization import quantize_dynamic
+from transformers import AutoModel, AutoTokenizer
+
+from ...decorator import tool
+from .faiss_indexer import Indexer
 
 """
 This module provides a high-performance, asynchronous dense retriever for document retrieval tasks.

@@ -1,21 +1,20 @@
 """ """
 
-import os
-import re
 import json
+import os
 import random
-from collections import defaultdict
+import re
 from ast import literal_eval
+from collections import defaultdict
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
-from tqdm import tqdm
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
-from rich import print
 from pyserini.search.lucene import LuceneSearcher
-
-from utils import get_base_dir, get_attr_path, get_human_attr_path
+from rich import print
+from tqdm import tqdm
+from utils import get_attr_path, get_base_dir, get_human_attr_path
 
 app = FastAPI()
 

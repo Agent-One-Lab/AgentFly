@@ -1,10 +1,11 @@
-from pathlib import Path
-from urllib.parse import urlparse
 import base64
 import io
-from PIL import Image
-import requests
+from pathlib import Path
 from typing import Union
+from urllib.parse import urlparse
+
+import requests
+from PIL import Image
 
 
 def open_image_from_any(src: str, *, timeout: int = 10) -> Image.Image:

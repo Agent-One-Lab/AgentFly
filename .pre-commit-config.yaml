@@ -10,10 +10,15 @@ repos:
       - id: check-yaml               # Validates your YAML files
       - id: check-added-large-files  # Prevents accidentally committing giant files
 
-  # 2. Ruff (Replaces Black, Flake8, Isort)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.13
     hooks:
       - id: ruff
         args: [ --fix ]             # Automatically fix linting errors
       - id: ruff-format             # Formats the code like Black
+
+  - repo: https://github.com/pycqa/isort
+    rev: 6.0.1
+    hooks:
+      - id: isort
+        args: ["src"]

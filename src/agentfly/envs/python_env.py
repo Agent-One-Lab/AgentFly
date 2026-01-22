@@ -1,7 +1,9 @@
 import asyncio
 import time
-import httpx
 from typing import Mapping, Tuple
+
+import httpx
+
 from .env_base import BaseEnv, SupportsDocker
 
 

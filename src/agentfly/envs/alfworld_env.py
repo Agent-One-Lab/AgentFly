@@ -1,8 +1,10 @@
 import asyncio
 import time
-from typing import Any, Tuple, Dict, List, Optional
-from .env_base import BaseEnv, SupportsDocker
+from typing import Any, Dict, List, Optional, Tuple
+
 import httpx
+
+from .env_base import BaseEnv, SupportsDocker
 
 
 class ALFWorldEnv(BaseEnv, SupportsDocker):

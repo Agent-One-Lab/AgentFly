@@ -1,5 +1,6 @@
+from sympy import Rational, simplify, sympify
+
 from ...decorator import tool
-from sympy import simplify, sympify, Rational
 
 
 @tool(

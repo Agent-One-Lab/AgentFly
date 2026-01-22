@@ -5,10 +5,12 @@ This module provides a WebSocket server that can stream agent events to web clie
 
 import asyncio
 import json
-import websockets
-from typing import Set, Optional, Callable
-from .streaming_observer import StreamObserver, StreamEvent
 import logging
+from typing import Callable, Optional, Set
+
+import websockets
+
+from .streaming_observer import StreamEvent, StreamObserver
 
 logger = logging.getLogger(__name__)
 

@@ -1,22 +1,25 @@
 import asyncio
-from collections import defaultdict
-from dataclasses import dataclass, field
-import json
-import time
-from ...utils.vision import image_to_data_uri
-from ..utils.messages import MessagesList, Messages
-from ...utils.timing import Timer
-from typing import Any, Dict, List, Optional, Tuple
-import uuid
-from termcolor import colored
-from copy import deepcopy
-from ...tools.tool_base import submit_tool_call
-from tqdm.asyncio import tqdm_asyncio
-import sys
 import inspect
-from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
-from .streaming_observer import ConsoleStreamObserver, StreamEvent, StreamEventType
+import json
 import logging
+import sys
+import time
+import uuid
+from collections import defaultdict
+from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+from termcolor import colored
+from tqdm.asyncio import tqdm_asyncio
+
+from ...tools.tool_base import submit_tool_call
+from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
+from ...utils.timing import Timer
+from ...utils.vision import image_to_data_uri
+from ..utils.messages import Messages, MessagesList
+from .streaming_observer import (ConsoleStreamObserver, StreamEvent,
+                                 StreamEventType)
 
 logger = logging.getLogger(__name__)
 

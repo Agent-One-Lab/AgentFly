@@ -1,5 +1,6 @@
-from ..reward_base import reward
 from typing import Dict
+
+from ..reward_base import reward
 
 
 @reward(name="llm_as_judge_reward")

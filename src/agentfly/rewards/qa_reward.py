@@ -1,7 +1,8 @@
 import re
 import string
 from collections import Counter
-from typing import List, Dict, Union
+from typing import Dict, List, Union
+
 from .reward_base import reward
 
 

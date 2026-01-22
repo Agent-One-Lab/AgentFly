@@ -1,5 +1,5 @@
-from abc import ABC, abstractmethod
 import dataclasses
+from abc import ABC, abstractmethod
 from typing import Callable
 
 

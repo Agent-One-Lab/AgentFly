@@ -1,8 +1,10 @@
-import torch
-import re
 import logging
-from .templates import Chat, get_template
+import re
 from typing import Any
+
+import torch
+
+from .templates import Chat, get_template
 from .vision_processor import get_processor
 
 LOGGER = logging.getLogger(__name__)

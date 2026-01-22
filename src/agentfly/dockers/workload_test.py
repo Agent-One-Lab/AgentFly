@@ -1,7 +1,8 @@
-import requests
-import logging
 import concurrent.futures
+import logging
 import time
+
+import requests
 
 logger = logging.getLogger(__name__)
 
