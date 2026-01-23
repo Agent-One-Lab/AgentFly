@@ -70,6 +70,7 @@ async def chess_puzzle_reward(prediction: str, env: ChessPuzzleEnv) -> Dict[str,
         # Evaluate each move made
         # We need to replay from the starting position
         import chess
+
         temp_board = chess.Board(env._puzzle_fen)
 
         # Apply setup move if it was made
