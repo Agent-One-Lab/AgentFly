@@ -88,7 +88,7 @@ prompt = chat.prompt(tools=tools)
 # Chat with image content
 messages_with_image = [
     {
-        "role": "user", 
+        "role": "user",
         "content": [
             {"type": "text", "text": "What's in this image?"},
             {"type": "image", "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"}

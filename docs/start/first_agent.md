@@ -13,7 +13,7 @@ agent = HFAgent(
 )
 ```
 
-Then, we can use the agent to do the task for us (or, say "rollout" in reinforcement learning scenario). Our framework is designed to be asynchronous, so we need to use `await`.
+Then, we can use the agent to do the task (or, say *rollout* in reinforcement learning scenario). The main interface is `run` method, which is fully asynchronous. You may use `asyncio.run` or `await` for the method.
 
 ```python
 messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]
@@ -35,14 +35,14 @@ It is in ShareGPT/OpenAI's input messages, and will look like something to this:
 {
     'messages': [
         {
-            'role': 'user', 
+            'role': 'user',
             'content': [{'type': 'text', 'text': 'What is the result of 1 + 1?'}]
-        }, 
+        },
         {
             'role': 'assistant',
             'content': [
                 {'type': 'text', 'text': '<tool_call>\n{"name": "calculator", "arguments": {"expression": "1 + 1"}}\n</tool_call>'}
-            ], 
+            ],
             'tool_calls': [
                     {
                         'id': None, 'type': 'function',
@@ -60,9 +60,9 @@ It is in ShareGPT/OpenAI's input messages, and will look like something to this:
             'content': [
                 {'type': 'text', 'text': '2'}
             ]
-        }, 
+        },
         {
-            'role': 'assistant', 
+            'role': 'assistant',
             'content': [
                 {'type': 'text', 'text': 'The result of 1 + 1 is 2.'}
             ],

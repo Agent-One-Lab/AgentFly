@@ -4,7 +4,7 @@ We have shown how to build an agent, to further customize the training, we need 
 
 **Tool Definition**
 
-Define a tools is simple and easy in AgentFly framework. You simple write a function, and then decorate it with `@tool`. The following example shows the calculator tool we used previously.
+Define a tools is simple and easy in AgentFly framework. You simply write a function, and then decorate it with `@tool`. The following example shows the calculator tool we used previously. You can also inherit a `BaseTool` class to define the tool with more flexibility and complexity (refer to Features section).
 
 ```python
 from agentfly.tools import tool
@@ -48,12 +48,12 @@ def math_reward_string_equal(prediction: str, answer: str, trajectory: List[Dict
     for msg in trajectory:
         if msg["role"] == "tool":
             tool_count += 1
-    
+
     if tool_count < 1:
         return 0.0
     else:
         prediction = extract_last_number(prediction)
-        
+
         if prediction == answer:
             return 1.0
         else:
@@ -97,4 +97,3 @@ rewards = agent.rewards
 print(trajectories)
 print(rewards)
 ```
-

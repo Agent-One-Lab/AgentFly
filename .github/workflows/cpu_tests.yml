@@ -13,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        python-version: ["3.10"]
+        python-version: ["3.12"]
         test-file:
           - agentfly/tests/unit/envs/ --ignore agentfly/tests/unit/envs/test_webshop_text_env.py --ignore agentfly/tests/unit/envs/test_alfworld_env.py
           - agentfly/tests/unit/envs/test_alfworld_env.py
@@ -33,7 +33,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Verify Python
         run: |

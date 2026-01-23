@@ -54,6 +54,7 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+agents/temp/
 nosetests.xml
 coverage.xml
 *,cover
@@ -78,6 +79,11 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+
+# MkDocs documentation
+docs/site/
+docs/.dates_cache.jsonl
+docs/.gitattributes
 
 # PyBuilder
 target/
@@ -140,7 +146,11 @@ slurm/
 *.out
 *.log
 
-# Notebooks
+# Ignore all images in current folder
+/*.jpg
+/*.png
+
+# Notebooks, images, and temp files
 agentfly/tests/*.ipynb
 agentfly/tests/*.jpg
 agentfly/tests/*.jpeg
@@ -159,4 +169,3 @@ verl/training_scripts/
 # training scripts
 training_scripts/
 verl/training_scripts/
-

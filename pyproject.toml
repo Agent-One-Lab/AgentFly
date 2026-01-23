@@ -9,6 +9,18 @@ markers = [
 
 [tool.setuptools]
 packages = ["agentfly"]
+package-dir = {"" = "src"}
+
+[tool.isort]
+profile = "black"
+line_length = 120
+known_first_party = ["agentfly"]
+skip_glob = ["*/verl/*"]
+
+[tool.ruff.lint]
+# Disable import checking - let isort handle it
+ignore = ["I"]
+
 
 [project]
 name = "AgentFly"
@@ -34,7 +46,10 @@ dependencies = [
     "qwen_vl_utils",
     "onnxruntime",
     "mpmath",
-    "wandb"
+    "wandb",
+    "diffusers",
+    "google-genai",
+    "chess",
 ]
 
 [project.optional-dependencies]
@@ -65,11 +80,15 @@ dev = [
     "pytest",
     "nest-asyncio",
     "pytest-asyncio",
+    "pre-commit",
 ]
 docs = [
-    "myst-parser",
-    "sphinx-markdown-tables",
-    "sphinx-rtd-theme",
-    "sphinx-book-theme",
-    "sphinx-design",
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]",
+    "pymdown-extensions",
+    "mkdocs-document-dates",
+    "mkdocs-link-preview-plugin",
+    "mkdocs-git-revision-date-localized-plugin",
+    "mkdocs-git-authors-plugin",
 ]

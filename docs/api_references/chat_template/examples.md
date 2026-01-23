@@ -166,7 +166,7 @@ from agentfly.templates.constants import ToolPlacement
 # Create a custom coding assistant template
 coding_template = Template(
     name="coding-assistant",
-    
+
     # System message
     system_template="""<|im_start|>system
 You are an expert coding assistant. You help users write, debug, and understand code.
@@ -174,7 +174,7 @@ Always provide clear explanations and follow best practices.
 {system_message}<|im_end|>
 """,
     system_message="You are an expert coding assistant.",
-    
+
     # Tool support for code execution
     system_template_with_tools="""<|im_start|>system
 You are an expert coding assistant with access to code execution tools.
@@ -184,16 +184,16 @@ Always think through the problem before writing code.
 Available Tools:
 {tools}<|im_end|>
 """,
-    
+
     # User and assistant templates
     user_template="<|im_start|>user\n{content}<|im_end|>\n",
     user_template_with_tools="<|im_start|>user\n{content}\n\nTools: {tools}<|im_end|>\n",
     assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
     tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",
-    
+
     # Stop words
     stop_words=["<|im_end|>"],
-    
+
     # Tool policy - place tools with first user message
     tool_policy=ToolPolicy(
         placement=ToolPlacement.FIRST_USER,

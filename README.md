@@ -39,7 +39,9 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 ## News
 
-**12/2025 verl update**: Updated verl to 0.6.x version.
+**12/2025 Method-Based Tool**: Support using `@tool` for a class method
+
+**12/2025 Verl Update**: Updated verl to 0.6.x version.
 
 **08/2025 Multi-Modal (Vision) Agent Training Support**: Thanks to the powerful template system, AgentFly now supports training vision-language agents! 🎉 Train agents that can see and understand visual content, including GUI automation and image-based QA. See our [predefined training examples](docs/examples/predefined_training_examples.md) for ready-to-use scripts.
 
@@ -200,12 +202,12 @@ https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
 If you used our code or find it helpful, please cite:
 ```
 @misc{wang2025agentfly,
-      title={AgentFly: Extensible and Scalable Reinforcement Learning for LM Agents}, 
+      title={AgentFly: Extensible and Scalable Reinforcement Learning for LM Agents},
       author={Renxi Wang and Rifo Ahmad Genadi and Bilal El Bouardi and Yongxin Wang and Fajri Koto and Zhengzhong Liu and Timothy Baldwin and Haonan Li},
       year={2025},
       eprint={2507.14897},
       archivePrefix={arXiv},
       primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2507.14897}, 
+      url={https://arxiv.org/abs/2507.14897},
 }
 ```

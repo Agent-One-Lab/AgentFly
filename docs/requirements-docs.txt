@@ -1,12 +1,8 @@
-# Markdown & MyST
-myst-parser
-# Optional tables
-sphinx-markdown-tables
-# Classic Read-the-Docs look
-sphinx-rtd-theme
-# Sphinx itself is pulled transitively
-sphinx-book-theme
-
-# Grid
-sphinx-design
-
+mkdocs
+mkdocs-material
+mkdocstrings[python]
+pymdown-extensions
+mkdocs-document-dates
+mkdocs-link-preview-plugin
+mkdocs-git-revision-date-localized-plugin
+mkdocs-git-authors-plugin

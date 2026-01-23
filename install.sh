@@ -46,13 +46,13 @@ check_sudo() {
 # Function to install enroot
 install_enroot() {
     print_status "Installing enroot..."
-    
+
     # Check if we're on a supported system
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         # Ubuntu/Debian
         if command_exists apt-get; then
             print_status "Detected Ubuntu/Debian system, installing enroot via deb packages..."
-            
+
             # Get architecture
             arch=$(dpkg --print-architecture)
             if [ $? -eq 0 ]; then
@@ -63,7 +63,7 @@ install_enroot() {
                 INSTALLATION_STATUS+=("architecture detection: FAILED")
                 return 1
             fi
-            
+
             # Download enroot packages
             print_status "Downloading enroot packages..."
             curl -fSsL -O "https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot-hardened_3.5.0-1_${arch}.deb"
@@ -75,7 +75,7 @@ install_enroot() {
                 INSTALLATION_STATUS+=("enroot-hardened download: FAILED")
                 return 1
             fi
-            
+
             curl -fSsL -O "https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot-hardened+caps_3.5.0-1_${arch}.deb"
             if [ $? -eq 0 ]; then
                 print_success "Downloaded enroot-hardened+caps package"
@@ -85,7 +85,7 @@ install_enroot() {
                 INSTALLATION_STATUS+=("enroot-hardened+caps download: FAILED")
                 return 1
             fi
-            
+
             # Install packages
             print_status "Installing enroot packages..."
             sudo apt install -y ./*.deb
@@ -97,12 +97,12 @@ install_enroot() {
                 INSTALLATION_STATUS+=("enroot package installation: FAILED")
                 return 1
             fi
-            
+
             # Clean up downloaded packages
             rm -f ./*.deb
             print_status "Cleaned up downloaded packages"
             INSTALLATION_STATUS+=("package cleanup: SUCCESS")
-            
+
         else
             print_warning "Unsupported package manager. Please install enroot manually from: https://github.com/NVIDIA/enroot/blob/master/doc/installation.md"
             return 1
@@ -111,7 +111,7 @@ install_enroot() {
         print_warning "Unsupported operating system. Please install enroot manually from: https://github.com/NVIDIA/enroot/blob/master/doc/installation.md"
         return 1
     fi
-    
+
     if command_exists enroot; then
         print_success "enroot installed successfully!"
         return 0
@@ -127,9 +127,9 @@ setup_conda_environment() {
         print_error "conda not found. Please install conda first."
         exit 1
     fi
-    
+
     print_success "conda found"
-    
+
     # Check if agentfly environment already exists
     if conda env list | grep -q "agentfly"; then
         print_status "agentfly environment already exists, activating it..."
@@ -143,8 +143,8 @@ setup_conda_environment() {
             return 1
         fi
     else
-        print_status "Creating new conda environment 'agentfly' with Python 3.10..."
-        conda create -n agentfly python=3.10 -y
+        print_status "Creating new conda environment 'agentfly' with Python 3.12..."
+        conda create -n agentfly python=3.12 -y
         if [ $? -eq 0 ]; then
             print_success "agentfly environment created successfully!"
             INSTALLATION_STATUS+=("conda environment creation: SUCCESS")
@@ -153,7 +153,7 @@ setup_conda_environment() {
             INSTALLATION_STATUS+=("conda environment creation: FAILED")
             return 1
         fi
-        
+
         print_status "Activating agentfly environment..."
         conda activate agentfly
         if [ $? -eq 0 ]; then
@@ -170,7 +170,7 @@ setup_conda_environment() {
 # Function to install redis-server via conda
 install_redis() {
     print_status "Installing redis-server via conda..."
-    
+
     # Ensure conda is in PATH
     if command_exists conda; then
         conda install -y conda-forge::redis-server==7.4.0
@@ -193,7 +193,7 @@ main() {
     echo "    AgentFly Installation Script"
     echo "=========================================="
     echo ""
-    
+
     # Check Python version (will be checked again after conda environment setup)
     print_status "Checking Python version..."
     if command_exists python3; then
@@ -201,11 +201,11 @@ main() {
         print_status "Found Python version: $PYTHON_VERSION"
         INSTALLATION_STATUS+=("Python availability: SUCCESS")
     else
-        print_error "Python 3 not found. Please install Python 3.10.x first."
+        print_error "Python 3 not found. Please install Python 3.12.x first."
         INSTALLATION_STATUS+=("Python availability: FAILED")
         exit 1
     fi
-    
+
     # Check pip
     print_status "Checking pip..."
     if command_exists pip3; then
@@ -219,7 +219,7 @@ main() {
         INSTALLATION_STATUS+=("pip availability: FAILED")
         exit 1
     fi
-    
+
     # Check git
     print_status "Checking git..."
     if command_exists git; then
@@ -230,7 +230,7 @@ main() {
         INSTALLATION_STATUS+=("git availability: FAILED")
         exit 1
     fi
-    
+
     # Initialize git submodules
     print_status "Initializing git submodules..."
     if [ -d ".git" ]; then
@@ -252,9 +252,9 @@ main() {
         print_warning "Not in a git repository. Skipping submodule initialization."
         INSTALLATION_STATUS+=("Git submodules: SKIPPED (not git repo)")
     fi
-    
+
     # Install Python dependencies
-    print_status "Installing basic Python dependencies..."
+    print_status "Installing basic Python dependencies, this may take a while..."
     pip install -e . > /dev/null
     if [ $? -eq 0 ]; then
         print_success "Basic dependencies installed successfully!"
@@ -263,7 +263,7 @@ main() {
         print_error "Failed to install basic dependencies"
         INSTALLATION_STATUS+=("Basic Python dependencies: FAILED")
     fi
-    
+
     print_status "Installing VERL dependencies..."
     pip install -e '.[verl]' --no-build-isolation > /dev/null
     if [ $? -eq 0 ]; then
@@ -273,14 +273,14 @@ main() {
         print_error "Failed to install VERL dependencies"
         INSTALLATION_STATUS+=("VERL dependencies: FAILED")
     fi
-    
+
     # Check and install enroot if needed
     print_status "Checking enroot installation..."
     if command_exists enroot; then
         print_success "enroot is already installed"
     else
         print_warning "enroot not found. Some tools require it for container management."
-        
+
         if check_sudo; then
             print_status "Sudo access detected. Attempting to install enroot..."
             INSTALLATION_STATUS+=("sudo access: SUCCESS")
@@ -297,7 +297,7 @@ main() {
             INSTALLATION_STATUS+=("enroot installation: SKIPPED (no sudo)")
         fi
     fi
-    
+
     # Check conda availability
     print_status "Checking conda availability..."
     if command_exists conda; then
@@ -308,7 +308,7 @@ main() {
         INSTALLATION_STATUS+=("conda availability: FAILED")
         exit 1
     fi
-    
+
     # Install redis-server (assuming we're already in a conda environment)
     print_status "Installing redis-server via conda..."
     if install_redis; then
@@ -316,29 +316,29 @@ main() {
     else
         INSTALLATION_STATUS+=("redis-server installation: FAILED")
     fi
-    
+
     # Final checks and summary
     echo ""
     echo "=========================================="
     echo "    Installation Summary"
     echo "=========================================="
-    
+
     print_status "Checking installed components..."
-    
+
     if command_exists python3; then
         PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-        if [[ "$PYTHON_VERSION" =~ ^3\.10\. ]]; then
-            print_success "✓ Python 3.10.x ($PYTHON_VERSION)"
-            INSTALLATION_STATUS+=("Python 3.10.x verification: SUCCESS")
+        if [[ "$PYTHON_VERSION" =~ ^3\.12\. ]]; then
+            print_success "✓ Python 3.12.x ($PYTHON_VERSION)"
+            INSTALLATION_STATUS+=("Python 3.12.x verification: SUCCESS")
         else
             print_error "✗ Python version $PYTHON_VERSION does not meet requirements (need 3.10.x)"
-            INSTALLATION_STATUS+=("Python 3.10.x verification: FAILED")
+            INSTALLATION_STATUS+=("Python 3.12.x verification: FAILED")
         fi
     else
         print_error "✗ Python 3 not found"
-        INSTALLATION_STATUS+=("Python 3.10.x verification: FAILED")
+        INSTALLATION_STATUS+=("Python 3.12.x verification: FAILED")
     fi
-    
+
     if [ -d "AgentFly.egg-info" ] || [ -d "agents" ]; then
         print_success "✓ AgentFly package"
         INSTALLATION_STATUS+=("AgentFly package verification: SUCCESS")
@@ -346,7 +346,7 @@ main() {
         print_error "✗ AgentFly package not found"
         INSTALLATION_STATUS+=("AgentFly package verification: FAILED")
     fi
-    
+
     if command_exists enroot; then
         print_success "✓ enroot"
         INSTALLATION_STATUS+=("enroot verification: SUCCESS")
@@ -354,7 +354,7 @@ main() {
         print_warning "✗ enroot (not installed - some tools may not work)"
         INSTALLATION_STATUS+=("enroot verification: FAILED")
     fi
-    
+
     if command_exists conda; then
         print_success "✓ conda"
         INSTALLATION_STATUS+=("conda verification: SUCCESS")
@@ -362,11 +362,11 @@ main() {
         print_error "✗ conda not found"
         INSTALLATION_STATUS+=("conda verification: FAILED")
     fi
-    
+
     # Skip agentfly environment check - assuming we're already in a conda environment
     print_success "✓ conda environment (assuming active)"
     INSTALLATION_STATUS+=("conda environment verification: SKIPPED (assumed active)")
-    
+
     if command_exists redis-server; then
         print_success "✓ redis-server"
         INSTALLATION_STATUS+=("redis-server verification: SUCCESS")
@@ -374,17 +374,17 @@ main() {
         print_error "✗ redis-server not found"
         INSTALLATION_STATUS+=("redis-server verification: FAILED")
     fi
-    
+
     echo ""
     echo "=========================================="
     echo "    Step-by-Step Status Report"
     echo "=========================================="
-    
+
     # Count successes, failures, and skips
     SUCCESS_COUNT=0
     FAILED_COUNT=0
     SKIPPED_COUNT=0
-    
+
     for status in "${INSTALLATION_STATUS[@]}"; do
         if [[ $status == *"SUCCESS"* ]]; then
             echo -e "${GREEN}✓${NC} $status"
@@ -397,7 +397,7 @@ main() {
             ((SKIPPED_COUNT++))
         fi
     done
-    
+
     echo ""
     echo "=========================================="
     echo "    Summary Statistics"
@@ -407,7 +407,7 @@ main() {
     if [ $SKIPPED_COUNT -gt 0 ]; then
         echo -e "${YELLOW}Skipped steps: $SKIPPED_COUNT${NC}"
     fi
-    
+
     echo ""
     if [ $FAILED_COUNT -eq 0 ]; then
         print_success "AgentFly installation completed successfully!"
@@ -416,7 +416,7 @@ main() {
     else
         print_error "AgentFly installation completed with significant issues. Please review the failed steps above."
     fi
-    
+
     echo ""
     print_status "Next steps:"
     echo "  1. If you just installed enroot, you may need to restart your terminal"

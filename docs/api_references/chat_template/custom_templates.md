@@ -57,16 +57,16 @@ print(prompt)
 ```python
 template = Template(
     # ... core fields ...
-    
+
     # Tool support
     system_template_with_tools="System: {system_message}\n\nTools: {tools}",
-    
+
     # Vision support
     vision_start="<vision>",
     vision_end="</vision>",
     image_token="<image>",
     video_token="<video>",
-    
+
     # Custom chat template (Jinja)
     chat_template="{% for message in messages %}{{ message.content }}{% endfor %}"
 )
@@ -280,27 +280,27 @@ from agentfly.agents.templates.constants import ToolPlacement
 # Create a comprehensive template
 comprehensive_template = Template(
     name="comprehensive-example",
-    
+
     # Basic templates
     system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
     system_message="You are a comprehensive AI assistant with multiple capabilities.",
-    
+
     # Tool support
     system_template_with_tools="<|im_start|>system\n{system_message}\n\nAvailable Tools:\n{tools}<|im_end|>\n",
     user_template="<|im_start|>user\n{content}<|im_end|>\n",
     user_template_with_tools="<|im_start|>user\n{content}\n\nTools: {tools}<|im_end|>\n",
     assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
     tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",
-    
+
     # Vision support
     vision_start="<|vision_start|>",
     vision_end="<|vision_end|>",
     image_token="<|image_pad|>",
     video_token="<|video_pad|>",
-    
+
     # Stop words
     stop_words=["<|im_end|>"],
-    
+
     # Policies
     global_policy=GlobalPolicy(prefix="<|begin_of_text|>"),
     system_policy=SystemPolicy(
@@ -450,7 +450,7 @@ from agentfly.agents.templates.constants import ToolPlacement
 # Create a coding assistant template
 coding_template = Template(
     name="coding-assistant",
-    
+
     # System message
     system_template="""<|im_start|>system
 You are an expert coding assistant. You help users write, debug, and understand code.
@@ -458,11 +458,11 @@ Always provide clear explanations and follow best practices.
 {system_message}<|im_end|>
 """,
     system_message="You are an expert coding assistant.",
-    
+
     # User and assistant templates
     user_template="<|im_start|>user\n{content}<|im_end|>\n",
     assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
-    
+
     # Tool support for code execution
     system_template_with_tools="""<|im_start|>system
 You are an expert coding assistant with access to code execution tools.
@@ -474,10 +474,10 @@ Available Tools:
 """,
     user_template_with_tools="<|im_start|>user\n{content}\n\nTools: {tools}<|im_end|>\n",
     tool_template="<|im_start|>tool\n{observation}<|im_end|>\n",
-    
+
     # Stop words
     stop_words=["<|im_end|>"],
-    
+
     # Tool policy - place tools with first user message
     tool_policy=ToolPolicy(
         placement=ToolPlacement.FIRST_USER,
