@@ -30,7 +30,7 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 
 # model=ByteDance-Seed/UI-TARS-1.5-7B
 model=Qwen/Qwen2.5-VL-3B-Instruct
 lr=4e-7
-length=512
+max_new_tokens_per_turn=512
 val_batch_size=512
 train_batch_size=64
 num_chains=8
@@ -62,22 +62,22 @@ agent_backend="async_verl"
 total_training_steps=200
 project_name="Open"
 experiment_name="gui_agent"
-# experiment_name="${model}-${train_dataset}-${lr}-${length}-bs${train_batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_turns}steps-${adv_estimator}"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=$adv_estimator \
     data.train_files=${train_dataset} \
     data.val_files=${eval_dataset} \
-    agent.num_chains=$num_chains \
     data.val_batch_size=$val_batch_size \
     data.train_batch_size=$train_batch_size \
     agent.use_agent=True \
-    agent.template=$prompt_template \
-    agent.model_name_or_path=$model \
+    agent.init_config.agent_type=$agent_type \
+    agent.init_config.template=$prompt_template \
+    agent.init_config.model_name_or_path=$model \
+    agent.init_config.reward_name=${reward_name} \
+    agent.init_config.tools=${tools} \
+    agent.generation_config.max_tokens=${max_new_tokens_per_turn} \
     agent.max_turns=${max_turns} \
-    agent.agent_type=$agent_type \
-    agent.tools=${tools} \
-    agent.reward_name=${reward_name} \
+    agent.num_chains=${num_chains} \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
@@ -94,7 +94,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=4 \
-    actor_rollout_ref.rollout.response_length=$length \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \

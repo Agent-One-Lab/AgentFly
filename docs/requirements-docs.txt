@@ -1,12 +1,8 @@
-# MkDocs and Material Theme
-mkdocs>=1.5.0
-mkdocs-material>=9.0.0
-
-# API Documentation
-mkdocstrings[python]>=0.24.0
-
-# Markdown Extensions
-pymdown-extensions>=10.0.0
-
-mkdocs-document-dates>=3.3.0
+mkdocs
+mkdocs-material
+mkdocstrings[python]
+pymdown-extensions
+mkdocs-document-dates
 mkdocs-link-preview-plugin
+mkdocs-git-revision-date-localized-plugin
+mkdocs-git-authors-plugin

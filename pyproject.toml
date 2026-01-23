@@ -69,11 +69,15 @@ dev = [
     "pytest",
     "nest-asyncio",
     "pytest-asyncio",
+    "pre-commit",
 ]
 docs = [
-    "myst-parser",
-    "sphinx-markdown-tables",
-    "sphinx-rtd-theme",
-    "sphinx-book-theme",
-    "sphinx-design",
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]",
+    "pymdown-extensions",
+    "mkdocs-document-dates",
+    "mkdocs-link-preview-plugin",
+    "mkdocs-git-revision-date-localized-plugin",
+    "mkdocs-git-authors-plugin",
 ]

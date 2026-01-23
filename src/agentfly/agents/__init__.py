@@ -1,7 +1,7 @@
 from .agent_base import BaseAgent
 from .auto import AutoAgent
 from .llm_backends import (AsyncVerlBackend, AsyncVLLMBackend, ClientBackend,
-                           ClientConfig, TransformersBackend)
+                           ClientConfig)
 from .react.react_agent import ReactAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent

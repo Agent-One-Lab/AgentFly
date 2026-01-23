@@ -45,7 +45,7 @@ class CodeAgent(BaseAgent):
             **kwargs,
         )
 
-    def parse(self, responses: List[str], tools: List[Any]) -> Tuple[dict, int, int]:
+    def parse(self, responses: List[str]) -> Tuple[dict, int, int]:
         """
         Generates an assistant message compatible with tool-calling.
         Returns:

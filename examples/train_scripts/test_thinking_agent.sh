@@ -48,7 +48,6 @@ agent_backend="async_verl"
 project_name="AgentRL"
 total_training_steps=200
 experiment_name="test_thinking_agent"
-# experiment_name="${model}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_turns}turns-${adv_estimator}"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=$adv_estimator \

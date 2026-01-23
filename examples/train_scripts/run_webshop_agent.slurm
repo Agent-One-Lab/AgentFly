@@ -5,7 +5,6 @@
 #SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --account=iq
 #SBATCH --cpus-per-task=96
 #SBATCH --output=stdout/%x_%j.out
 #SBATCH --error=stdout/%x_%j.err
@@ -85,8 +84,6 @@ total_training_steps=200
 project_name="Open"
 experiment_name="webshop_agent"
 
-
-# experiment_name="${model}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_turs}turns-${adv_estimator}"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \

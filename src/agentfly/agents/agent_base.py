@@ -17,8 +17,7 @@ from ..tools.tool_base import BaseTool
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
 from .chain.chain_base import ChainRollout
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
-from .llm_backends import (AsyncVerlBackend, AsyncVLLMBackend, ClientBackend,
-                           TransformersBackend)
+from .llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
 from .llm_backends.backend_configs import BACKEND_CONFIGS
 from .utils.messages import MessagesList
 from .utils.tokenizer import create_processor, create_tokenizer
@@ -98,8 +97,8 @@ class BaseAgent(ChainRollout, ABC):
             debug: Whether to enable debug mode.
             backend: The backend to use for the agent.
             tool_parser: Optional tool parser instance from vLLM. If provided, will be used for parsing tool calls.
-            tool_parser_name: Optional name of the tool parser to use (e.g., "hermes", "pythonic").
-                             If provided and tool_parser is None, will create a parser using this name.
+            tool_parser_name: Optional name of the tool parser to use (e.g., "hermes", "pythonic"). If provided and tool_parser is None, will create a parser using this name.
+
         """
         self._validate_init_args(
             model_name_or_path,

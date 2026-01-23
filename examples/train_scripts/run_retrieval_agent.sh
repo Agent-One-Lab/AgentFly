@@ -51,7 +51,6 @@ tool_parser_name="hermes"
 total_training_steps=200
 project_name="Open"
 experiment_name="retrieval_agent"
-# experiment_name="${model}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_steps}steps-${adv_estimator}"
 
 python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \

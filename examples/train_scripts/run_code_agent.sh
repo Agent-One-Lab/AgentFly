@@ -1,6 +1,6 @@
 export VLLM_USE_V1=1
 # Run in single node
-export VERL_LOGGING_LEVEL=DEBUG
+export VERL_LOGGING_LEVEL=INFO
 # export PYTHONPATH="agentfly/verl:${PYTHONPATH}"
 
 set -x

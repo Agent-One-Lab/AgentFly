@@ -1,6 +1,6 @@
 export VLLM_USE_V1=1
 # Run in single node
-export VERL_LOGGING_LEVEL=DEBUG
+export VERL_LOGGING_LEVEL=INFO
 
 set -x
 
@@ -55,7 +55,6 @@ project_name="AgentRL"
 total_training_steps=100
 
 experiment_name="test_gsm8k"
-# experiment_name="${model}-${agent_type}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_steps}steps-${adv_estimator}"
 
 python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -88,7 +87,6 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.response_length=$length \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
