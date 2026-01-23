@@ -28,6 +28,7 @@ from .src.react.tools import answer_qa, answer_math
 from .src.search.async_dense_retriever import asyncdense_retrieve
 from .src.scienceworld.tools import scienceworld_explorer
 from .src.ui.tools import pyautogui_code_generator
+from .src.chess.tools import chess_move, chess_get_state, chess_get_legal_moves
 
 
 # Add explicit tools in case they weren't auto-registered
@@ -47,7 +48,10 @@ EXPLICIT_TOOLS = {
     "invalid_input_tool": invalid_input_tool,
     "dense_retrieve": dense_retrieve,
     "pyautogui_code_generator": pyautogui_code_generator,
-    "calculator": calculator
+    "calculator": calculator,
+    "chess_move": chess_move,
+    "chess_get_state": chess_get_state,
+    "chess_get_legal_moves": chess_get_legal_moves,
 }
 
 # Update the registry with explicit tools
