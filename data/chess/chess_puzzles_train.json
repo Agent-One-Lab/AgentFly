@@ -1,0 +1,82 @@
+[
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1000\nHint: This is a mate in 1 - find the checkmate!\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best move to solve this puzzle.",
+        "puzzle_id": "00sHx",
+        "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+        "moves": "h5f7",
+        "rating": 1000,
+        "themes": ["mateIn1", "short"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1100\nHint: This is a mate in 1 - find the checkmate!\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best move to solve this puzzle.",
+        "puzzle_id": "mate1_back_rank",
+        "fen": "6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1",
+        "moves": "e1e8",
+        "rating": 1100,
+        "themes": ["mateIn1", "backRankMate"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1050\nHint: This is a mate in 1 - find the checkmate!\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best move to solve this puzzle.",
+        "puzzle_id": "mate1_queen",
+        "fen": "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+        "moves": "f3f7",
+        "rating": 1050,
+        "themes": ["mateIn1", "short"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1200\nHint: This is a mate in 2 moves.\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best moves to solve this puzzle.",
+        "puzzle_id": "mate2_sacrifice",
+        "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 2 3",
+        "moves": "f3f7 e8f7 c4g8",
+        "rating": 1200,
+        "themes": ["mateIn2", "sacrifice"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1150\nHint: This is a mate in 1 - find the checkmate!\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best move to solve this puzzle.",
+        "puzzle_id": "mate1_smothered",
+        "fen": "r4rk1/ppp2ppp/8/8/8/5N2/PPP2PPP/R4RK1 w - - 0 1",
+        "moves": "f3h4",
+        "rating": 1150,
+        "themes": ["mateIn1"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1300\nHint: This is a mate in 2 moves.\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best moves to solve this puzzle.",
+        "puzzle_id": "mate2_queen_sac",
+        "fen": "r1b1k2r/ppppqppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 0 5",
+        "moves": "c4f7 e7f7 d1b3",
+        "rating": 1300,
+        "themes": ["mateIn2", "fork"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1100\nHint: This is a mate in 1 - find the checkmate!\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best move to solve this puzzle.",
+        "puzzle_id": "mate1_arabian",
+        "fen": "5rk1/5ppp/8/8/8/8/5PPP/4RNK1 w - - 0 1",
+        "moves": "e1e8",
+        "rating": 1100,
+        "themes": ["mateIn1", "backRankMate"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1250\nHint: This is a mate in 2 moves.\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best moves to solve this puzzle.",
+        "puzzle_id": "mate2_double_check",
+        "fen": "rnbqkb1r/pppp1ppp/5n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 2 3",
+        "moves": "h5f7 e8d8 f7f8",
+        "rating": 1250,
+        "themes": ["mateIn2", "doubleCheck"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1000\nHint: This is a mate in 1 - find the checkmate!\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best move to solve this puzzle.",
+        "puzzle_id": "mate1_rook",
+        "fen": "4k3/8/8/8/8/8/8/R3K3 w Q - 0 1",
+        "moves": "a1a8",
+        "rating": 1000,
+        "themes": ["mateIn1", "short"]
+    },
+    {
+        "question": "You are solving a chess puzzle.\nDifficulty rating: 1400\nHint: This is a mate in 2 moves.\n\nUse the chess_get_state tool to see the current board position.\nUse the chess_get_legal_moves tool to see available moves.\nUse the chess_move tool to make your move(s).\n\nFind the best moves to solve this puzzle.",
+        "puzzle_id": "mate2_classic",
+        "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+        "moves": "f1c4 g8f6 f3g5",
+        "rating": 1400,
+        "themes": ["mateIn2", "opening"]
+    }
+]
