@@ -4,9 +4,10 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.12"
-  commands:
-    - pip install -e .
-    - pip install -e ".[docs]"
+  jobs:
+    install:
+      - pip install -e .
+      - pip install -e ".[docs]"
 
 mkdocs:
   configuration: mkdocs.yml
