@@ -1,6 +1,6 @@
 from .alfworld_env import ALFWorldEnv
-from .manager import (EnvironmentManager, WarmPool, clear_enroot_containers,
-                      from_env)
+from .chess_env import ChessPuzzleEnv
+from .manager import EnvironmentManager, WarmPool, clear_enroot_containers, from_env
 from .python_env import PythonSandboxEnv
 from .redis_env import RedisEnv
 from .scienceworld_env import ScienceWorldEnv
@@ -12,6 +12,7 @@ __all__ = [
     "WebAgentTextEnv",
     "ScienceWorldEnv",
     "RedisEnv",
+    "ChessPuzzleEnv",
     "from_env",
     "WarmPool",
     "EnvironmentManager",

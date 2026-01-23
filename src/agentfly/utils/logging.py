@@ -1,6 +1,5 @@
 import os
-from logging import (DEBUG, INFO, FileHandler, Formatter, StreamHandler,
-                     getLogger)
+from logging import DEBUG, INFO, FileHandler, Formatter, StreamHandler, getLogger
 
 
 class Logger:

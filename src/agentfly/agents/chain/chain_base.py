@@ -18,8 +18,7 @@ from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
 from ...utils.timing import Timer
 from ...utils.vision import image_to_data_uri
 from ..utils.messages import Messages, MessagesList
-from .streaming_observer import (ConsoleStreamObserver, StreamEvent,
-                                 StreamEventType)
+from .streaming_observer import ConsoleStreamObserver, StreamEvent, StreamEventType
 
 logger = logging.getLogger(__name__)
 

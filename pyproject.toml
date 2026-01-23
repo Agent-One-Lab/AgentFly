@@ -11,6 +11,16 @@ markers = [
 packages = ["agentfly"]
 package-dir = {"" = "src"}
 
+[tool.isort]
+profile = "black"
+line_length = 120
+known_first_party = ["agentfly"]
+skip_glob = ["*/verl/*"]
+
+[tool.ruff.lint]
+# Disable import checking - let isort handle it
+ignore = ["I"]
+
 
 [project]
 name = "AgentFly"
@@ -39,6 +49,7 @@ dependencies = [
     "wandb",
     "diffusers",
     "google-genai",
+    "chess",
 ]
 
 [project.optional-dependencies]

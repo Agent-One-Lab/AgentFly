@@ -1,9 +1,13 @@
 from .decorator import tool
 from .registry import get_tool_from_name, get_tools_from_names, register_tool
-from .src.alfworld.tools import (alfworld_get_admissible_commands,
-                                 alfworld_get_task_objective, alfworld_reset,
-                                 alfworld_step)
+from .src.alfworld.tools import (
+    alfworld_get_admissible_commands,
+    alfworld_get_task_objective,
+    alfworld_reset,
+    alfworld_step,
+)
 from .src.calculate.tools import calculator
+from .src.chess.tools import chess_get_legal_moves, chess_get_state, chess_move
 from .src.code.tools import CodeInterpreterTool, code_interpreter
 from .src.react.tools import answer_math, answer_qa
 from .src.scienceworld.tools import scienceworld_explorer
@@ -48,4 +52,7 @@ __all__ = [
     "get_tool_from_name",
     "get_tools_from_names",
     "register_tool",
+    "chess_move",
+    "chess_get_state",
+    "chess_get_legal_moves",
 ]

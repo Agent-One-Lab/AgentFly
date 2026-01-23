@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import (Any, Dict, Iterable, List, Mapping, MutableMapping,
-                    Sequence, Union)
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Union
 
 import numpy as np
 

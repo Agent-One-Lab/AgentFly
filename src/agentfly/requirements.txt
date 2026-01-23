@@ -17,3 +17,5 @@ qwen_vl_utils
 onnxruntime
 mpmath
 wandb
+google-genai
+chess

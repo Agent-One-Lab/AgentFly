@@ -11,8 +11,17 @@ import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from io import BytesIO
-from typing import (TYPE_CHECKING, Any, BinaryIO, Dict, List, Literal,
-                    Optional, TypedDict, Union)
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    BinaryIO,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    TypedDict,
+    Union,
+)
 
 import numpy as np
 import PIL

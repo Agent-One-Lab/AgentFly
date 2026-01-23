@@ -7,8 +7,7 @@ import logging
 import re
 from typing import Dict, List, Tuple
 
-from ..utils.ui_action_parser import (IMAGE_FACTOR,
-                                      parse_action_to_structure_output)
+from ..utils.ui_action_parser import IMAGE_FACTOR, parse_action_to_structure_output
 from .reward_base import reward
 
 logger = logging.getLogger(__name__)

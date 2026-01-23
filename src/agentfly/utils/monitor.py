@@ -221,7 +221,6 @@ class Monitor:
                 cls._queue = asyncio.Queue()
                 cls._queue_loop = None
             return cls._queue
-
         # Check if queue needs to be recreated for current event loop
         if cls._queue is None or cls._queue_loop is not current_loop:
             # Recreate queue for current event loop
@@ -229,7 +228,6 @@ class Monitor:
             # since events are best-effort and the old loop is closed anyway
             cls._queue = asyncio.Queue()
             cls._queue_loop = current_loop
-
         return cls._queue
 
     @classmethod

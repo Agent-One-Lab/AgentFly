@@ -5,9 +5,15 @@ import random
 import string
 from ast import literal_eval
 
-from engine import (END_BUTTON, convert_web_app_string_to_var,
-                    get_product_per_page, get_top_n_product_from_keywords,
-                    init_search_engine, load_products, map_action_to_html)
+from engine import (
+    END_BUTTON,
+    convert_web_app_string_to_var,
+    get_product_per_page,
+    get_top_n_product_from_keywords,
+    init_search_engine,
+    load_products,
+    map_action_to_html,
+)
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles

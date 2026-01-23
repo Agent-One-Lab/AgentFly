@@ -8,8 +8,7 @@ import torch
 from PIL import Image
 
 from ...tools import tool
-from ...utils.vision import (image_to_data_uri, image_to_pil,
-                             open_image_from_any)
+from ...utils.vision import image_to_data_uri, image_to_pil, open_image_from_any
 from ..agent_base import BaseAgent
 from ..utils.json import jsonish
 

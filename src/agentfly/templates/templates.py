@@ -13,8 +13,12 @@ from .assistant_policy import AssistantPolicy, Qwen25AssistantContentProcessor
 from .constants import Role, ToolPlacement
 from .global_policy import GlobalPolicy
 from .system_policy import Llama32DateProcessor, SystemPolicy
-from .tool_policy import (JsonCompactFormatter, JsonIndentedFormatter,
-                          ToolMainContentProcessor, ToolPolicy)
+from .tool_policy import (
+    JsonCompactFormatter,
+    JsonIndentedFormatter,
+    ToolMainContentProcessor,
+    ToolPolicy,
+)
 from .vision_processor import is_vision_template
 
 logger = logging.getLogger(__name__)
