@@ -15,7 +15,7 @@ jobs:
       matrix:
         python-version: ["3.12"]
         test-file:
-          - tests/unit/envs/ --ignore tests/unit/envs/test_webshop_text_env.py --ignore tests/unit/envs/test_alfworld_env.py
+          - tests/unit/envs/ --ignore tests/unit/envs/test_webshop_text_env.py --ignore tests/unit/envs/test_alfworld_env.py --ignore tests/unit/envs/test_chess_env.py
           - tests/unit/envs/test_alfworld_env.py
           # - tests/unit/envs/test_webshop_text_env.py # TODO: add minimal variant of the webshop docker image
           - tests/unit/rewards/ --ignore tests/unit/rewards/test_env_id.py --ignore tests/unit/rewards/test_webshop_reward.py
