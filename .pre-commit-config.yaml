@@ -8,17 +8,23 @@ repos:
       - id: trailing-whitespace      # Removes unnecessary spaces at ends of lines
       - id: end-of-file-fixer        # Ensures files end with a newline
       - id: check-yaml               # Validates your YAML files
+        exclude: ^mkdocs\.yml$  # Exclude mkdocs.yml (contains Python tags)
       - id: check-added-large-files  # Prevents accidentally committing giant files
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.13
     hooks:
       - id: ruff
-        args: [ --fix ]             # Automatically fix linting errors
+        args: ["--fix"]             # Automatically fix linting errors
+        files: ^src/.*\.py$  # Only process Python files in src/
+        exclude: ^src/agentfly/verl/  # Exclude specific folders
       - id: ruff-format             # Formats the code like Black
+        files: ^src/.*\.py$  # Only process Python files in src/
+        exclude: ^src/agentfly/verl/  # Exclude specific folders
 
   - repo: https://github.com/pycqa/isort
     rev: 6.0.1
     hooks:
       - id: isort
-        args: ["src"]
+        files: ^src/.*\.py$  # Only process Python files in src/
+        exclude: ^src/agentfly/verl/  # Exclude specific folders

@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 from ..agent_base import BaseAgent
 

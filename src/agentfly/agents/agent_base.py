@@ -235,11 +235,7 @@ class BaseAgent(ChainRollout, ABC):
                     if not k.startswith("_")
                 }
 
-            if backend == "transformers":
-                llm_engine = TransformersBackend(
-                    model_name_or_path, self.template, **config_kwargs
-                )
-            elif backend == "async_vllm":
+            if backend == "async_vllm":
                 llm_engine = AsyncVLLMBackend(
                     model_name_or_path, self.template, **config_kwargs
                 )

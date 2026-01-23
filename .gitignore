@@ -82,6 +82,8 @@ docs/_build/
 
 # MkDocs documentation
 docs/site/
+docs/.dates_cache.jsonl
+docs/.gitattributes
 
 # PyBuilder
 target/
