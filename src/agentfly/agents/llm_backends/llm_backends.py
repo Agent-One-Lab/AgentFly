@@ -19,7 +19,7 @@ from google.genai import types
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
-from ...templates import Chat
+from chat_bricks import Chat
 from ...utils.vision import image_to_data_uri
 
 logger = logging.getLogger(__name__)
@@ -272,14 +272,15 @@ class AsyncVLLMBackend(LLMBackend):
 
     async def generate_async(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt using vLLM"""
-        max_tokens = kwargs.get("max_tokens", self.max_tokens)
-        temperature = kwargs.get("temperature", self.temperature)
+        sampling_params = {}
+        if "temperature" in kwargs:
+            sampling_params["temperature"] = kwargs["temperature"]  
+        if "n" in kwargs:
+            sampling_params["n"] = kwargs["n"]
+        if "max_tokens" in kwargs:
+            sampling_params["max_tokens"] = kwargs.get("max_tokens")
+        sampling_params = SamplingParams(**sampling_params)
         n = kwargs.get("n", 1)
-        sampling_params = SamplingParams(
-            n=1,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
 
         tools = kwargs.get("tools", None)
         prompts, vision_inputs = self.apply_chat_template(
@@ -392,15 +393,24 @@ class AsyncVerlBackend(LLMBackend):
         We use the pure generated content as the history. So we don't want any tool call to be part of the history.
         This is used when models are not openai's official models like GPT-4o.
         """
-        messages = copy.deepcopy(messages)
+        # messages = copy.deepcopy(messages)
+        # for message in messages:
+        #     if "tool_calls" in message:
+        #         del message["tool_calls"]
+        #     if "tool_call_id" in message:
+        #         del message["tool_call_id"]
+        #     if "tool_choice" in message:
+        #         del message["tool_choice"]
+        # return messages
+
+        processed_messages = []
         for message in messages:
-            if "tool_calls" in message:
-                del message["tool_calls"]
-            if "tool_call_id" in message:
-                del message["tool_call_id"]
-            if "tool_choice" in message:
-                del message["tool_choice"]
-        return messages
+            processed_message = {}
+            for k, v in message.items():
+                if k not in ["tool_calls", "tool_call_id", "tool_choice"]:
+                    processed_message[k] = v
+            processed_messages.append(processed_message)
+        return processed_messages
 
     def _process_messages(self, messages: List[Dict]):
         new_messages = []
@@ -423,7 +433,6 @@ class AsyncVerlBackend(LLMBackend):
 
         generation_config = {}
         tensors = torch.ones(len(messages_list), dtype=torch.int64)
-        # messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
         messages_list = [self._process_messages(messages) for messages in messages_list]
         messages_list = [
             self._convert_to_openai_chat_without_tool_call_processing(messages)

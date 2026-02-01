@@ -339,7 +339,7 @@ main() {
         INSTALLATION_STATUS+=("Python 3.12.x verification: FAILED")
     fi
 
-    if [ -d "AgentFly.egg-info" ] || [ -d "agents" ]; then
+    if [ -d "src/AgentFly.egg-info" ]; then
         print_success "✓ AgentFly package"
         INSTALLATION_STATUS+=("AgentFly package verification: SUCCESS")
     else

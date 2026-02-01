@@ -1,3 +1,4 @@
+import copy
 import inspect
 import json
 import logging
@@ -11,8 +12,7 @@ import numpy as np
 import torch
 from termcolor import colored
 
-from ..templates import tokenize_conversations
-from ..templates.templates import get_template
+from chat_bricks import tokenize_conversations, get_template
 from ..tools.tool_base import BaseTool
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
 from .chain.chain_base import ChainRollout
@@ -120,7 +120,6 @@ class BaseAgent(ChainRollout, ABC):
 
         self.debug = debug
         self.backend = backend
-        self.template = template
         self.tools = tools
         self.max_model_len = max_model_len
 
@@ -141,18 +140,25 @@ class BaseAgent(ChainRollout, ABC):
         else:
             self.backend_config = backend_config
 
-        self.llm_engine = self._init_llm_engine(model_name_or_path, backend)
-
         # Create appropriate tokenizer for trajectory processing
         self.tokenizer = create_tokenizer(model_name_or_path)
         self.processor = create_processor(model_name_or_path)
 
         self._reward_fn = reward_fn
 
+        # We use model name as template if no template is provided
+        # For a model name, chat-bricks will use HF's template by default
+        if template:
+            self.template = template
+        else:
+            self.template = self.model_name_or_path
+
         if self.template is None:
             self.jinja_template = None
         else:
             self.jinja_template = get_template(self.template).jinja_template()
+
+        self.llm_engine = self._init_llm_engine(model_name_or_path, backend)
 
         self.wandb_project_name = wandb_project_name
         self.wandb_run_name = wandb_run_name
@@ -222,9 +228,6 @@ class BaseAgent(ChainRollout, ABC):
                 tool_method.instance = self
 
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
-        assert not (self.template and backend == "client"), (
-            "For client backend, we do not support template. Set the template when deploying the model."
-        )
         if isinstance(model_name_or_path, str):
             # Extract backend-specific configuration
             config_kwargs = {}
@@ -381,8 +384,8 @@ class BaseAgent(ChainRollout, ABC):
 
     @property
     def trajectories(self):
+        """Get the trajectories of the agent."""
         trajectories = self.get_messages()
-
         return trajectories
 
     def tokenize_trajectories(
@@ -401,16 +404,10 @@ class BaseAgent(ChainRollout, ABC):
         for trajectory in trajectories:
             messages = trajectory["messages"]
             messages_list.append(messages)
-            have_called_tool = False
-            for message in messages:
-                if message["role"] == "tool":
-                    have_called_tool = True
-                    break
             info = {}
             for key, value in trajectory.items():
                 if key != "messages":
                     info[key] = value
-            info["have_called_tool"] = have_called_tool
 
             last_response = None
 
@@ -433,6 +430,7 @@ class BaseAgent(ChainRollout, ABC):
             return_reward_mask=return_reward_mask,
             add_generation_prompt=True,
             concatenate_mm_inputs=concatenate_mm_inputs,
+            ignore_tool_calls=True,
         )
         position_ids = torch.clip(
             torch.cumsum(inputs["attention_mask"], dim=-1) - 1, min=0, max=None

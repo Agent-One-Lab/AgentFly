@@ -46,7 +46,7 @@ entropy_coeff=0.001
 kl_loss_type=mse
 agent_type=hf
 max_turns=4
-template="qwen2.5"
+# template="qwen2.5"
 tool_parser_name="hermes"
 total_training_steps=200
 project_name="Open"
@@ -63,7 +63,6 @@ python3 -m agentfly.cli train \
     agent.init_config.agent_type=$agent_type \
     agent.init_config.model_name_or_path=$model \
     agent.init_config.max_model_len=$max_model_len \
-    agent.init_config.template=$template \
     agent.init_config.tool_parser_name=$tool_parser_name \
     agent.init_config.tools=${tools} \
     agent.init_config.reward_name=${reward_name} \
