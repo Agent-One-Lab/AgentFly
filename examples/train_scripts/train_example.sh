@@ -27,11 +27,9 @@ max_model_len=8192
 mini_batch_size=64
 max_new_tokens_per_turn=512
 num_chains=8
-num_gpus=1
-
 # Fully on-policy training
+num_gpus=1
 ppo_mini_batch_size=${mini_batch_size}*${num_chains}
-
 ppo_micro_batch_size_per_gpu=8
 
 kl_coef=0.001
@@ -63,7 +61,6 @@ python3 -m agentfly.cli train \
     data.train_batch_size=${mini_batch_size} \
     agent.init_config.agent_type=$agent_type \
     agent.init_config.tools=$tools \
-    agent.init_config.template=$template \
     agent.init_config.model_name_or_path=$model \
     agent.init_config.backend=${agent_backend} \
     agent.init_config.reward_name=$reward_name \
