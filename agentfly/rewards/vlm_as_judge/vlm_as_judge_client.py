@@ -27,9 +27,9 @@ def _get_retry_settings() -> tuple[int, float]:
         retry_interval_env = os.getenv("VLM_CLIENT_POLL_INTERVAL")
 
     try:
-        retry_seconds = int(retry_seconds_env) if retry_seconds_env is not None else -1
+        retry_seconds = int(retry_seconds_env) if retry_seconds_env is not None else 120
     except (TypeError, ValueError):
-        retry_seconds = -1
+        retry_seconds = 120
 
     try:
         retry_interval = float(retry_interval_env) if retry_interval_env is not None else 1.0
@@ -37,7 +37,7 @@ def _get_retry_settings() -> tuple[int, float]:
         retry_interval = 1.0
 
     if retry_seconds < 0:
-        retry_seconds = -1
+        retry_seconds = 0
     if retry_interval <= 0:
         retry_interval = 1.0
 

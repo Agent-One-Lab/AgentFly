@@ -24,6 +24,7 @@ try:
         create_vlm_prompt_from_template,
         _extract_json_list,
     )
+    from ..llm_as_judge.llm_as_judge_client import LLMClient
     try:
         from ..utils.monitor import MetricEvent, emit
     except Exception:
@@ -43,6 +44,7 @@ except ImportError:  # Running as a script without package context
         create_vlm_prompt_custom,
         DEFAULT_VLM_PROMPT_TEMPLATE,
     )
+    from agentfly.rewards.llm_as_judge.llm_as_judge_client import LLMClient
     try:
         from agentfly.utils.monitor import MetricEvent, emit
     except Exception:
@@ -53,15 +55,11 @@ except ImportError:  # Running as a script without package context
 logger = logging.getLogger(__name__)
 
 DEFAULT_VLM_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"
+DEFAULT_LLM_MODEL = "Qwen/Qwen2.5-72B-Instruct"
 VLM_MODEL_SERVER_IPS = {
-    "Qwen/Qwen3-VL-235B-A22B-Instruct": ["10.24.24.28", "10.24.0.61"],
-    "OpenGVLab/InternVL3_5-241B-A28B": ["10.24.1.154"],
 }
 _VLM_CLIENTS: Dict[Tuple[str, Tuple[str, ...], int, int, int, str], VLMClient] = {}
 DEFAULT_VLM_ENSEMBLE_MODEL_SPECS = [
-    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.24.28"]},
-    {"model": "OpenGVLab/InternVL3_5-241B-A28B", "server_ips": ["10.24.1.154"]},
-    {"model": "Qwen/Qwen3-VL-235B-A22B-Instruct", "server_ips": ["10.24.0.61"]},
 ]
 VLM_ENSEMBLE_PROMPT_TEMPLATE = """You are given a video and several visual verification questions. Your task is to judge each question as true or false based only on what can be seen or reasonably inferred from the video. If the visual evidence is insufficient to confirm the statement, or if the statement directly contradicts the video, answer 'false'.
  
@@ -99,6 +97,39 @@ LADDER_CODE_EXTRACTION_REWARD = 0.04
 LADDER_CODE_RENDER_REWARD = 0.06
 LADDER_VIDEO_OPEN_REWARD = 0.1
 LADDER_VLM_REWARD = 1.0 - LADDER_CODE_EXTRACTION_REWARD - LADDER_CODE_RENDER_REWARD - LADDER_VIDEO_OPEN_REWARD
+
+LLM_AS_JUDGE_ABLATION_PROMPT = """You are a code analysis judge. Read the Python code and determine:
+1) Does the code execute without errors?
+2) Does the code generate and save a video?
+Then, based on the code's intended behavior, judge the domain questions.
+
+Instructions:
+- Do not execute the code; reason from static analysis of the code.
+- Assume a standard Python 3 environment with common libraries available
+  (e.g., numpy, opencv-python) unless the code clearly requires missing resources.
+- For generating video: look for proper creation of a video writer, writing frames,
+  and releasing/closing to finalize the file.
+- For each question, return one of "True" or "False".
+
+Context:
+- Summary of expected visual content (if provided): {summarize}
+- Questions to evaluate:\n{all_questions}
+
+Provide your output strictly as a JSON list with entries like:
+[
+  {{
+    "index": "1",
+    "question": "Does the code execute without errors?",
+    "analysis": "...your reasoning...",
+    "result": "True|False"
+  }}
+]
+
+Here is the Python code to evaluate:
+```python
+{code}
+```
+"""
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -140,6 +171,18 @@ def _build_vlm_messages(video_path: str, prompt_text: str) -> List[Dict[str, Any
             ],
         },
     ]
+
+
+def _extract_code_from_response(response: str) -> Optional[str]:
+    """Extract Python code from model response."""
+    if not response:
+        return None
+    cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
+    pattern = r"```python\n(.*?)```"
+    matches = re.findall(pattern, cleaned, re.DOTALL)
+    if matches:
+        return matches[0]
+    return None
 
 
 def _normalize_server_ips(value: Optional[Any]) -> Optional[List[str]]:
@@ -248,9 +291,9 @@ def _get_vlm_wait_settings() -> Tuple[int, float]:
     poll_interval_env = os.getenv("VLM_CLIENT_POLL_INTERVAL")
 
     try:
-        wait_seconds = int(wait_seconds_env) if wait_seconds_env is not None else 30
+        wait_seconds = int(wait_seconds_env) if wait_seconds_env is not None else 120
     except (TypeError, ValueError):
-        wait_seconds = 30
+        wait_seconds = 120
 
     try:
         poll_interval = float(poll_interval_env) if poll_interval_env is not None else 1.0
@@ -1138,6 +1181,115 @@ async def vlm_as_judge_pass_reward(
             import traceback
             traceback.print_exc()
             return {"reward": 0.0}
+
+
+@reward(name="vlm_as_judge_pass_reward_llm")
+async def vlm_as_judge_pass_reward_llm(
+    final_response: str,
+    trajectory: Dict[str, Any] = None,
+    vlm_questions: Dict[str, Any] = None,
+    vlm_model: Optional[str] = None,
+    vlm_server_ips: Optional[List[str]] = None,
+    **data_fields
+) -> Dict[str, float]:
+    """LLM-as-Judge ablation: pass/fail reward using code-only reasoning.
+
+    This does not execute code or render video. It asks an LLM to judge:
+    - qexec: "Does the code execute without errors?"
+    - qvideo: "Does the code generate and save a video?"
+    plus the provided VLM questions (re-indexed starting from 3).
+    """
+    try:
+        logger.info("=" * 60)
+        logger.info("vlm_as_judge_pass_reward_llm called")
+        logger.info(f"Prediction length: {len(final_response) if final_response else 0}")
+
+        all_data = dict(data_fields)
+        if vlm_questions is not None:
+            all_data["vlm_questions"] = vlm_questions
+
+        all_questions, summarize, questions_list = extract_vlm_questions_from_data(all_data)
+        if not questions_list:
+            logger.warning("No VLM questions found in data.")
+            return {"reward": 0.0}
+
+        code = _extract_code_from_response(final_response)
+        if not code:
+            logger.warning("No Python code found in final_response")
+            return {"reward": 0.0}
+
+        base_questions = [
+            {"index": "1", "question": "Does the code execute without errors?"},
+            {"index": "2", "question": "Does the code generate and save a video?"},
+        ]
+        combined_questions: List[Dict[str, Any]] = []
+        combined_questions.extend(base_questions)
+
+        display_lines = [
+            "1. Does the code execute without errors?",
+            "2. Does the code generate and save a video?",
+        ]
+        for i, q in enumerate(questions_list):
+            question = str(q.get("question", "")).strip()
+            if not question:
+                continue
+            new_idx = str(i + 3)
+            combined_questions.append({
+                "index": new_idx,
+                "question": question,
+                **({"weight": q.get("weight")} if "weight" in q else {}),
+            })
+            display_lines.append(f"{new_idx}. {question}")
+
+        all_questions_text = "\n".join(display_lines)
+
+        prompt = LLM_AS_JUDGE_ABLATION_PROMPT.format(
+            summarize=summarize or "",
+            all_questions=all_questions_text,
+            code=code,
+        )
+
+        messages = [{"role": "user", "content": prompt}]
+
+        model_name = str(data_fields.get("llm_model", DEFAULT_LLM_MODEL)).strip() or DEFAULT_LLM_MODEL
+        client = LLMClient(model=model_name, timeout_seconds=120)
+
+        for _ in range(10):
+            if client.is_available():
+                break
+            await asyncio.sleep(1)
+        else:
+            logger.error("LLM client not available")
+            return {"reward": 0.0}
+
+        responses = await client.process_all_inputs(
+            [messages],
+            model=model_name,
+            temperature=0.1,
+        )
+        if not responses or not responses[0] or not responses[0][0]:
+            logger.error("No response from LLM server")
+            return {"reward": 0.0}
+
+        output_text = responses[0][0]
+        try:
+            results = _extract_json_list(output_text)
+            if not results:
+                logger.error("Failed to parse LLM results")
+                return {"reward": 0.0}
+        except Exception as e:
+            logger.error(f"Error parsing LLM results: {e}")
+            return {"reward": 0.0}
+
+        reward_score = pass_fail_reward(results, combined_questions)
+        logger.info(f"LLM evaluation completed. Reward: {reward_score:.3f}")
+        return {"reward": float(reward_score)}
+
+    except Exception as e:
+        logger.error(f"Error in vlm_as_judge_pass_reward_llm: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"reward": 0.0}
     
 
 @reward(name="vlm_as_judge_pass_reward_multi_model")

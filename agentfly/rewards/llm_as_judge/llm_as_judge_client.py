@@ -245,7 +245,7 @@ class LLMClient:
         """
         self.timeout_seconds = timeout_seconds
         # server_ips = get_server_ips(model)
-        server_ips = ["10.24.0.80"]
+        server_ips = ["10.24.3.25"]
         # Create a rate limiter for each instance
         rate_limiters = [RateLimiter(max_window_size_per_instance) for _ in server_ips]
         self.client_manager = RoundRobinClient(server_ips, port, api_key, timeout_seconds, rate_limiters)
@@ -416,4 +416,3 @@ async def llm_as_judge_client_math_reward(prediction: str, answer: str) -> float
         return {
             "reward": 0.0,
         }
-
