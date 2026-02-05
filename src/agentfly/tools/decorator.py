@@ -1,7 +1,7 @@
 import inspect
 import logging
+from typing import Any
 
-from ..envs.env_base import BaseEnv
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
 
 logger = logging.getLogger(__name__)
@@ -56,8 +56,8 @@ def tool(
     max_length: int = 2048,
     auto_register: bool = True,
     stateful: bool = False,
-    env_cls: type[BaseEnv] | None = None,
-    env_kwargs: dict | None = None,
+    resource_spec: Any = None,
+    backend: str = "local",
     pool_size: int = -1,  # -1, or 0 means no pool
 ):
     """
@@ -72,10 +72,10 @@ def tool(
             - "continue": The tool call is not the final step in the chain. The search will continue.
         max_length (int): The maximum length of the tool's output/observation.
         auto_register (bool): Whether to automatically register the tool. This is used to get tool by name.
-        stateful (bool): Whether the tool is stateful. A stateful tool is a tool that manages its own environment.
-        env_cls (type[BaseEnv]): The environment class for the tool.
-        env_kwargs (dict): The kwargs for the environment class.
-        pool_size (int): The size of the pool for the environment.
+        stateful (bool): Whether the tool is stateful (manages resources via ResourceEngine).
+        resource_spec: ResourceSpec for the tool (used when stateful).
+        backend (str): Backend name for the resource engine (e.g. "local").
+        pool_size (int): The size of the resource pool.
     """
     from .tool_base import BaseTool
 
@@ -112,10 +112,10 @@ def tool(
                 "args": validated_schema["args"],
                 "max_length": max_length,
                 "status": status,
-                "env_cls": env_cls,
-                "env_kwargs": env_kwargs or {},
+                "resource_spec": resource_spec,
+                "backend": backend,
                 "pool_size": pool_size,
-                "is_stateful": stateful or env_cls is not None,
+                "is_stateful": stateful or resource_spec is not None,
                 # Store the function as a class attribute for reference
                 "_func": func,
             },

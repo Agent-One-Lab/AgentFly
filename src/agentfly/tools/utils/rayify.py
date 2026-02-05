@@ -11,7 +11,7 @@ def rayify(tool: Tool, *, export=None, **ray_opts):
     Turn a Tool into a Ray actor **without** pickling the Tool itself.
     We pass only its name and reconstruct from TOOL_REGISTRY inside the actor.
     """
-    export = export or ("__call__", "release_env", "reset_env", "release")
+    export = export or ("__call__", "release", "set_resource", "release_all")
     tool_name = tool.name  # plain str ⇒ always pickleable
 
     # ---------- build the actor class ----------

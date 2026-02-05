@@ -2,11 +2,15 @@ import asyncio
 import inspect
 import json
 import logging
-from typing import Any, Callable, List, Optional
-
-from ..envs.env_base import BaseEnv
-from ..envs.manager.env_manager import EnvironmentManager
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
+from ..resources import ResourceEngine
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
+
+if TYPE_CHECKING:
+    from ..resources.types import BaseResource, ResourceSpec
+else:
+    BaseResource = None
+    ResourceSpec = None
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +19,7 @@ class BaseTool:
     """
     Universal tool wrapper that can handle both stateful and non-stateful tools.
 
-    - For stateful tools: manages environments and pools
+    - For stateful tools: manages resources via ResourceEngine
 
     - For non-stateful tools: works like a simple wrapper
 
@@ -84,14 +88,14 @@ class BaseTool:
     args: dict | None = None
     max_length: int = 2048
     status: str = "success"
-    env_cls: type[BaseEnv] | None = None
-    env_kwargs: dict = {}
+    resource_spec: Optional["ResourceSpec"] = None
+    backend: str = "local"
     pool_size: int = -1  # -1 means no pool
     is_stateful: bool = False
     auto_register: bool = True
 
-    # Class-level environment state (shared across all instances of the same tool class)
-    _envs: dict[str, BaseEnv] = {}
+    # Class-level resource state (shared across all instances of the same tool class)
+    _resources: dict[str, Any] = {}
     _locks: dict[str, asyncio.Lock] = {}
     _initialized: bool = False
 
@@ -127,7 +131,7 @@ class BaseTool:
             self.is_method = False
             self.instance = None
 
-        cls.is_stateful = cls.env_cls is not None
+        cls.is_stateful = cls.resource_spec is not None
 
         # Use __dict__ to avoid triggering __getattr__ in metaclass
         if "_is_async_call" not in cls.__dict__:
@@ -214,8 +218,7 @@ class BaseTool:
     def _validate_call_args(self, kwargs):
         # TODO: raise error, return error message, or filter the invalid arguments, make it configurable. Currently, we just return the error message.
         for arg in kwargs:
-            if arg not in self.args and not (arg == "id" and self.is_stateful):
-                # raise ValueError(f"""Invalid argument "{arg}" for tool {self.name}.""")
+            if arg not in self.args and not (arg == "id" and self.is_stateful) and not (arg == "resource" and self.is_stateful):
                 result = f"""Invalid argument "{arg}" for tool {self.name}."""
                 return result
         return None
@@ -268,16 +271,16 @@ class BaseTool:
             return str(e)
 
     async def _execute_stateful_tool(self, id: str, **kwargs):
-        """Execute a stateful tool with environment management."""
+        """Execute a stateful tool with resource management."""
         cls = type(self)
-        await cls._initialize_envs()
-        env = await cls._acquire_env(id)
+        await cls._initialize_resources()
+        resource = await cls._acquire_resource(id)
 
         async with cls._locks[id]:
-            assert kwargs.get("env", None) is None, (
-                "env is not allowed to be passed to stateful tools"
+            assert kwargs.get("resource", None) is None, (
+                "resource is not allowed to be passed to stateful tools"
             )
-            kwargs["env"] = env
+            kwargs["resource"] = resource
             return await self._execute_user_function_async(**kwargs)
 
     def __call__(self, **kwargs):
@@ -331,7 +334,7 @@ class BaseTool:
             # For non-stateful tools, directly execute the function
             result = await self._execute_user_function_async(**kwargs)
         else:
-            # For stateful tools, handle environment management
+            # For stateful tools, handle resource management
             id = kwargs.pop("id", None)
             if id is None:
                 result = "Error: 'id' parameter is required for stateful tools"
@@ -379,75 +382,77 @@ class BaseTool:
                 f"Got invalid result: {type(result)} when calling {self.name} with arguments {kwargs}. The result should be a string or a dict containing 'observation' as a key."
             )
 
-    # ========== Environment Management ==========
+    # ========== Resource Management ==========
     @classmethod
-    async def _initialize_envs(cls):
-        """Lazy initialization of the environment pool."""
-        if cls.is_stateful and not cls._initialized:
-            await EnvironmentManager.start(
-                cls.env_cls, size=cls.pool_size, env_kwargs=cls.env_kwargs
-            )
-            cls._initialized = True
+    async def _initialize_resources(cls):
+        """Lazy initialization of the resource pool via ResourceEngine."""
+        if not cls.is_stateful or cls._initialized or cls.resource_spec is None:
+            return
+        await ResourceEngine.start(
+            cls.resource_spec,
+            size=cls.pool_size if cls.pool_size > 0 else 1,
+            backend=cls.backend,
+        )
+        cls._initialized = True
 
     @classmethod
-    def used_env_size(cls):
-        """Get the number of used environments."""
+    def used_resource_size(cls):
+        """Get the number of used resources."""
         if cls.is_stateful:
-            return len(cls._envs)
+            return len(cls._resources)
         return 0
 
     @classmethod
     def ids(cls):
-        """Get the IDs of all active environments (for stateful tools only)."""
-        return list(cls._envs.keys()) if cls.is_stateful else []
+        """Get the IDs of all active resources (for stateful tools only)."""
+        return list(cls._resources.keys()) if cls.is_stateful else []
 
     @classmethod
-    async def _acquire_env(cls, id: str):
-        """Acquire an environment from existing environments or the pool."""
-        env = cls._envs.get(id)
-        if env is None:
-            if not cls.is_stateful:
-                return None
-            env = await EnvironmentManager.acquire(cls.env_cls, id=id)
-            cls._envs[id] = env
-            cls._locks[id] = asyncio.Lock()
-        return env
+    async def _acquire_resource(cls, id: str) -> Any:
+        """Acquire a resource from the engine."""
+        resource = cls._resources.get(id)
+        if resource is not None:
+            return resource
+        if not cls.is_stateful or cls.resource_spec is None:
+            raise ValueError("Stateful tool requires resource_spec")
+        resource = await ResourceEngine.acquire(id, cls.resource_spec, backend=cls.backend)
+        cls._resources[id] = resource
+        cls._locks[id] = asyncio.Lock()
+        return resource
 
     @classmethod
     async def release(cls, id, success=True):
         """
-        Release a specific environment.
-        Release means we take the occupied env back, and reset it, put it back to the pool if there is one, or close it if there is no pool.
+        Release a specific resource back to the engine pool.
         """
-        if not cls.is_stateful or id not in cls._envs:
+        if not cls.is_stateful or id not in cls._resources:
             return
 
-        env = cls._envs.pop(id)
+        resource = cls._resources.pop(id)
         cls._locks.pop(id)
-        await EnvironmentManager.release(env, id=id)
+        await ResourceEngine.release(resource, id=id, finished=success)
 
     @classmethod
-    async def set_env(cls, id, env_args=None):
-        """Reset a specific environment."""
+    async def set_resource(cls, id, resource_args=None):
+        """Reset a specific resource."""
         if not cls.is_stateful:
             return
-        await cls._initialize_envs()
-        if id in cls._envs:
-            env = cls._envs[id]
-            await EnvironmentManager.reset(env, env_args=env_args)
+        await cls._initialize_resources()
+        if id in cls._resources:
+            resource = cls._resources[id]
+            await ResourceEngine.reset(resource, **(resource_args or {}))
         else:
-            env = await cls._acquire_env(id)
-            await EnvironmentManager.reset(env, env_args=env_args)
-            return
+            resource = await cls._acquire_resource(id)
+            await ResourceEngine.reset(resource, **(resource_args or {}))
 
     @classmethod
     async def release_all(cls):
-        """Release all environments."""
+        """Release all resources."""
         if not cls.is_stateful:
             return
 
-        env_ids = list(cls._envs.keys())
-        await asyncio.gather(*[cls.release(env_id, success=True) for env_id in env_ids])
+        resource_ids = list(cls._resources.keys())
+        await asyncio.gather(*[cls.release(rid, success=True) for rid in resource_ids])
 
     # ========== Registration ==========
     @classmethod

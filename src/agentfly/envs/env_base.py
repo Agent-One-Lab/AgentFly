@@ -3,8 +3,7 @@ import asyncio
 import time
 import warnings
 from typing import Any
-
-from .manager import enroot
+from enroot import from_env
 from .manager.resource import GLOBAL_ENVS
 
 # import docker
@@ -80,7 +79,7 @@ class SupportsDocker:
             RuntimeError: If the container fails to start.
         """
         # client = docker.from_env()
-        client = enroot.from_env()
+        client = from_env()
 
         # run docker-py call in default ThreadPoolExecutor
         retry_times = 3
