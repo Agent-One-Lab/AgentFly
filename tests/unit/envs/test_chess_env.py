@@ -7,6 +7,7 @@ Install with: brew install stockfish (macOS) or apt-get install stockfish (Linux
 """
 
 import pytest
+import pytest_asyncio
 from agentfly.envs.chess_env import ChessPuzzleEnv
 
 
@@ -17,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def chess_env():
     """Create and start a chess environment for testing."""
     env = ChessPuzzleEnv()
@@ -171,7 +172,7 @@ async def test_puzzle_state_tracking(chess_env):
     puzzle = {
         "puzzle_id": "test",
         "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        "moves": "e2e4 e7e5 g1f3"  # Multi-move puzzle
+        "moves": "e2e4 e7e5 g1f3"  # Multi-move puzzle: e2e4 is setup, e7e5 is agent's move, g1f3 is response
     }
 
     await chess_env.reset(puzzle)
@@ -183,11 +184,11 @@ async def test_puzzle_state_tracking(chess_env):
     # After setup, solution index should be 1 (first move was played)
     assert chess_env._current_solution_idx == 1
 
-    # Make the correct move
-    await chess_env.step("e2e4")
+    # Make the correct move (e7e5, not e2e4 which was already auto-played as setup)
+    await chess_env.step("e7e5")
 
     assert len(chess_env.moves_made) == 1
-    assert "e2e4" in chess_env.moves_made
+    assert "e7e5" in chess_env.moves_made
 
 
 @pytest.mark.asyncio
