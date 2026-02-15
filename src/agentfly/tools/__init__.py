@@ -11,7 +11,8 @@ from .src.chess.tools import chess_get_legal_moves, chess_get_state, chess_move
 from .src.code.tools import CodeInterpreterTool, code_interpreter
 from .src.react.tools import answer_math, answer_qa
 from .src.scienceworld.tools import scienceworld_explorer
-from .src.search.async_dense_retriever import asyncdense_retrieve
+from .src.search.async_dense_retriever import async_dense_retrieve
+from .src.search.async_dense_retrieve_api import async_dense_retrieve_api
 from .src.search.dense_retriever import dense_retrieve
 from .src.search.google_search import google_search_serper
 from .src.ui.tools import pyautogui_code_generator
@@ -41,7 +42,8 @@ __all__ = [
     "calculator",
     "google_search_serper",
     "dense_retrieve",
-    "asyncdense_retrieve",
+    "async_dense_retrieve",
+    "async_dense_retrieve_api",
     "scienceworld_explorer",
     "webshop_browser",
     "answer_qa",

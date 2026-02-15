@@ -158,11 +158,13 @@ def _extract_answer_tag(text: str) -> str:
 def _format_ok(final_response: str, trajectory: List) -> tuple:
     """True if final_response has <answer>...</answer>, trajectory has tool calling, and all assistant turns except the last have <think>/</think>."""
     has_answer_tags = "<answer>" in final_response and "</answer>" in final_response
-    if not has_answer_tags or not trajectory:
-        return False, False, False
+    
     has_tool_calling = any(
         isinstance(msg, dict) and msg.get("role") == "tool" for msg in trajectory
     )
+
+    tool_call_count = sum(1 for msg in trajectory if msg.get("role") == "tool")
+
     # Collect assistant turns; only previous (non-last) ones must have think
     assistant_turns = []
     for msg in trajectory:
@@ -181,8 +183,26 @@ def _format_ok(final_response: str, trajectory: List) -> tuple:
         previous_have_think = all(
             "<think>" in c and "</think>" in c for c in previous if c
         )
-    fmt = has_answer_tags and has_tool_calling and previous_have_think
-    return fmt, previous_have_think, has_tool_calling
+
+    has_tool_call_answer = False
+    answer = None
+    last_message = trajectory[-1]
+    if last_message["role"] == "assistant":
+        if "tool_calls" in last_message and len(last_message["tool_calls"]) > 0:
+            tool_call = last_message["tool_calls"][0]
+            if "answer" in tool_call["function"]["arguments"]:
+                has_tool_call_answer = True
+                answer = tool_call["function"]["arguments"]["answer"]
+
+    format_dict = {
+        "has_think": previous_have_think,
+        "has_answer_tags": has_answer_tags,
+        "has_tool_calling": has_tool_calling,
+        "tool_call_count": tool_call_count,
+        "has_tool_call_answer": has_tool_call_answer,
+        "answer": answer,
+    }
+    return format_dict
 
 
 @reward(name="qa_em_format_reward")
@@ -200,25 +220,100 @@ def qa_em_format_reward(final_response: str, golden_answers: List[str], trajecto
     else:
         max_em = max(em_score(predicted, g) for g in golden_answers)
         max_f1 = max(f1_score(predicted, g)[0] for g in golden_answers)
-    fmt, previous_have_think, has_tool_calling = _format_ok(final_response, trajectory)
+    format_dict = _format_ok(final_response, trajectory)
 
     reward = 0.0
-    if fmt and max_em:
+    if format_dict["format"] and max_em:
         reward = 1.0
-    elif fmt and not max_em:
+    elif format_dict["format"] and not max_em:
         reward = 0.1
-    elif max_em and not fmt:
+    elif max_em and not format_dict["format"]:
         reward = 0.0
 
     return {
         "reward": reward,
         "em": max_em,
         "f1": max_f1,
-        "fmt": 1.0 if fmt else 0.0,
-        "fmt_think": 1.0 if previous_have_think else 0.0,
-        "fmt_tool": 1.0 if has_tool_calling else 0.0,
+        "fmt": 1.0 if format_dict["has_think"] and format_dict["has_answer_tags"] else 0.0,
+        "fmt_think": 1.0 if format_dict["has_think"] else 0.0,
+        "fmt_answer_tags": 1.0 if format_dict["has_answer_tags"] else 0.0,
+        "fmt_tool": 1.0 if format_dict["has_tool_calling"] else 0.0,
     }
 
+{
+    "question": "...",
+    "golden_answers": ["..."],
+}
+
+@reward(name="qa_em_reward")
+def qa_em_reward(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
+    """
+    Calculate the reward for the agent's response based on the EM score.
+
+    - 1.0 if the format is correct, and the em is true
+    - 0.1 if the format is correct, but the em is wrong
+    - 0.0 if the format is incorrect
+    """
+    predicted = _extract_answer_tag(final_response)
+    if not golden_answers:
+        max_em, max_f1 = 0.0, 0.0
+    else:
+        max_em = max(em_score(predicted, g) for g in golden_answers)
+        max_f1 = max(f1_score(predicted, g)[0] for g in golden_answers)
+    format_dict = _format_ok(final_response, trajectory)
+
+    reward = max_em
+
+    return {
+        "reward": reward,
+        "em": max_em,
+        "f1": max_f1,
+        "fmt": 1.0 if format_dict["has_think"] and format_dict["has_answer_tags"] else 0.0,
+        "fmt_think": 1.0 if format_dict["has_think"] else 0.0,
+        "fmt_answer_tags": 1.0 if format_dict["has_answer_tags"] else 0.0,
+        "fmt_tool": 1.0 if format_dict["has_tool_calling"] else 0.0,
+    }
+
+
+@reward(name="qa_em_reward_tool")
+def qa_em_reward_tool(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
+    """
+    Calculate the reward for the agent's response based on the EM score.
+
+    - 1.0 if the format is correct, and the em is true
+    - 0.1 if the format is correct, but the em is wrong
+    - 0.0 if the format is incorrect
+    """
+
+    format_dict = _format_ok(final_response, trajectory)
+
+    answer = format_dict["answer"]
+    if answer is None:
+        predicted = final_response
+    else:
+        predicted = answer
+        
+    if not golden_answers:
+        max_em, max_f1 = 0.0, 0.0
+    else:
+        max_em = max(em_score(predicted, g) for g in golden_answers)
+        max_f1 = max(f1_score(predicted, g)[0] for g in golden_answers)
+
+    reward = 0.0
+    if format_dict['has_tool_calling'] and max_em:
+        reward = 1.0
+    elif format_dict['has_tool_calling'] and not max_em:
+        reward = 0.1
+    elif not format_dict['has_tool_calling']:
+        reward = 0.0
+
+    return {
+        "reward": reward,
+        "em": max_em,
+        "f1": max_f1,
+        "has_tool_calling": 1.0 if format_dict["has_tool_calling"] else 0.0,
+        "has_tool_call_answer": 1.0 if format_dict["has_tool_call_answer"] else 0.0,
+    }
 
 
 @reward(name="ok_vqa_reward")

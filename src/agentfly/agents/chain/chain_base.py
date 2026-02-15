@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 import logging
+import random
 import sys
 import time
 import uuid
@@ -648,7 +649,7 @@ class ChainRollout:
         )
         emit(evt)
 
-        sample_message_json = json.dumps(serialize_for_json(messages[0]), indent=2)
+        sample_message_json = json.dumps(serialize_for_json(random.choice(messages)), indent=2)
         evt = MetricEvent(
             kind="text",
             name="Agent/rollout/sample_message",

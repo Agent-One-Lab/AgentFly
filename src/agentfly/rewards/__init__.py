@@ -7,7 +7,7 @@ from .math_reward import (
     math_equal_reward_tool,
     math_string_equal_reward_tool,
 )
-from .qa_reward import qa_f1_reward, qa_f1_reward_tool
+from .qa_reward import qa_f1_reward, qa_f1_reward_tool, qa_em_reward
 from .reward_base import (
     BaseReward,
     get_reward_from_name,
@@ -26,6 +26,7 @@ __all__ = [
     "list_available_rewards",
     "register_reward",
     "reward",
+    "qa_em_reward",
     "qa_f1_reward",
     "qa_f1_reward_tool",
     "math_equal_reward",

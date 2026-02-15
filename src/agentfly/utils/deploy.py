@@ -3,7 +3,7 @@ import os
 import click
 
 from .. import AGENT_DATA_DIR
-from ..templates import get_template
+from chat_bricks import get_template
 
 
 def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization):
