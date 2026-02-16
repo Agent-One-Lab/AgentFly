@@ -1,14 +1,16 @@
 import json
 import logging
 import re
-from typing import Optional
-from typing import Dict, List
+from typing import Dict, List, Optional
+
 from ..agent_base import BaseAgent
 
 logger = logging.getLogger(__file__)
 
 # Output format from system prompt: <think>...</think>, <search> query </search>, <information>...</information>, <answer>...</answer>
-_SEARCH_TAG_PATTERN = re.compile(r"<search>\s*(.*?)\s*</search>", re.DOTALL | re.IGNORECASE)
+_SEARCH_TAG_PATTERN = re.compile(
+    r"<search>\s*(.*?)\s*</search>", re.DOTALL | re.IGNORECASE
+)
 
 
 class HFAgent(BaseAgent):
@@ -21,7 +23,6 @@ class HFAgent(BaseAgent):
         super().__init__(
             model_name_or_path, tool_parser_name=tool_parser_name, **kwargs
         )
-
 
 
 class SearchR1Agent(BaseAgent):
@@ -105,4 +106,3 @@ class SearchR1Agent(BaseAgent):
 
     def parse(self, responses: List[str]) -> List[Dict]:
         return [self._parse_single_response(response) for response in responses]
-

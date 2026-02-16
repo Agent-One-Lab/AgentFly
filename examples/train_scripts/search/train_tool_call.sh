@@ -33,13 +33,13 @@ train_dataset="./data/rlhf/qa/nq_hotpotqa_train.json"
 eval_dataset="./data/rlhf/qa/nq_hotpotqa_test.json"
 system_prompt="Answer the given question. At the start of each turn, you must conduct some reasoning. After reasoning, if you find you lack some knowledge, you can call a search engine by generating the tool calling and it will return the top searched results. You can search as many times as your want. If you find no further external knowledge needed, you need to provide a short and simple answer by calling the answer tool."
 # tools="[google_search,answer_qa]"
-tools="[asyncdense_retrieve,answer_qa]"
+tools="[async_dense_retrieve_api,answer_qa]"
 # tools="[dense_retrieve,answer_qa]"
 # reward_name="qa_f1_reward"
 # reward_name="qa_em_reward"
-reward_name="qa_em_reward_tool"
-train_on_last_turn=True
-experiment_name="qa_em_reward_tool_train_on_last_turn"
+reward_name="qa_em_reward_tool_call"
+train_on_last_turn=False
+experiment_name="search_qa_em_reward_tool_call_3_turns"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
@@ -47,12 +47,13 @@ adv_estimator=grpo
 # adv_estimator=gae
 
 entropy_coeff=0.001
-kl_loss_type=mse
+kl_loss_type=low_var_kl
 agent_type=hf
-max_turns=4
+max_turns=3
 # template="qwen2.5"
 tool_parser_name="hermes"
-total_training_steps=200
+total_training_steps=1005
+lr_warmup_steps_ratio=0.03
 project_name="Algorithm"
 
 python3 -m agentfly.cli train \
@@ -76,6 +77,7 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
+    actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$train_batch_size \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.actor.use_kl_loss=True \

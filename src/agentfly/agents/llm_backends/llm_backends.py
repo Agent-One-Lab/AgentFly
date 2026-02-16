@@ -14,12 +14,12 @@ import numpy as np
 import openai
 import PIL
 import torch
+from chat_bricks import Chat
 from google import genai
 from google.genai import types
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
 
-from chat_bricks import Chat
 from ...utils.vision import image_to_data_uri
 
 logger = logging.getLogger(__name__)
@@ -274,7 +274,7 @@ class AsyncVLLMBackend(LLMBackend):
         """Generate text from prompt using vLLM"""
         sampling_params = {}
         if "temperature" in kwargs:
-            sampling_params["temperature"] = kwargs["temperature"]  
+            sampling_params["temperature"] = kwargs["temperature"]
         if "n" in kwargs:
             sampling_params["n"] = kwargs["n"]
         if "max_tokens" in kwargs:

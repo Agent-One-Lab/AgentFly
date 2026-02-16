@@ -3,10 +3,12 @@ Client tool that calls a separately deployed dense retriever API via HTTP.
 Use this when the retriever is run as a service (e.g. retriever_server.py) so that
 the retriever process can use GPU while the trainer/agent process does not need to.
 """
-import os
+
 import logging
+import os
 
 import httpx
+
 from ...decorator import tool
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,9 @@ SEARCH_PATH = "/search"
 TIMEOUT_SEC = 300.0
 
 
-def _format_retriever_error(exc: Exception, response: httpx.Response | None = None) -> str:
+def _format_retriever_error(
+    exc: Exception, response: httpx.Response | None = None
+) -> str:
     """Build a non-empty error message from exception and optional response body."""
     parts = []
     if response is not None:
@@ -61,4 +65,9 @@ async def async_dense_retrieve_api(query: str):
         err_msg = _format_retriever_error(e)
         return f"[Retriever API error: {err_msg}]"
     results = data.get("results") or []
-    return "\n".join(f"Doc {i+1}: {r.get('contents', '')}" for i, r in enumerate(results)) + "\n"
+    return (
+        "\n".join(
+            f"Doc {i + 1}: {r.get('contents', '')}" for i, r in enumerate(results)
+        )
+        + "\n"
+    )

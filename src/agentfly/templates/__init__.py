@@ -1,1 +1,1 @@
-from .registry import *
+from .registry import *  # noqa: F403

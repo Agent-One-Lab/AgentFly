@@ -1,6 +1,8 @@
 import sys
 from importlib import import_module
-from .templates import * # noqa: F401
+
+from .templates import *  # noqa: F403
+
 
 def main():
     """
