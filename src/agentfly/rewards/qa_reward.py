@@ -192,7 +192,13 @@ def _format_ok(final_response: str, trajectory: List) -> tuple:
             tool_call = last_message["tool_calls"][0]
             if "answer" in tool_call["function"]["arguments"]:
                 has_tool_call_answer = True
-                answer = tool_call["function"]["arguments"]["answer"]
+                if (
+                    isinstance(tool_call["function"]["arguments"], dict)
+                    and "answer" in tool_call["function"]["arguments"]
+                ):
+                    answer = tool_call["function"]["arguments"]["answer"]
+                else:
+                    answer = tool_call["function"]["arguments"]
 
     format_dict = {
         "has_think": previous_have_think,

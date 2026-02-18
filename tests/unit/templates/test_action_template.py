@@ -3,13 +3,13 @@ from chat_bricks import Chat, get_template, Template, tokenize_conversations
 import pytest
 from transformers import AutoTokenizer
 
-@pytest.mark.parametrize("template_name", ["search-r1"])
+@pytest.mark.parametrize("template_name", ["action-agent"])
 @pytest.mark.parametrize("messages", [
     [
         {"role": "user", "content": "Who is the president of the United States?"},
-        {"role": "assistant", "content": "<think>I need to search for the president of the United States.</think>\n<search>president of the United States</search>\n"},
+        {"role": "assistant", "content": "<think>I need to search for the president of the United States.</think>\n<action>president of the United States</action>\n"},
         {"role": "tool", "content": "(US President): President is a political office in the United States... The current president is Joe Biden."},
-        {"role": "assistant", "content": "I found the president of the United States is Joe Biden. <answer>Joe Biden</answer>"},
+        {"role": "assistant", "content": "I found the president of the United States is Joe Biden."},
     ],
 ])
 @pytest.mark.parametrize("tools", [

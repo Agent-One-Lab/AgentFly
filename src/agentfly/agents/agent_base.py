@@ -60,7 +60,7 @@ except ImportError:
     ChatCompletionRequest = None
     ToolParserManager = None
 
-Logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class BaseAgent(ChainRollout, ABC):
@@ -562,7 +562,7 @@ class BaseAgent(ChainRollout, ABC):
                 if isinstance(schema, dict):
                     tool_schemas.append(schema)
                 else:
-                    Logger.warning(
+                    logger.warning(
                         f"Tool {getattr(tool, 'name', 'unknown')} has invalid schema format: {type(schema)}"
                     )
                     continue
@@ -615,7 +615,7 @@ class BaseAgent(ChainRollout, ABC):
                             )
                         except (json.JSONDecodeError, TypeError):
                             # Invalid JSON, skip this tool call
-                            # Logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
+                            # logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
                             continue
                     elif isinstance(tool_call, dict):
                         # Fallback: handle dictionary format (for compatibility)
@@ -649,7 +649,7 @@ class BaseAgent(ChainRollout, ABC):
                                     if isinstance(func_info, dict)
                                     else getattr(func_info, "name", "unknown")
                                 )
-                                Logger.warning(
+                                logger.warning(
                                     f"Invalid JSON in tool call arguments for {tool_name}: {arguments_str}"
                                 )
                                 continue

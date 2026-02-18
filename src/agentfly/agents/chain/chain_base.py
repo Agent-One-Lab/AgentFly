@@ -335,8 +335,12 @@ class ChainRollout:
                     # Validate tool call
                     # We don't allow tool calls for unknow tools now
                     is_valid = self.validate_tool_call(tool_call)
+
                     if not is_valid:
+                        logger.debug(f"Invalid tool call: {tool_call}")
                         continue
+                    else:
+                        logger.debug(f"Valid tool call: {tool_call}")
 
                     result = await self._execute_tool_call(
                         tool_call,

@@ -7,6 +7,7 @@ from .llm_backends import (
     ClientConfig,
 )
 from .react.react_agent import ReactAgent
+from .specialized.action_agent import ActionAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
 from .specialized.hf_agent import HFAgent, SearchR1Agent
@@ -23,6 +24,7 @@ __all__ = [
     "GUIAgent",
     "HFAgent",
     "ImageEditingAgent",
+    "ActionAgent",
     "ClientBackend",
     "ClientConfig",
     "AsyncVLLMBackend",

@@ -252,7 +252,7 @@ class ScienceWorldEnv(BaseEnv, SupportsDocker):
             raise RuntimeError(f"Port mapping not found. Logs:\n{logs}")
 
         base_url = f"http://{self.host_ip}:{host_port}"
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=20.0)
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=40.0)
 
     @staticmethod
     async def acquire():
