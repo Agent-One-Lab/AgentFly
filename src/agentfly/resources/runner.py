@@ -30,7 +30,7 @@ class BaseRunner(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def start_resource(self, spec: ResourceSpec, resource_id: Optional[str] = None) -> BaseResource:
+    async def start_resource(self, spec: ResourceSpec) -> BaseResource:
         """
         Start a single resource according to spec.
         Called by ResourceEngine when scaling up or on first acquire.
@@ -81,7 +81,10 @@ class LocalRunner(BaseRunner):
         raise ValueError(f"LocalRunner does not support resource category: {spec.category.value}")
 
     async def _start_container(self, spec: ResourceSpec, resource_id: Optional[str]) -> BaseResource:
-        """Start a container using the enroot client."""
+        """Start a container using the enroot client.
+        All container-based resource default to use enroot to start locally for now. So we directly
+        call their start method for local running.
+        """
         name = resource_id or random_name(prefix="res")
         image = spec.image or "ubuntu:22.04"
         kwargs = {
@@ -112,7 +115,7 @@ class LocalRunner(BaseRunner):
 
     async def _start_vllm(self, spec: ResourceSpec, resource_id: Optional[str]) -> BaseResource:
         # TODO: vLLM local process or subprocess; return VLLMResource
-        raise NotImplementedError("LocalRunner VLLM not implemented in template")
+        raise NotImplementedError("LocalRunner VLLM not implemented.")
 
     async def end_resource(self, resource: BaseResource) -> None:
         await resource.end()
