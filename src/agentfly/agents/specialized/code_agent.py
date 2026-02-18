@@ -37,6 +37,8 @@ class CodeAgent(BaseAgent):
     def __init__(
         self, model_name_or_path: str, template: str, tools: List = None, **kwargs
     ):
+        if "system_prompt" in kwargs:
+            del kwargs["system_prompt"]
         super().__init__(
             model_name_or_path=model_name_or_path,
             template=template,

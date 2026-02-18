@@ -1,4 +1,3 @@
-import copy
 import inspect
 import json
 import logging
@@ -10,11 +9,17 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import torch
+from chat_bricks import (
+    get_template,
+    split_messages_with_assistant,
+    tokenize_conversations,
+)
 from termcolor import colored
 
-from chat_bricks import tokenize_conversations, get_template
+from ..templates import *  # noqa: F403
 from ..tools.tool_base import BaseTool
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
+from ..utils.verl import pad_tensor_to_rank_size
 from .chain.chain_base import ChainRollout
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 from .llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
@@ -55,7 +60,7 @@ except ImportError:
     ChatCompletionRequest = None
     ToolParserManager = None
 
-Logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class BaseAgent(ChainRollout, ABC):
@@ -73,7 +78,7 @@ class BaseAgent(ChainRollout, ABC):
         model_name_or_path,
         template: str = None,
         system_prompt: str = None,
-        tools: List = None,
+        tools: List = [],
         max_model_len: int = None,
         backend: str = "async_vllm",
         backend_config: Any = None,
@@ -122,8 +127,8 @@ class BaseAgent(ChainRollout, ABC):
         self.backend = backend
         self.tools = tools
         self.max_model_len = max_model_len
-
         self.tool_names = [tool.name for tool in tools]
+
         if isinstance(system_prompt, str):
             system_prompt = system_prompt.replace("\\n", "\n")
         self.system_prompt = system_prompt
@@ -270,9 +275,17 @@ class BaseAgent(ChainRollout, ABC):
             List of preprocessed messages.
         """
         messages_list = MessagesList.from_data(messages)
+        tools = [tool.schema for tool in self.tools]
+        if self.system_prompt and "{tools}" in self.system_prompt:
+            system_prompt = self.system_prompt.replace(
+                "{tools}", json.dumps(tools, indent=4)
+            )
+        else:
+            system_prompt = self.system_prompt
+
         for messages in messages_list:
-            if self.system_prompt:
-                messages.set_system_prompt(self.system_prompt, enforce=False)
+            if system_prompt:
+                messages.set_system_prompt(system_prompt, enforce=False)
 
         return messages_list.to_list()
 
@@ -394,6 +407,8 @@ class BaseAgent(ChainRollout, ABC):
         tokenizer=None,
         return_reward_mask: bool = False,
         concatenate_mm_inputs: bool = True,
+        train_on_last_turn: bool = False,
+        world_size: int = 1,
     ):
         if tokenizer is None:
             tokenizer = self.tokenizer
@@ -409,17 +424,25 @@ class BaseAgent(ChainRollout, ABC):
                 if key != "messages":
                     info[key] = value
 
-            last_response = None
-
-            for i in range(len(messages) - 1, -1, -1):
-                message = messages[i]
-                if message["role"] == "assistant":
-                    last_message = message
-                    last_response = last_message["content"][0]["text"]
-                    break
-
-            info["last_response"] = last_response
             other_info_list.append(info)
+
+        repeated_nums = [1] * len(messages_list)
+        if train_on_last_turn:
+            # Split each trajectory into multiple message lists (one per assistant turn)
+            messages_list = [
+                split_messages_with_assistant(messages) for messages in messages_list
+            ]
+            repeated_nums = [len(messages) for messages in messages_list]
+            # Repeat other_info_list so each sub-conversation has aligned info
+            other_info_list = [
+                info
+                for i, info in enumerate(other_info_list)
+                for _ in range(repeated_nums[i])
+            ]
+            # Flatten messages_list to a single list of conversations
+            messages_list = [
+                messages for sub_list in messages_list for messages in sub_list
+            ]
 
         inputs = tokenize_conversations(
             messages_list,
@@ -431,6 +454,7 @@ class BaseAgent(ChainRollout, ABC):
             add_generation_prompt=True,
             concatenate_mm_inputs=concatenate_mm_inputs,
             ignore_tool_calls=True,
+            train_on_last_turn_only=train_on_last_turn,
         )
         position_ids = torch.clip(
             torch.cumsum(inputs["attention_mask"], dim=-1) - 1, min=0, max=None
@@ -439,7 +463,19 @@ class BaseAgent(ChainRollout, ABC):
 
         assert inputs["input_ids"].shape[0] == len(other_info_list)
 
-        return inputs, other_info_list
+        if world_size > 1:
+            pad_size = (
+                world_size - inputs["input_ids"].shape[0] % world_size
+            ) % world_size
+            for k, v in inputs.items():
+                inputs[k] = pad_tensor_to_rank_size(v, world_size)
+            if pad_size > 0:
+                # Pad other_info_list with copies of the last element (matches last-row repeat in pad_tensor_to_rank_size)
+                other_info_list = other_info_list + [other_info_list[-1]] * pad_size
+                # Add pad_size to the last element of repeated_nums since padding repeats the last sample
+                repeated_nums = repeated_nums[:-1] + [repeated_nums[-1] + pad_size]
+
+        return inputs, other_info_list, repeated_nums
 
     def extract_final_response(self, messages: List[Dict[str, Any]]) -> str:
         last_message_content = messages[-1]["content"][0]["text"]
@@ -526,7 +562,7 @@ class BaseAgent(ChainRollout, ABC):
                 if isinstance(schema, dict):
                     tool_schemas.append(schema)
                 else:
-                    Logger.warning(
+                    logger.warning(
                         f"Tool {getattr(tool, 'name', 'unknown')} has invalid schema format: {type(schema)}"
                     )
                     continue
@@ -579,7 +615,7 @@ class BaseAgent(ChainRollout, ABC):
                             )
                         except (json.JSONDecodeError, TypeError):
                             # Invalid JSON, skip this tool call
-                            # Logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
+                            # logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
                             continue
                     elif isinstance(tool_call, dict):
                         # Fallback: handle dictionary format (for compatibility)
@@ -613,7 +649,7 @@ class BaseAgent(ChainRollout, ABC):
                                     if isinstance(func_info, dict)
                                     else getattr(func_info, "name", "unknown")
                                 )
-                                Logger.warning(
+                                logger.warning(
                                     f"Invalid JSON in tool call arguments for {tool_name}: {arguments_str}"
                                 )
                                 continue
@@ -690,10 +726,16 @@ class BaseAgent(ChainRollout, ABC):
                         )
             print(text)
 
-    def get_verl_data_proto(self):
-        inputs, other_info_list = self.tokenize_trajectories(
-            return_reward_mask=True, concatenate_mm_inputs=False
+    def get_verl_data_proto(
+        self, train_on_last_turn: bool = False, world_size: int = 1
+    ):
+        inputs, other_info_list, repeated_nums = self.tokenize_trajectories(
+            return_reward_mask=True,
+            concatenate_mm_inputs=False,
+            world_size=world_size,
+            train_on_last_turn=train_on_last_turn,
         )
+
         group_ids_list = [info["group_id"] for info in other_info_list]
         group_ids = np.array(group_ids_list, dtype=object)
         batch_size = len(group_ids_list)
@@ -705,6 +747,22 @@ class BaseAgent(ChainRollout, ABC):
                 seen_group_ids.add(group_id)
         # Do evaluation here
         reward_values, other_values = self.rewards
+        # Truncate to len(repeated_nums) so expansion matches truncated batch (when world_size > 1)
+        n_segments = len(repeated_nums)
+        reward_values = [
+            reward_value
+            for i, reward_value in enumerate(reward_values[:n_segments])
+            for _ in range(repeated_nums[i])
+        ]
+        other_values = {
+            key: [
+                value
+                for i, value in enumerate(values[:n_segments])
+                for _ in range(repeated_nums[i])
+            ]
+            for key, values in other_values.items()
+        }
+
         inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(
             reward_values, dtype=torch.float32
         ).unsqueeze(dim=-1)  # BS x L
@@ -738,6 +796,8 @@ class BaseAgent(ChainRollout, ABC):
         if "mm_inputs" in inputs:
             mm_inputs = inputs.pop("mm_inputs")
             inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
-        batch = DataProto.from_single_dict(inputs, meta_info={"use_agent": True})
+        batch = DataProto.from_single_dict(
+            inputs, meta_info={"use_agent": True, "repeated_nums": repeated_nums}
+        )
 
         return batch

@@ -9,7 +9,7 @@ from ...decorator import tool
     name="scienceworld_explorer",
     description="Take an action in scienceworld environment and return the observation. Valid actions are 'look around', 'inventory', 'task', 'open <OBJ>', 'close <OBJ>', 'deactivate <OBJ>', 'activate <OBJ>', 'connect <OBJ> to <OBJ2>', 'disconnect <OBJ>', 'use <OBJ>', 'use <OBJ> [on <OBJ2>]' (OBJ2 is optional), 'look at <OBJ>', 'look in <OBJ>', 'read <OBJ>', 'move <OBJ> to <OBJ2>', 'pick up <OBJ>', 'put down <OBJ>', 'pour <OBJ> into <OBJ2>', 'dunk <OBJ> into <OBJ2>', 'mix <OBJ>', 'go to <LOC>', 'eat <OBJ>', 'flush <OBJ>', 'focus on <OBJ>', 'wait [<DURATION>]' (DURATION is optional)",
     stateful=True,
-    pool_size=8,
+    pool_size=24,
 )
 async def scienceworld_explorer(action: str, env: ScienceWorldEnv):
     """

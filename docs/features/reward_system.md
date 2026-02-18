@@ -5,7 +5,9 @@ We put reward calculation into the agent side instead of trainer side and use a 
 2. Reward calculation can be designed to be asynchronous for efficiency.
 
 ### Definition
-Similar to tools, we can decide whether to use environments in the reward definition. The return should either be a value, or a dictionary containing `reward` as one of keys. We can use decorator `@tool` or inherit from the `BaseReward` class.
+Similar to tools, we can decide whether to use environments in the reward definition. The return should either be a value, or a dictionary containing `reward` as one of keys. We can use decorator `@tool` or inherit from the `BaseReward` class. Any additional keys in the returned dict (e.g. `em`, `f1`, `fmt`) are passed through and documented in training and validation.
+
+
 
 ```python
 @reward(name="qa_f1_reward")
@@ -105,3 +107,9 @@ def summary_reward(final_response, length_penalty, max_length):
     else:
         return 1.0
 ```
+
+## Return Values
+
+Each a `float` value or a dictionary containing `reward` as key should be returned. If the return value is `float`, it is directly used as rewards. If a dictionary is returned, the `reward` is used as rewards. While other keys are still documented.
+
+Extra keys (besides `reward`) are logged as `reward_extra/{key}/mean`, `reward_extra/{key}/max`, `reward_extra/{key}/min` in the metrics produced by `compute_data_metrics` (`verl/verl/trainer/ppo/metric_utils.py`).

@@ -35,7 +35,7 @@ def answer_math(answer: str):
 
 @tool(
     name="answer_qa",
-    description="Give the final answer. The answer should be a simple, short, and direct.",
+    description="Give the final answer. The answer should be simple, short, and direct.",
     status="finish",
 )
 def answer_qa(answer: str):

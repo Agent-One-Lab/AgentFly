@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 import logging
+import random
 import sys
 import time
 import uuid
@@ -277,7 +278,19 @@ class ChainRollout:
         enable_streaming: bool = False,
     ):
         """
-        Run a single chain with optional streaming support.
+        Run a single chain with optional streaming support. It supports parallel tool calls (running multiple tool calls for a single turn).
+        If there is no tool call, we stop the task immediately.
+
+        Args:
+            chain_id: The id of the chain.
+            first_node: The first node of the chain.
+            chain: The chain object.
+            tools: The tools to use for the chain.
+            max_turns: The maximum number of turns for the chain.
+            generation_config: The generation configuration.
+            done_queue: The queue to put the result of the chain.
+            enable_streaming: Whether to enable streaming.
+
         """
         current_node = first_node
         depth = 0
@@ -313,8 +326,22 @@ class ChainRollout:
                     break
 
             # Handle tool calls
-            if current_node.messages[-1].get("tool_calls"):
+            num_parallel_tool_call = 0
+            if (
+                current_node.messages[-1].get("tool_calls")
+                and len(current_node.messages[-1]["tool_calls"]) > 0
+            ):
                 for tool_call in current_node.messages[-1]["tool_calls"]:
+                    # Validate tool call
+                    # We don't allow tool calls for unknow tools now
+                    is_valid = self.validate_tool_call(tool_call)
+
+                    if not is_valid:
+                        logger.debug(f"Invalid tool call: {tool_call}")
+                        continue
+                    else:
+                        logger.debug(f"Valid tool call: {tool_call}")
+
                     result = await self._execute_tool_call(
                         tool_call,
                         newest_messages,
@@ -324,6 +351,7 @@ class ChainRollout:
                         have_set_tools,
                         enable_streaming,
                     )
+                    num_parallel_tool_call += 1
                     have_set_tools = True
 
                     # Create action input node
@@ -358,12 +386,16 @@ class ChainRollout:
                     action_input_node.is_terminal = (
                         result["status"] in self.terminal_status
                     )
+
             else:
                 # No tool calls, chain is finished
                 break
 
-            current_node = action_input_node
+            if num_parallel_tool_call == 0:
+                # No tool call, stop the task
+                break
 
+            current_node = action_input_node
             depth += 1
 
         # Finalize chain
@@ -499,6 +531,14 @@ class ChainRollout:
             )
             new_msg = self.parse(responses)
             return new_msg[0]
+
+    def validate_tool_call(self, tool_call):
+        tool_name = tool_call["function"]["name"]
+        # TODO: validate tool input
+        tool_input = tool_call["function"]["arguments"]  # noqa: F841
+        if tool_name not in self.tool_names:
+            return False
+        return True
 
     async def _execute_tool_call(
         self,
@@ -648,7 +688,9 @@ class ChainRollout:
         )
         emit(evt)
 
-        sample_message_json = json.dumps(serialize_for_json(messages[0]), indent=2)
+        sample_message_json = json.dumps(
+            serialize_for_json(random.choice(messages)), indent=2
+        )
         evt = MetricEvent(
             kind="text",
             name="Agent/rollout/sample_message",

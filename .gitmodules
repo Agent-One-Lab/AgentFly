@@ -1,3 +1,3 @@
 [submodule "verl"]
 	path = verl
-	url = git@github.com:Agent-One-Lab/verl.git
+	url = https://github.com/Agent-One-Lab/verl.git
