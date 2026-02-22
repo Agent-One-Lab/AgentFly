@@ -22,7 +22,13 @@ async def scienceworld_explorer(action: str, context: Context):
         str: The observation returned by the environment after performing the action, or an error message if the action is invalid or an exception occurs.
     """
     try:
-        env = await context.acquire_resource(spec=ScienceWorldSpec, scope="global", backend="local")
+        # If this spec is not in resource_acquired yet, we will need to reset after acquire.
+        need_reset = not context.is_spec_acquired(ScienceWorldSpec)
+        env = await context.acquire_resource(
+            spec=ScienceWorldSpec, scope="global", backend="local"
+        )
+        if need_reset:
+            await env.reset(env_args=context.metadata)
         observation = await env.step(action)
         return observation
     except Exception as e:

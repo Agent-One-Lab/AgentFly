@@ -577,10 +577,19 @@ class ChainRollout:
         tool_name = tool_call["function"]["name"]
         tool_input = tool_call["function"]["arguments"]
 
-        # Set up tools if needed
+        # Set up tools if needed (reset resources that may have been acquired at chain start)
         if not have_set_resources:
-            await context.reset_resource(scope="rollout")
-            await context.reset_resource(scope="global")
+            env_args = {
+                k: context.metadata[k]
+                for k in ("task_name", "variation_idx")
+                if k in context.metadata
+            }
+            if env_args:
+                await context.reset_resource(scope="rollout", env_args=env_args)
+                await context.reset_resource(scope="global", env_args=env_args)
+            else:
+                await context.reset_resource(scope="rollout")
+                await context.reset_resource(scope="global")
             have_set_resources = True
 
         # Execute tool call

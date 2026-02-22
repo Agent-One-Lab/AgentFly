@@ -11,6 +11,11 @@ from ..resources import ResourceEngine
 from ..resources.types import BaseResource, ResourceSpec
 
 
+def _spec_key(spec: ResourceSpec) -> str:
+    """Stable hashable key for a spec (category + image or model)."""
+    return f"{spec.category}:{spec.image or spec.model_name_or_path or 'default'}"
+
+
 class Context:
     """
     Execution context for tools and rewards in agentic RL rollouts.
@@ -43,7 +48,16 @@ class Context:
         self.resource_engine = ResourceEngine
         self.rollout_resource_ids: List[str] = []
         self.global_resource_ids: Set[str] = set()
-    
+        # Spec keys acquired this rollout (set by acquire_resource). Tools can use
+        # last_acquire_was_first to decide whether to reset (e.g. first acquisition of that spec).
+        self._resource_acquired: Set[str] = set()
+        # Set by acquire_resource: True if this spec was not in _resource_acquired before.
+        self.last_acquire_was_first: bool = False
+
+    def is_spec_acquired(self, spec: ResourceSpec) -> bool:
+        """Return True if a resource for this spec has been acquired this rollout."""
+        return _spec_key(spec) in self._resource_acquired
+
     async def monitor_resources(self) -> Dict[str, Dict[str, int]]:
         """
         Monitor the resources in the context.
@@ -82,6 +96,8 @@ class Context:
             )
 
         resource_id = id or self.rollout_id
+        spec_key = _spec_key(spec)
+        self.last_acquire_was_first = spec_key not in self._resource_acquired
         if scope == "rollout":
             if resource_id not in self.rollout_resource_ids:
                 self.rollout_resource_ids.append(resource_id)
@@ -93,6 +109,7 @@ class Context:
             spec=spec,
             backend=backend,
         )
+        self._resource_acquired.add(spec_key)
         return resource
 
     async def reset_resource(
