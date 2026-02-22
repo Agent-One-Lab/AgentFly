@@ -24,7 +24,7 @@ rm -rf /tmp/ray/ray_current_cluster
 ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
 
 
-model=Qwen/Qwen2.5-3B
+model=Qwen/Qwen2.5-7B-Instruct
 lr=5e-7
 max_model_len=16384
 max_new_tokens_per_turn=378
@@ -34,7 +34,7 @@ num_chains=5
 mini_batch_size=$((train_batch_size * num_chains))
 kl_coef=0.001
 train_dataset="./data/rlhf/qa/nq_hotpotqa_train.json"
-eval_dataset="./data/rlhf/qa/qa_test.json"
+eval_dataset="./data/rlhf/qa/nq_hotpotqa_test.json"
 system_prompt="Answer the given question. You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search> and it will return the top searched results between <information> and </information>. You can search as many times as your want. If you find no further external knowledge needed, you can directly provide the answer inside <answer> and </answer>, without detailed illustrations. For example, <answer> Beijing </answer>."
 # tools="[google_search,answer_qa]"
 tools="[async_dense_retrieve_api]"
@@ -44,7 +44,7 @@ tools="[async_dense_retrieve_api]"
 # experiment_name="search_r1_base_grpo_em_format"
 reward_name="qa_em_reward"
 train_on_last_turn=False
-experiment_name="search_r1_base_grpo_em_reward_searchr1_setting_3_turns_shifting"
+experiment_name="search_r1_grpo_em_reward_7b"
 
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus

@@ -76,9 +76,9 @@ kl_coef=0.001
 train_dataset="./data/rlhf/scienceworld/scienceworld_train.json"
 eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
 # adv_estimator=rloo
-# adv_estimator=reinforce_plus_plus
+adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
-adv_estimator=grpo
+# adv_estimator=grpo
 # adv_estimator=gae
 
 agent_type=action
@@ -93,7 +93,7 @@ agent_backend="async_verl"
 total_training_steps=200
 
 project_name="Algorithm"
-experiment_name="scienceworld_qwen2.5-3b-instruct_mse"
+experiment_name="scienceworld_qwen2.5-3b-instruct_reinforcepp"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \

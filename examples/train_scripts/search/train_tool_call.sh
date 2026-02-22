@@ -21,7 +21,7 @@ rm -rf /tmp/ray/ray_current_cluster
 ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
 
 
-model=Qwen/Qwen2.5-3B-Instruct
+model=Qwen/Qwen2.5-7B-Instruct
 lr=5e-7
 max_model_len=16384
 max_new_tokens_per_turn=512
@@ -39,7 +39,7 @@ tools="[async_dense_retrieve_api,answer_qa]"
 # reward_name="qa_em_reward"
 reward_name="qa_em_reward_tool_call"
 train_on_last_turn=False
-experiment_name="search_qa_em_reward_tool_call_3_turns"
+experiment_name="search_qa_em_reward_tool_call_7b"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
