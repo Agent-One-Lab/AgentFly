@@ -1,27 +1,36 @@
 import pytest
 
+from agentfly.core import Context
 from agentfly.rewards import reward
 from agentfly.tools import tool
-from agentfly.envs import WebAgentTextEnv
+from agentfly.envs.webshop_text_env import WebShopSpec
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_tool_reward_env():
-    @tool(env_cls=WebAgentTextEnv, name="test_tool", pool_size=4)
-    async def test_tool(prediction: str, env: WebAgentTextEnv):
-        result = await env.step("search[protein]")
-        result = await env.step("click[B079HGJ5MH]")
-        result = await env.step("click[Buy Now]")
-        return result
+    ctx = Context(rollout_id="test_env_id_webshop")
+    try:
+        @tool(name="test_webshop_tool")
+        async def test_tool(prediction: str, context: Context):
+            env = await context.acquire_resource(
+                spec=WebShopSpec, scope="rollout", backend="local"
+            )
+            await env.step("search[protein]")
+            await env.step("click[B079HGJ5MH]")
+            return await env.step("click[Buy Now]")
 
-    @reward(env_cls=WebAgentTextEnv, name="test_reward", pool_size=4)
-    async def test_reward(prediction, env: WebAgentTextEnv):
-        result = await env.step("get_reward", task_id=0)
+        @reward(name="test_webshop_reward")
+        async def test_reward(prediction, context: Context):
+            env = await context.acquire_resource(
+                spec=WebShopSpec, scope="rollout", backend="local"
+            )
+            result = await env.step("get_reward", task_id=0)
+            return {"reward": result.get("reward", 0), "result": result}
 
-        return {"reward": 1, "result": result}
+        result = await test_tool(prediction="random", context=ctx)
+        assert result is not None
 
-    result = await test_tool(prediction="random", id="test_0")
-    print(result)
-
-    result = await test_reward(prediction="random", id="test_0")
-    print(result)
+        result = await test_reward(prediction="random", context=ctx)
+        assert "reward" in result
+    finally:
+        await ctx.release_resource(scope="rollout")

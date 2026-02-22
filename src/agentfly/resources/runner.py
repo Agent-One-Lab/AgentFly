@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import asyncio
 from enroot import from_env, random_name
 from .container_resource import ContainerResource
-from .types import BaseResource, ResourceCategory, ResourceSpec, ResourceStatus
+from .types import BaseResource, ResourceSpec, ResourceStatus
 
 if TYPE_CHECKING:
     from .call_interface import CallInterface
@@ -47,7 +47,7 @@ class BaseRunner(abc.ABC):
         """Return current execution/lifecycle status of the resource."""
         raise NotImplementedError
 
-    def get_call_interface(self, kind: ResourceCategory) -> Optional["CallInterface"]:
+    def get_call_interface(self, kind: str) -> Optional["CallInterface"]:
         """
         Return the call interface (MCP or input-text) for this runner and resource kind.
         Override in subclasses to return MCPToolCall or InputTextCall implementation.
@@ -65,8 +65,11 @@ class LocalRunner(BaseRunner):
         self._containers: Dict[str, Any] = {}
         self.client = from_env()
         self.container_resources_categories = [
-            ResourceCategory.CONTAINER,
-            ResourceCategory.PYTHON_ENV,
+            "container",
+            "python_env",
+            "scienceworld",
+            "alfworld",
+            "webshop",
         ]
 
     @property
@@ -76,9 +79,9 @@ class LocalRunner(BaseRunner):
     async def start_resource(self, spec: ResourceSpec, resource_id: Optional[str] = None) -> BaseResource:
         if spec.category in self.container_resources_categories:
             return await self._start_container(spec, resource_id)
-        if spec.category == ResourceCategory.VLLM:
+        if spec.category == "vllm":
             return await self._start_vllm(spec, resource_id)
-        raise ValueError(f"LocalRunner does not support resource category: {spec.category.value}")
+        raise ValueError(f"LocalRunner does not support resource category: {spec.category}")
 
     async def _start_container(self, spec: ResourceSpec, resource_id: Optional[str]) -> BaseResource:
         """Start a container using the enroot client.
@@ -102,13 +105,22 @@ class LocalRunner(BaseRunner):
         container = self.client.containers.run(image, **kwargs)
         self._containers[container.name] = container
 
-        if spec.category == ResourceCategory.PYTHON_ENV:
+        if spec.category == "python_env":
             from ..envs.python_env import PythonSandboxEnv
             resource = PythonSandboxEnv(container=container, resource_id=container.name, spec=spec)
-        elif spec.category == ResourceCategory.CONTAINER:
+        elif spec.category == "scienceworld":
+            from ..envs.scienceworld_env import ScienceWorldEnv
+            resource = ScienceWorldEnv(container=container, resource_id=container.name, spec=spec)
+        elif spec.category == "alfworld":
+            from ..envs.alfworld_env import ALFWorldEnv
+            resource = ALFWorldEnv(container=container, resource_id=container.name, spec=spec)
+        elif spec.category == "webshop":
+            from ..envs.webshop_text_env import WebAgentTextEnv
+            resource = WebAgentTextEnv(container=container, resource_id=container.name, spec=spec)
+        elif spec.category == "container":
             resource = ContainerResource(container=container, resource_id=container.name, spec=spec)
         else:
-            raise ValueError(f"LocalRunner does not support resource category: {spec.category.value}")
+            raise ValueError(f"LocalRunner does not support resource category: {spec.category}")
 
         await resource.start()
         return resource

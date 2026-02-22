@@ -35,14 +35,13 @@ The code is in markdown format, enclosed with ```python and ```. In each turn, o
 
 class CodeAgent(BaseAgent):
     def __init__(
-        self, model_name_or_path: str, template: str, tools: List = None, **kwargs
+        self, model_name_or_path: str, tools: List = None, system_prompt: str = CodeAgentSystemPrompt, **kwargs
     ):
-        if "system_prompt" in kwargs:
-            del kwargs["system_prompt"]
+        if system_prompt is None or system_prompt == "":
+            system_prompt = CodeAgentSystemPrompt
         super().__init__(
             model_name_or_path=model_name_or_path,
-            template=template,
-            system_prompt=CodeAgentSystemPrompt,
+            system_prompt=system_prompt,
             tools=tools,
             **kwargs,
         )

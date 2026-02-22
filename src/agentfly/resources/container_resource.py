@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, TYPE_CHECKING
 
-from .types import BaseResource, ResourceCategory, ResourceSpec, ResourceStatus
+from .types import BaseResource, ResourceSpec, ResourceStatus
 
 
 
@@ -27,8 +27,8 @@ class ContainerResource(BaseResource):
         return self._resource_id
 
     @property
-    def category(self) -> ResourceCategory:
-        return ResourceCategory.CONTAINER
+    def category(self) -> str:
+        return "container"
 
     @property
     def container(self) -> Any:

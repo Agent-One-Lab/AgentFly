@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from termcolor import colored
 from tqdm.asyncio import tqdm_asyncio
 
+from ...core import Context
+from ...resources import ResourceEngine
 from ...tools.tool_base import submit_tool_call
 from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
 from ...utils.timing import Timer
@@ -179,7 +181,10 @@ class ChainRollout:
         for group_idx, messages in enumerate(messages_list):
             group_id = group_ids[group_idx]
             for j in range(num_chains):
-                ch = Chain(messages.meta | {"group_id": group_id})
+                ch = Chain(
+                    messages.meta
+                    | {"group_id": group_id, "group_idx": group_idx, "chain_idx": j}
+                )
                 root = ch.add_node(
                     type="Action Input", messages=deepcopy(messages.messages)
                 )
@@ -192,7 +197,15 @@ class ChainRollout:
 
     def get_messages(self) -> List[Any]:
         messages = []
-        for id, node in self.current_nodes.items():
+        # Sort by (group_idx, chain_idx) so trajectories are in deterministic order
+        items = list(self.current_nodes.items())
+        items.sort(
+            key=lambda item: (
+                self.chains[item[0]].info.get("group_idx", 0),
+                self.chains[item[0]].info.get("chain_idx", 0),
+            )
+        )
+        for id, node in items:
             info = self.chains[id].info
             message_item = {}
             message_item["messages"] = node.messages.messages
@@ -292,9 +305,17 @@ class ChainRollout:
             enable_streaming: Whether to enable streaming.
 
         """
+
+        # Build Context from rollout data for tools that need it
+        context = Context(
+            rollout_id=chain_id,
+            group_id=chain.info.get("group_id"),
+            metadata=chain.info,
+        )
+
         current_node = first_node
         depth = 0
-        have_set_tools = False
+        have_set_resources = False
 
         while not current_node.is_terminal and depth < max_turns:
             newest_messages = current_node.messages.copy()
@@ -343,16 +364,17 @@ class ChainRollout:
                         logger.debug(f"Valid tool call: {tool_call}")
 
                     result = await self._execute_tool_call(
+                        context,
                         tool_call,
                         newest_messages,
                         chain,
                         chain_id,
                         depth,
-                        have_set_tools,
+                        have_set_resources,
                         enable_streaming,
                     )
                     num_parallel_tool_call += 1
-                    have_set_tools = True
+                    have_set_resources = True
 
                     # Create action input node
                     action_input_node = chain.add_node(
@@ -399,7 +421,7 @@ class ChainRollout:
             depth += 1
 
         # Finalize chain
-        await self._finalize_chain(chain_id, chain, current_node, depth)
+        await self._finalize_chain(chain_id, chain, current_node, depth, context)
         await done_queue.put((chain_id, chain, current_node))
 
         self.finished_chains_count += 1
@@ -542,12 +564,13 @@ class ChainRollout:
 
     async def _execute_tool_call(
         self,
+        context,
         tool_call,
         newest_messages,
         chain,
         chain_id,
         depth,
-        have_set_tools,
+        have_set_resources,
         enable_streaming,
     ):
         """Execute a tool call with optional streaming support."""
@@ -555,13 +578,17 @@ class ChainRollout:
         tool_input = tool_call["function"]["arguments"]
 
         # Set up tools if needed
-        if not have_set_tools:
-            await self.set_tools(chain_id, chain.info)
-            have_set_tools = True
+        if not have_set_resources:
+            await context.reset_resource(scope="rollout")
+            await context.reset_resource(scope="global")
+            have_set_resources = True
 
         # Execute tool call
         result = await submit_tool_call(
-            tool_name, tool_input, id=chain_id, allowed_tool_names=self.tool_names
+            tool_name,
+            tool_input,
+            context=context,
+            allowed_tool_names=self.tool_names,
         )
 
         if enable_streaming:
@@ -586,7 +613,7 @@ class ChainRollout:
 
         return result
 
-    async def _finalize_chain(self, chain_id, chain, current_node, depth):
+    async def _finalize_chain(self, chain_id, chain, current_node, depth, context):
         """Finalize the chain with reward calculation and cleanup."""
         if self._reward_fn is not None:
             trajectory = current_node.messages.messages
@@ -603,6 +630,7 @@ class ChainRollout:
                 **other_args,
                 trajectory=trajectory,
                 id=chain_id,
+                context=context,
             )
             if inspect.iscoroutine(reward):
                 reward = await reward
@@ -611,17 +639,13 @@ class ChainRollout:
         else:
             chain.info["reward"] = None
 
-        await self.release_resources(chain_id)
 
-    async def release_resources(self, id: str) -> None:
-        for tool in self.tools:
-            await tool.release(id=id)
-        if self._reward_fn is not None:
-            await self._reward_fn.release(id=id)
+        # Release resources so other rollouts can use them
+        await context.release_resource(scope="rollout")
+        await context.release_resource(scope="global")
 
-    async def set_tools(self, id: str, env_args: Dict[str, Any]) -> None:
-        for tool in self.tools:
-            await tool.set_env(id, env_args)
+        # Kill rollout-scoped resources
+        await context.end_resource(scope="rollout")
 
     def monitor_step(self) -> None:
         messages = self.get_messages()
@@ -712,11 +736,6 @@ class ChainRollout:
 
     def monitor_chain(self, trajectory, info) -> None:
         self.monitor_info["Agent/chains"].append(self.finished_chains_count)
-        for tool in self.tools:
-            if tool.is_stateful and tool.pool_size > 0:
-                self.monitor_info[f"Agent/Tool/{tool.name}/used_env_size"].append(
-                    tool.used_env_size
-                )
 
         # We only log the trajectory to local jsonl file, for wandb much bandwidth is needed
         evt = MetricEvent(

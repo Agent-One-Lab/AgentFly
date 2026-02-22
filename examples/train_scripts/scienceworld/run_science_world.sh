@@ -90,10 +90,10 @@ kl_loss_type=mse
 max_turns=24
 lr_warmup_steps_ratio=0.08
 agent_backend="async_verl"
-total_training_steps=200
+total_training_steps=300
 
 project_name="Algorithm"
-experiment_name="scienceworld_qwen2.5-3b-instruct_mse"
+experiment_name="scienceworld_qwen2.5-3b-instruct_resource"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \

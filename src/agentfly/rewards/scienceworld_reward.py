@@ -1,21 +1,22 @@
-from ..envs.scienceworld_env import ScienceWorldEnv
+from ..core import Context
+from ..envs.scienceworld_env import ScienceWorldSpec
 from .reward_base import reward
 
 
-@reward(name="scienceworld_reward", env_cls=ScienceWorldEnv, pool_size=24)
-async def scienceworld_reward(final_response: str, env: ScienceWorldEnv) -> dict:
+@reward(name="scienceworld_reward")
+async def scienceworld_reward(final_response: str, context: Context) -> dict:
     """
     Computes the reward for a given prediction in the ScienceWorld environment.
-    Actual logic for reward calculation is in the environment and partially in step method of the environment.
-    The reward is the highest score achieved in the task (which subgoal is reached, 1 if the full task is completed).
-    Adapted and modified from https://github.com/allenai/ScienceWorld/tree/main
+    Uses the same rollout resource as the scienceworld tools (context.acquire_resource).
 
     Args:
         final_response (str): The agent's final response. Not used in this reward function.
+        context (Context): Injected rollout context; used to acquire the ScienceWorld resource.
 
     Returns:
         dict: A dictionary containing the reward and the observation output after taking the 'get_reward' step.
     """
+    env = await context.acquire_resource(spec=ScienceWorldSpec, scope="global", backend="local")
     result = await env.step("get_reward")
     if result["reward"] >= 1:
         acc = 1.0

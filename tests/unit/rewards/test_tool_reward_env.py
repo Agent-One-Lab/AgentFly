@@ -1,26 +1,40 @@
 import pytest
 
-from agentfly.envs import PythonSandboxEnv
+from agentfly.core import Context
+from agentfly.envs.python_env import PythonSandboxSpec
 from agentfly.tools import tool
 from agentfly.rewards import reward
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_tool_reward_env():
-    @tool(env_cls=PythonSandboxEnv, name="test_tool", pool_size=4)
-    async def test_tool(code: str, env: PythonSandboxEnv):
-        result = await env.step(code)
-        return result
+    ctx = Context(rollout_id="test_tool_reward_python")
+    try:
+        @tool(name="test_python_tool")
+        async def test_tool(code: str, context: Context):
+            env = await context.acquire_resource(
+                spec=PythonSandboxSpec, scope="rollout", backend="local"
+            )
+            return await env.step(code)
 
-    @reward(env_cls=PythonSandboxEnv, name="test_reward", pool_size=4)
-    async def test_reward(prediction, env: PythonSandboxEnv):
-        result = await env.step(prediction)
-        return {"reward": 1, "result": result}
+        @reward(name="test_python_reward")
+        async def test_reward(prediction, context: Context):
+            env = await context.acquire_resource(
+                spec=PythonSandboxSpec, scope="rollout", backend="local"
+            )
+            result = await env.step(prediction)
+            return {"reward": 1.0, "result": result}
 
-    result = await test_tool(code="import os; os.environ['TEST'] = 'test'", id="test_0")
-    print(result)
+        result = await test_tool(
+            code="import os; os.environ['TEST'] = 'test'", context=ctx
+        )
+        assert result is not None
 
-    result = await test_reward(
-        prediction="import os; print(os.environ['TEST'])", id="test_0"
-    )
-    print(result)
+        result = await test_reward(
+            prediction="import os; print(os.environ.get('TEST', ''))",
+            context=ctx,
+        )
+        assert result["reward"] == 1.0
+        assert "test" in result["result"]
+    finally:
+        await ctx.release_resource(scope="rollout")

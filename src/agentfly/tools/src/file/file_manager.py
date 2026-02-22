@@ -6,13 +6,17 @@ import fnmatch
 import re
 
 class FileManager:
-    def __init__(self, workspace_root="/workspace"):
-        self.root = os.path.abspath(workspace_root)
+    def __init__(self, workspace_root=None):
+        root = workspace_root or os.environ.get("WORKSPACE_ROOT", "/testbed")
+        self.root = os.path.realpath(os.path.abspath(root))
         self.backup_dir = os.path.join(self.root, ".backup")
         os.makedirs(self.backup_dir, exist_ok=True)
 
     def _safe_path(self, path):
-        full_path = os.path.abspath(os.path.join(self.root, path))
+        # Treat absolute paths as relative to workspace root (e.g. "/" -> root, "/main.py" -> root/main.py)
+        if path.startswith("/"):
+            path = path[1:] or "."
+        full_path = os.path.realpath(os.path.abspath(os.path.join(self.root, path)))
         if not full_path.startswith(self.root):
             raise PermissionError("Access denied: Path is outside workspace.")
         return full_path

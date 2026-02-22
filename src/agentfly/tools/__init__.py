@@ -11,14 +11,14 @@ from .registry import get_tool_from_name, get_tools_from_names, register_tool
 from .src.code.tools import CodeInterpreterTool, code_interpreter
 from .src.react.tools import answer_math, answer_qa
 from .src.scienceworld.tools import scienceworld_explorer
-from .src.search.async_dense_retrieve_api import async_dense_retrieve_api
-from .src.search.async_dense_retriever import async_dense_retrieve
-from .src.search.dense_retriever import dense_retrieve
-from .src.search.google_search import google_search_serper
-from .src.ui.tools import pyautogui_code_generator
-from .src.webshop.tools import webshop_browser
+# from .src.search.async_dense_retrieve_api import async_dense_retrieve_api
+# from .src.search.async_dense_retriever import async_dense_retrieve
+# from .src.search.dense_retriever import dense_retrieve
+# from .src.search.google_search import google_search_serper
+# from .src.ui.tools import pyautogui_code_generator
+# from .src.webshop.tools import webshop_browser
 from .tool_base import BaseTool
-
+from .src.file.tools import grep_search, list_files
 
 @tool()
 def hallucination_tool(tool_name):

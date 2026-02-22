@@ -1,28 +1,32 @@
 import traceback
 
-from ....envs.alfworld_env import ALFWorldEnv
+from ....core import Context
+from ....envs.alfworld_env import ALFWorldSpec
 from ...decorator import tool
 
 
+async def _get_alfworld_env(context: Context):
+    return await context.acquire_resource(spec=ALFWorldSpec, scope="global", backend="local")
+
+
 @tool(
-    env_cls=ALFWorldEnv,
     name="alfworld_step",
     description="Take an action in the ALFWorld environment and return the observation",
     stateful=True,
-    pool_size=8,
 )
-async def alfworld_step(action: str, env: ALFWorldEnv):
+async def alfworld_step(action: str, context: Context):
     """
     Take an action in the ALFWorld environment and return the observation
 
     Args:
         action (str): The action to take in the environment
-        env (ALFWorldEnv): The ALFWorld environment instance
+        context (Context): Injected rollout context; used to acquire the ALFWorld resource.
 
     Returns:
         dict: A dictionary containing the observation, reward, done, and info
     """
     try:
+        env = await _get_alfworld_env(context)
         obs, reward, done, info = await env.step(action)
         return {
             "observation": obs,
@@ -35,14 +39,13 @@ async def alfworld_step(action: str, env: ALFWorldEnv):
 
 
 @tool(
-    env_cls=ALFWorldEnv,
     name="alfworld_reset",
     description="Reset the ALFWorld environment to start a new episode",
     stateful=True,
-    pool_size=32,
 )
-async def alfworld_reset(env: ALFWorldEnv):
+async def alfworld_reset(context: Context):
     try:
+        env = await _get_alfworld_env(context)
         obs, info = await env.reset()
         return obs
     except Exception as e:
@@ -50,14 +53,13 @@ async def alfworld_reset(env: ALFWorldEnv):
 
 
 @tool(
-    env_cls=ALFWorldEnv,
     name="alfworld_get_admissible_commands",
     description="Get the list of admissible commands for the current state in ALFWorld",
     stateful=True,
-    pool_size=8,
 )
-async def alfworld_get_admissible_commands(env: ALFWorldEnv):
+async def alfworld_get_admissible_commands(context: Context):
     try:
+        env = await _get_alfworld_env(context)
         commands = await env.get_admissible_commands()
         return "\n".join(commands)
     except Exception as e:
@@ -65,18 +67,15 @@ async def alfworld_get_admissible_commands(env: ALFWorldEnv):
 
 
 @tool(
-    env_cls=ALFWorldEnv,
     name="alfworld_get_task_objective",
     description="Get the current task objective/goal from the ALFWorld environment",
     stateful=True,
-    pool_size=8,
 )
-async def alfworld_get_task_objective(env: ALFWorldEnv):
+async def alfworld_get_task_objective(context: Context):
     try:
-        # First ask the environment. If it returns nothing, fall back to the info
-        # cached during the last reset/step (env._current_info).
+        env = await _get_alfworld_env(context)
         info = await env.get_info()
-        if not info:  # HTTP endpoint returned nothing
+        if not info:
             info = getattr(env, "_current_info", {}) or {}
 
         task_objective = info.get(

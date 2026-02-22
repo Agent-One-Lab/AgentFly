@@ -13,24 +13,13 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 
-class ResourceCategory(str, Enum):
-    """Kind of resource the engine can manage."""
-    
-    CONTAINER = "container"  # Enroot/Docker container
-    VLLM = "vllm"  # vLLM deployed model (process / service)
-
-    # The following are for compitable with old environments
-    PYTHON_ENV = "python_env"
-
-
 @dataclass
 class ResourceSpec:
     """
     Specification for creating or scaling a resource.
     Used by ResourceEngine.start() and acquire().
     """
-
-    category: ResourceCategory
+    category: str  # Resource kind: "container", "vllm", or "python_env"
     # Container-specific
     image: Optional[str] = None
     cpu_count: Optional[float] = None
@@ -45,6 +34,10 @@ class ResourceSpec:
     port: Optional[int] = None
     # Common
     extra: Dict[str, Any] = field(default_factory=dict)
+    # Max concurrent resources for this spec (free + acquired). When set:
+    # - Rollout-scoped: at most this many can exist; only after one is ended can another start.
+    # - Global-scoped: at most this many total; no new resources can be added when at cap.
+    max_global_num: Optional[int] = None
 
 
 class ResourceStatus(str, Enum):
@@ -72,8 +65,8 @@ class BaseResource(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def category(self) -> ResourceCategory:
-        """Resource kind (container or vllm)."""
+    def category(self) -> str:
+        """Resource kind (container, vllm, or python_env)."""
         raise NotImplementedError
 
     @abc.abstractmethod

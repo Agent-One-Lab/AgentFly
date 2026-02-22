@@ -1,7 +1,6 @@
 import json
 import re
 from typing import Dict, List, Optional
-
 from ..agent_base import BaseAgent
 
 ACTION_TAG_PATTERN = re.compile(

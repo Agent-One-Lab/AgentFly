@@ -10,8 +10,8 @@ pool layer.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
-
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+import uuid
 from .types import BaseResource, ResourceSpec, ResourceStatus
 from .runner import LocalRunner, SlurmRunner, CloudRunner, K8sRunner
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 def _pool_key(spec: ResourceSpec, backend: str) -> str:
     """Stable key for (spec, backend). Use '|' so backend can be parsed."""
-    spec_key = f"{spec.category.value}:{spec.image or spec.model_name_or_path or 'default'}"
+    spec_key = f"{spec.category}:{spec.image or spec.model_name_or_path or 'default'}"
     return f"{spec_key}|{backend}"
 
 
@@ -43,9 +43,46 @@ class ResourceEngine:
     # pool_key -> list of free resources (any type)
     _free: Dict[str, List[BaseResource]] = {}
     # id -> (resource, pool_key) for same-id reuse and correct return on release
-    _acquired: Dict[str, Tuple[BaseResource, str]] = {}
+    _acquired: Dict[str, Tuple[Optional[BaseResource], str]] = {}
     _lock = asyncio.Lock()
+    _condition = None  # asyncio.Condition(_lock), created after _lock exists
 
+    @classmethod
+    def _get_condition(cls) -> asyncio.Condition:
+        if cls._condition is None:
+            cls._condition = asyncio.Condition(cls._lock)
+        return cls._condition
+
+    @classmethod
+    def _count_for_pool(cls, key: str) -> int:
+        """Return total number of resources for this pool (free + acquired)."""
+        free_count = len(cls._free.get(key, []))
+        acquired_count = sum(1 for _, (_, k) in cls._acquired.items() if k == key)
+        return free_count + acquired_count
+
+    @classmethod
+    async def monitor(cls) -> Dict[str, Dict[str, int]]:
+        """
+        Return a statistics dictionary of existing resource counts per pool.
+
+        Returns:
+            Dict mapping pool_key -> {"total": N, "free": F, "acquired": A}.
+            Only includes pool keys that have at least one resource.
+        """
+        stats: Dict[str, Dict[str, int]] = {}
+        async with cls._lock:
+            keys = set(cls._free.keys())
+            for _, (_, key) in cls._acquired.items():
+                keys.add(key)
+            for key in keys:
+                free_count = len(cls._free.get(key, []))
+                acquired_count = sum(1 for _, (_, k) in cls._acquired.items() if k == key)
+                stats[key] = {
+                    "total": free_count + acquired_count,
+                    "free": free_count,
+                    "acquired": acquired_count,
+                }
+        return stats
 
     @classmethod
     async def start(
@@ -59,22 +96,50 @@ class ResourceEngine:
         Ensure at least `size` free resources for (spec, backend).
         Creates resources via the backend runner and adds them to the store.
         """
-        print(f"[ResourceEngine]: runners: {cls._runners}")
         runner = cls._runners.get(backend)
         if runner is None:
             raise ValueError(f"Unknown backend: {backend}")
         key = _pool_key(spec, backend)
-        async with cls._lock:
+        
+        pending_ids = []
+        cond = cls._get_condition()
+        async with cond:
             if key not in cls._free:
                 cls._free[key] = []
-            needed = size - len(cls._free[key])
-        if needed <= 0:
-            return
-        # Create outside lock so we don't block other operations
-        for _ in range(needed):
-            resource = await runner.start_resource(spec)
-            async with cls._lock:
-                cls._free.setdefault(key, []).append(resource)
+            
+            current_free = len(cls._free[key])
+            if current_free >= size:
+                return
+
+            total_existing = cls._count_for_pool(key)
+            cap = spec.max_global_num
+            
+            needed = size - current_free
+            if cap is not None:
+                needed = min(needed, cap - total_existing)
+            
+            if needed <= 0:
+                return
+            
+            # Reserve slots with placeholders
+            for _ in range(needed):
+                p_id = f"_pending_{key}_{uuid.uuid4().hex}"
+                cls._acquired[p_id] = (None, key)
+                pending_ids.append(p_id)
+
+        # Create outside lock
+        for p_id in pending_ids:
+            try:
+                resource = await runner.start_resource(spec)
+                async with cond:
+                    cls._acquired.pop(p_id, None)
+                    cls._free.setdefault(key, []).append(resource)
+                    cond.notify_all()
+            except Exception:
+                async with cond:
+                    cls._acquired.pop(p_id, None)
+                    cond.notify_all()
+                raise
 
     @classmethod
     async def acquire(
@@ -82,73 +147,150 @@ class ResourceEngine:
         id: str,
         spec: ResourceSpec,
         backend: str = "local",
-    ) -> BaseResource:   
+    ) -> BaseResource:
         """
         Acquire a resource for the given id. Same id returns the same resource.
-        Uses a free resource for (spec, backend) or creates one via the runner.
+
+        Semantics:
+        - Prefer taking from the free queue for (spec, backend).
+        - If none free and under max_global_num, create a new resource (slot reserved under lock).
+        - If at max_global_num and none free, wait until another thread releases one.
         """
         key = _pool_key(spec, backend)
-        async with cls._lock:
-            if id in cls._acquired:
-                return cls._acquired[id][0]
         runner = cls._runners.get(backend)
         if runner is None:
             raise ValueError(f"Unknown backend: {backend}")
-        resource: Optional[BaseResource] = None
-        async with cls._lock:
-            if key in cls._free and cls._free[key]:
-                resource = cls._free[key].pop()
-        if resource is None:
+        cond = cls._get_condition()
+        async with cond:
+            while True:
+                # If already acquired (or being acquired) for this id, return or wait.
+                if id in cls._acquired:
+                    resource, _ = cls._acquired[id]
+                    if resource is not None:
+                        return resource
+                    # placeholder present; wait for the first caller to finish starting it
+                    await cond.wait()
+                    continue
+
+                # Take from the free queue if available.
+                if key in cls._free and cls._free[key]:
+                    resource = cls._free[key].pop()
+                    cls._acquired[id] = (resource, key)
+                    return resource
+
+                current = cls._count_for_pool(key)
+                if spec.max_global_num is None or current < spec.max_global_num:
+                    # Reserve a slot using the actual id as placeholder
+                    cls._acquired[id] = (None, key)
+                    break
+                await cond.wait()
+
+        # Start the resource outside the lock
+        try:
             resource = await runner.start_resource(spec)
-        async with cls._lock:
+        except Exception:
+            # Clean up the placeholder if starting fails so others can try
+            async with cond:
+                cls._acquired.pop(id, None)
+                cond.notify_all()
+            raise
+
+        async with cond:
+            # Complete the acquisition
             cls._acquired[id] = (resource, key)
+            cond.notify_all()
         return resource
 
     @classmethod
     async def release(
         cls,
-        resource: BaseResource,
-        id: str,
-        finished: bool = True,
+        id: str
     ) -> None:
         """Return resource to the store and unregister from acquired."""
-        async with cls._lock:
+        cond = cls._get_condition()
+        async with cond:
             entry = cls._acquired.pop(id, None)
-        if entry is None:
-            return
-        _, key = entry
-        async with cls._lock:
+            if entry is None:
+                return
+            resource, key = entry
+            if resource is None:
+                return  # placeholder; already removed
             cls._free.setdefault(key, []).append(resource)
+            cond.notify_all()
 
     @classmethod
     async def reset(
         cls,
-        resource: BaseResource,
+        id: str,
         *args: Any,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Any:
-        """Reset resource state."""
+        """
+        Reset resource state for the given id.
+
+        Args:
+            id: Identifier used when acquiring the resource.
+        """
+        async with cls._lock:
+            entry = cls._acquired.get(id)
+        if entry is None:
+            raise ValueError(f"Resource with id {id!r} is not acquired and cannot be reset.")
+        resource, _ = entry
+        if resource is None:
+            raise ValueError(f"Resource with id {id!r} is still being created.")
         return await resource.reset(*args, **kwargs)
 
     @classmethod
-    async def get_status(cls, resource: BaseResource) -> ResourceStatus:
-        """Current execution/lifecycle status."""
+    async def get_status(cls, id: str) -> ResourceStatus:
+        """
+        Current execution/lifecycle status for the resource associated with id.
+
+        Args:
+            id: Identifier used when acquiring the resource.
+        """
+        async with cls._lock:
+            entry = cls._acquired.get(id)
+        if entry is None:
+            raise ValueError(f"Resource with id {id!r} is not acquired and has no status.")
+        resource, _ = entry
+        if resource is None:
+            raise ValueError(f"Resource with id {id!r} is still being created.")
         return await resource.get_status()
 
     @classmethod
-    async def control(cls, resource: BaseResource, **kwargs: Any) -> None:
-        """Update resource limits where supported."""
+    async def control(cls, id: str, **kwargs: Any) -> None:
+        """
+        Update resource limits for the resource associated with id where supported.
+
+        Args:
+            id: Identifier used when acquiring the resource.
+        """
+        async with cls._lock:
+            entry = cls._acquired.get(id)
+        if entry is None:
+            raise ValueError(f"Resource with id {id!r} is not acquired and cannot be controlled.")
+        resource, _ = entry
+        if resource is None:
+            raise ValueError(f"Resource with id {id!r} is still being created.")
         await resource.control(**kwargs)
 
     @classmethod
-    async def end(cls, resource: BaseResource) -> None:
-        """End/kill resource. Removes from acquired if present; does not return to store."""
+    async def end(cls, id: str) -> None:
+        """
+        End/kill the resource associated with id.
+
+        Removes it from the acquired map and does not return it to the free store.
+
+        Args:
+            id: Identifier used when acquiring the resource.
+        """
         async with cls._lock:
-            for id, (r, _) in list(cls._acquired.items()):
-                if r is resource:
-                    del cls._acquired[id]
-                    break
-        await resource.end()
+            entry = cls._acquired.pop(id, None)
+        if entry is None:
+            return
+        resource, _ = entry
+        if resource is not None:
+            await resource.end()
 
     @classmethod
     async def close(cls) -> None:
@@ -162,6 +304,8 @@ class ResourceEngine:
             cls._acquired.clear()
             cls._free.clear()
         for _, resource in acquired_list:
+            if resource is None:
+                continue
             try:
                 await resource.end()
             except Exception:

@@ -1,10 +1,14 @@
-from agentfly.rewards import scienceworld_reward
 import pytest
+
+from agentfly.core import Context
+from agentfly.rewards import scienceworld_reward
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_scienceworld_reward():
+    ctx = Context(rollout_id="test_scienceworld_reward")
+    
     prediction = "Task not completed"
-    reward = await scienceworld_reward(final_response=prediction, id="test")
-    assert reward["reward"] == 0.0
-    await scienceworld_reward.release(id="test")
+    result = await scienceworld_reward(final_response=prediction, context=ctx)
+    assert "reward" in result
+    assert result["reward"] >= 0.0

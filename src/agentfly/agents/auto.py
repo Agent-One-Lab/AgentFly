@@ -7,6 +7,7 @@ from .react.react_agent import ReactAgent
 from .specialized.action_agent import ActionAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
+from .specialized.swe_agent import SWEAgent
 from .specialized.hf_agent import HFAgent, SearchR1Agent
 from .specialized.openai_agent import OpenAIAgent
 from .specialized.think_agent import ThinkAgent
@@ -177,3 +178,4 @@ AutoAgent.register_agent("gui", GUIAgent)
 AutoAgent.register_agent("hf", HFAgent)
 AutoAgent.register_agent("searchr1", SearchR1Agent)
 AutoAgent.register_agent("action", ActionAgent)
+AutoAgent.register_agent("swe", SWEAgent)

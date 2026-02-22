@@ -7,7 +7,6 @@ Tools and rewards use the engine to acquire, use (MCP or input-text), and releas
 
 from .types import (
     BaseResource,
-    ResourceCategory,
     ResourceSpec,
     ResourceStatus,
 )
@@ -28,7 +27,6 @@ from .engine import ResourceEngine
 
 __all__ = [
     "BaseResource",
-    "ResourceCategory",
     "ResourceSpec",
     "ResourceStatus",
     "CallInterface",

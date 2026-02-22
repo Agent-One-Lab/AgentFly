@@ -1,32 +1,35 @@
 import traceback
 
-from ....envs.python_env import python_sandbox_spec
+from ....core import Context
+from ....envs.python_env import PythonSandboxSpec
 from ...decorator import tool
 from ...tool_base import BaseTool
 
 
 @tool(
-    resource_spec=python_sandbox_spec(),
     name="code_interpreter",
     description="Run the code in docker container and return the output from stdout or stderr",
-    stateful=True,
-    pool_size=32,
-    backend="local",
 )
-async def code_interpreter(code: str, resource):
+async def code_interpreter(code: str, context: Context):
     """
-    Run the code in docker container and return the output from stdout or stderr
+    Run the code in docker container and return the output from stdout or stderr.
+
+    Uses one Python sandbox per rollout (acquired via Context); the sandbox is
+    released when the rollout ends. Warm the pool at training start with
+    ResourceEngine.start(python_sandbox_spec(), size=32, backend="local") if needed.
 
     Args:
-        code (str): The code to run.
-        resource: The Python sandbox resource (injected by BaseTool).
+        code: The code to run.
+        context: Injected rollout context; used to acquire the sandbox resource.
 
     Returns:
-        str: The output from stdout or stderr
+        str: The output from stdout or stderr.
     """
     code = str(code)
+    spec = PythonSandboxSpec
+    env = await context.acquire_resource(spec=spec, scope="global", backend="local")
     try:
-        obs = await resource.step(code)
+        obs = await env.step(code)
         return str(obs)
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
@@ -37,17 +40,21 @@ class CodeInterpreterTool(BaseTool):
     description = (
         "Run the code in docker container and return the output from stdout or stderr"
     )
-    resource_spec = python_sandbox_spec()
-    backend = "local"
-    pool_size = 32
 
     def __init__(self):
         super().__init__()
 
-    async def call(self, code: str, resource):
+    async def call(self, code: str, context: Context):
+        """
+        Args:
+            code: The code to run.
+            context: Injected rollout context for acquiring the sandbox.
+        """
         code = str(code)
+        spec = PythonSandboxSpec
+        env = await context.acquire_resource(spec=spec, scope="global", backend="local")
         try:
-            obs = await resource.run_code(code)
+            obs = await env.step(code)
             return str(obs)
         except Exception as e:
             return f"Error: {str(e)}\n{traceback.format_exc()}"

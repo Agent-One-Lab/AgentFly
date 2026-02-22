@@ -189,8 +189,8 @@ def validate_schema(name, description, signature, docs):
                 if v == "bool":
                     param_info[k] = "boolean"
 
-    # Remove injected/internal params from the schema (env, resource, self)
-    for key in ("env", "resource", "self"):
+    # Remove injected/internal params from the schema (env, resource, context, self)
+    for key in ("env", "resource", "context", "self"):
         if key in properties:
             del properties[key]
         if key in required_params:
@@ -209,7 +209,7 @@ def validate_schema(name, description, signature, docs):
         },
     }
     arguments = deepcopy(signature)
-    for key in ("env", "resource"):
+    for key in ("env", "resource", "context"):
         if key in arguments:
             del arguments[key]
 

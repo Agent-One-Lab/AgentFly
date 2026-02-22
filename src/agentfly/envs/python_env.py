@@ -12,26 +12,20 @@ import asyncio
 import time
 from typing import Any
 import httpx
-from ..resources import ResourceSpec, ResourceCategory, ContainerResource
+from ..resources import ResourceSpec, ContainerResource
 
-def python_sandbox_spec(
-    image: str = "reasonwang/python-http-env:latest",
-    container_port: int = 8000,
-    start_timeout: float = 60.0,
-    host_ip: str = "127.0.0.1",
-) -> ResourceSpec:
-    """ResourceSpec for the Python HTTP sandbox (container + HTTP /exec)."""
-    return ResourceSpec(
-        category=ResourceCategory.PYTHON_ENV,
-        image=image,
-        ports={f"{container_port}/tcp": None},
-        extra={
-            "python_http_env": True,
-            "container_port": container_port,
-            "start_timeout": start_timeout,
-            "host_ip": host_ip,
-        },
-    )
+PythonSandboxSpec = ResourceSpec(
+    category="python_env",
+    image="reasonwang/python-http-env:latest",
+    ports={"8000/tcp": None},
+    extra={
+        "python_http_env": True,
+        "container_port": 8000,
+        "start_timeout": 60,
+        "host_ip": "127.0.0.1",
+    },
+    max_global_num=16,
+)
 
 
 class PythonSandboxEnv(ContainerResource):
@@ -101,7 +95,7 @@ class PythonSandboxEnv(ContainerResource):
     async def reset(self, *args: Any, **kwargs: Any) -> Any:
         try:
             await asyncio.wait_for(
-                self.run_code("globals().clear()"), timeout=20.0
+                self.step("globals().clear()"), timeout=20.0
             )
         except (asyncio.TimeoutError, httpx.TransportError):
             await self.end()
