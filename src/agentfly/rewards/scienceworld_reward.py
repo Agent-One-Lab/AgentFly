@@ -1,9 +1,10 @@
 from ..envs.scienceworld_env import ScienceWorldEnv
 from .reward_base import reward
+from typing import List
 
 
 @reward(name="scienceworld_reward", env_cls=ScienceWorldEnv, pool_size=24)
-async def scienceworld_reward(final_response: str, env: ScienceWorldEnv) -> dict:
+async def scienceworld_reward(final_response: str, trajectory: List[str], env: ScienceWorldEnv) -> dict:
     """
     Computes the reward for a given prediction in the ScienceWorld environment.
     Actual logic for reward calculation is in the environment and partially in step method of the environment.
@@ -16,6 +17,13 @@ async def scienceworld_reward(final_response: str, env: ScienceWorldEnv) -> dict
     Returns:
         dict: A dictionary containing the reward and the observation output after taking the 'get_reward' step.
     """
+    if len(trajectory) < 4:
+        return {
+            "reward": 0.0,
+            "acc": 0.0,
+            "output": "Not enough steps to get reward",
+        }
+
     result = await env.step("get_reward")
     if result["reward"] >= 1:
         acc = 1.0
