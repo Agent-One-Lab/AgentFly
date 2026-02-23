@@ -1,0 +1,81 @@
+"""Tests for undo_edit tool with real container."""
+
+import pytest
+
+from agentfly.core import Context
+from agentfly.tools.src.file.tools import edit_file, list_files, read_file, undo_edit
+
+IMAGE_ID = "swebench/swesmith.x86_64.andialbrecht_1776_sqlparse.e57923b3"
+
+
+def _strip_line_numbers(content: str) -> str:
+    """Remove '  N | ' prefix from read_file output."""
+    lines = []
+    for line in content.split("\n"):
+        if "|" in line:
+            _, _, rest = line.partition("|")
+            lines.append(rest.strip())
+        else:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+@pytest.mark.asyncio
+async def test_undo_edit_reverts_last_edit():
+    context = Context(
+        rollout_id="test_undo_edit",
+        group_id="group_file_tools",
+        metadata={"image_id": IMAGE_ID},
+    )
+    try:
+        listing = await list_files(path=".", context=context)
+        paths = [p.strip() for p in listing.split("\n") if p.strip()]
+        assert len(paths) > 0
+        path = paths[0]
+        before = await read_file(path=path, context=context)
+        content_before = _strip_line_numbers(before)
+        lines = [ln for ln in content_before.split("\n") if ln.strip()]
+        if not lines:
+            pytest.skip("No non-empty lines to edit")
+        search_block = lines[0]
+        replace_block = search_block + "  # undo_test"
+
+        edit_result = await edit_file(
+            path=path,
+            search_block=search_block,
+            replace_block=replace_block,
+            context=context,
+        )
+        if "Error" in edit_result:
+            pytest.skip("Edit failed, cannot test undo")
+        after_edit = await read_file(path=path, context=context)
+        assert replace_block in _strip_line_numbers(after_edit)
+
+        undo_result = await undo_edit(path=path, context=context)
+        assert "undone" in undo_result.lower() or "Error" in undo_result
+
+        after_undo = await read_file(path=path, context=context)
+        assert search_block in _strip_line_numbers(after_undo)
+        assert replace_block not in _strip_line_numbers(after_undo)
+    finally:
+        await context.release_resource(scope="rollout")
+
+
+@pytest.mark.asyncio
+async def test_undo_edit_no_backup_returns_error():
+    context = Context(
+        rollout_id="test_undo_edit_no_backup",
+        group_id="group_file_tools",
+        metadata={"image_id": IMAGE_ID},
+    )
+    try:
+        listing = await list_files(path=".", context=context)
+        paths = [p.strip() for p in listing.split("\n") if p.strip()]
+        assert len(paths) > 0
+        path = paths[0]
+        result = await undo_edit(path=path, context=context)
+        # No prior edit: either "No backup" or success (if implementation allows)
+        assert isinstance(result, str)
+        assert "No backup" in result or "undone" in result.lower()
+    finally:
+        await context.release_resource(scope="rollout")

@@ -38,7 +38,7 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
     payload = json.dumps({"tool": tool_name, "params": params})
     escaped = _escape_shell_json(payload)
     cmd = f"python {INSTALL_PATH}/file_manager.py '{escaped}'"
-    return await container.run_cmd(cmd)
+    return (await container.run_cmd(cmd)).decode("utf-8")
 
 
 @tool(name="read_file")
