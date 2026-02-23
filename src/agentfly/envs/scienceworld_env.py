@@ -4,6 +4,14 @@ from typing import Union
 
 import httpx
 
+# Transport errors that may be transient (server disconnect, read timeout, etc.)
+TRANSIENT_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.ReadTimeout,
+    httpx.ConnectError,
+    httpx.WriteTimeout,
+)
+
 from .env_base import BaseEnv, SupportsDocker
 
 
@@ -129,7 +137,14 @@ class ScienceWorldEnv(BaseEnv, SupportsDocker):
 
         await self._connect()
         await self._wait_ready()
-        await self._client.get("/load?task_name=boil&variation_idx=0")
+        for attempt in range(3):
+            try:
+                await self._client.get("/load?task_name=boil&variation_idx=0")
+                break
+            except TRANSIENT_ERRORS:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(1.0 * (2**attempt))
 
     async def reset(self, env_args=None) -> str:
         """
@@ -151,10 +166,30 @@ class ScienceWorldEnv(BaseEnv, SupportsDocker):
         env_args = env_args or {}
         task_name = env_args.get("task_name", "boil")
         variation_idx = env_args.get("variation_idx", 0)
-        r = await self._client.get(
-            f"/load?task_name={task_name}&variation_idx={variation_idx}"
-        )
-        await self._client.get("/reset")
+
+        max_retries = 3
+        base_delay = 1.0
+
+        for attempt in range(max_retries):
+            try:
+                r = await self._client.get(
+                    f"/load?task_name={task_name}&variation_idx={variation_idx}"
+                )
+                break
+            except TRANSIENT_ERRORS as e:
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(base_delay * (2**attempt))
+
+        for attempt in range(max_retries):
+            try:
+                await self._client.get("/reset")
+                break
+            except TRANSIENT_ERRORS as e:
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(base_delay * (2**attempt))
+
         r = r.json()
         # self.is_completed = False
         self.score = 0

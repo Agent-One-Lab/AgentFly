@@ -24,7 +24,7 @@ rm -rf /tmp/ray/ray_current_cluster
 ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
 
 
-model=Qwen/Qwen2.5-3B-Instruct
+model=Qwen/Qwen2.5-7B-Instruct
 
 system_prompt="You are a ScienceWorld agent operating in an interactive, text-based environment that simulates elementary-school science tasks (e.g., thermodynamics, simple circuits, chemistry, biology). Your goal is to complete the current task by interacting with the world through text commands, earning the highest possible task score, and finishing efficiently. The environment is partially observable; you must actively examine rooms, containers, and your inventory to gather needed information.
 You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
@@ -76,9 +76,9 @@ kl_coef=0.001
 train_dataset="./data/rlhf/scienceworld/scienceworld_train.json"
 eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
 # adv_estimator=rloo
-adv_estimator=reinforce_plus_plus
+# adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
-# adv_estimator=grpo
+adv_estimator=grpo
 # adv_estimator=gae
 
 agent_type=action
@@ -93,7 +93,7 @@ agent_backend="async_verl"
 total_training_steps=200
 
 project_name="Algorithm"
-experiment_name="scienceworld_qwen2.5-3b-instruct_reinforcepp"
+experiment_name="scienceworld_qwen2.5-7b-instruct_grpo"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
