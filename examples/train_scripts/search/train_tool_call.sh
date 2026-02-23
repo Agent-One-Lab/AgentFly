@@ -39,7 +39,7 @@ tools="[async_dense_retrieve_api,answer_qa]"
 # reward_name="qa_em_reward"
 reward_name="qa_em_reward_tool_call"
 train_on_last_turn=False
-experiment_name="search_qa_em_reward_tool_call_7b"
+experiment_name="search_qa_em_reward_tool_call_7b_mse"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
@@ -47,7 +47,7 @@ adv_estimator=grpo
 # adv_estimator=gae
 
 entropy_coeff=0.001
-kl_loss_type=low_var_kl
+kl_loss_type=mse
 agent_type=hf
 max_turns=3
 # template="qwen2.5"

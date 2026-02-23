@@ -62,7 +62,10 @@ Living things / misc:
 
 Electricity (for simple circuits):
 - connect [object] to [object]: connect electrical components
-- disconnect [object]: disconnect electrical components"
+- disconnect [object]: disconnect electrical components
+
+Remember that you must put your action inside <action> and </action> tags."
+
 template=action-agent
 lr=4e-7
 max_model_len=16384

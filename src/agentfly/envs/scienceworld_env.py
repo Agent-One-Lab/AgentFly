@@ -177,15 +177,7 @@ class ScienceWorldEnv(BaseEnv, SupportsDocker):
                 )
                 break
             except TRANSIENT_ERRORS as e:
-                if attempt == max_retries - 1:
-                    raise
-                await asyncio.sleep(base_delay * (2**attempt))
-
-        for attempt in range(max_retries):
-            try:
-                await self._client.get("/reset")
-                break
-            except TRANSIENT_ERRORS as e:
+                r = (await self._client.get("/reset")).json()
                 if attempt == max_retries - 1:
                     raise
                 await asyncio.sleep(base_delay * (2**attempt))
