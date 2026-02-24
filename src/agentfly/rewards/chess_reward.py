@@ -14,7 +14,7 @@ from .reward_base import reward
 
 
 @reward(name="chess_puzzle_reward", env_cls=ChessPuzzleEnv, pool_size=8)
-async def chess_puzzle_reward(prediction: str, env: ChessPuzzleEnv) -> Dict[str, Any]:
+async def chess_puzzle_reward(final_response: str, env: ChessPuzzleEnv) -> Dict[str, Any]:
     """
     Calculate reward for chess puzzle solving based on Stockfish evaluation.
 
@@ -29,7 +29,7 @@ async def chess_puzzle_reward(prediction: str, env: ChessPuzzleEnv) -> Dict[str,
     - Making progress even with imperfect moves
 
     Args:
-        prediction (str): The agent's final response/output (not used directly).
+        final_response (str): The agent's final response/output (not used directly).
         env (ChessPuzzleEnv): The chess puzzle environment instance.
 
     Returns:
@@ -139,7 +139,7 @@ async def chess_puzzle_reward(prediction: str, env: ChessPuzzleEnv) -> Dict[str,
 
 @reward(name="chess_puzzle_reward_simple", env_cls=ChessPuzzleEnv, pool_size=8)
 async def chess_puzzle_reward_simple(
-    prediction: str, env: ChessPuzzleEnv
+    final_response: str, env: ChessPuzzleEnv
 ) -> Dict[str, Any]:
     """
     Simple binary reward for chess puzzle solving.
@@ -149,7 +149,7 @@ async def chess_puzzle_reward_simple(
     where you only care about correct solutions.
 
     Args:
-        prediction (str): The agent's final response/output (not used).
+        final_response (str): The agent's final response/output (not used).
         env (ChessPuzzleEnv): The chess puzzle environment instance.
 
     Returns:

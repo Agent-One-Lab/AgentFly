@@ -5,12 +5,33 @@ Unlike Docker-based environments, this runs locally with python-chess library.
 """
 
 import asyncio
+import shutil
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import chess
 import chess.engine
 
 from .env_base import BaseEnv
+
+
+def _find_stockfish() -> str:
+    """Find the Stockfish binary on the system."""
+    # Check common paths
+    common_paths = [
+        "/usr/games/stockfish",           # Ubuntu/Debian
+        "/usr/bin/stockfish",             # Linux
+        "/opt/homebrew/bin/stockfish",    # macOS (Homebrew ARM)
+        "/usr/local/bin/stockfish",       # macOS (Homebrew Intel)
+    ]
+    for path in common_paths:
+        if shutil.which(path) or __import__('os').path.isfile(path):
+            return path
+    # Try to find in PATH
+    path = shutil.which("stockfish")
+    if path:
+        return path
+    # Default fallback
+    return "/opt/homebrew/bin/stockfish"
 
 
 class ChessPuzzleEnv(BaseEnv):
@@ -49,7 +70,7 @@ class ChessPuzzleEnv(BaseEnv):
 
     def __init__(
         self,
-        stockfish_path: str = "/opt/homebrew/bin/stockfish",
+        stockfish_path: str = None,
         analysis_time: float = 0.1,
         analysis_depth: int = 20,
         max_moves: int = 20,
@@ -58,7 +79,7 @@ class ChessPuzzleEnv(BaseEnv):
         Initialize the chess puzzle environment.
 
         Args:
-            stockfish_path: Path to the Stockfish binary. Common paths:
+            stockfish_path: Path to the Stockfish binary. If None, auto-detects. Common paths:
                 - macOS (Homebrew): /opt/homebrew/bin/stockfish
                 - Linux: /usr/bin/stockfish or /usr/games/stockfish
                 - Windows: C:\\path\\to\\stockfish.exe
@@ -67,7 +88,7 @@ class ChessPuzzleEnv(BaseEnv):
             max_moves: Maximum number of moves allowed per puzzle
         """
         super().__init__()
-        self.stockfish_path = stockfish_path
+        self.stockfish_path = stockfish_path or _find_stockfish()
         self.analysis_time = analysis_time
         self.analysis_depth = analysis_depth
         self.max_moves = max_moves
