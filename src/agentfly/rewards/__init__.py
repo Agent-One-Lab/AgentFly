@@ -1,4 +1,5 @@
 from .alfworld_reward import alfworld_episode_reward
+from .chess_reward import chess_puzzle_reward, chess_puzzle_reward_simple
 from .code_reward import code_reward_test
 from .gui_reward import gui_reward
 from .math_reward import (
@@ -37,4 +38,6 @@ __all__ = [
     "scienceworld_reward",
     "gui_reward",
     "code_reward_test",
+    "chess_puzzle_reward",
+    "chess_puzzle_reward_simple",
 ]
