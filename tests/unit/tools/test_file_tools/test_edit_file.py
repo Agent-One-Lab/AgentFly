@@ -28,11 +28,11 @@ async def test_edit_file_replace_first_occurrence():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = await list_files(path=".", context=context)
+        listing = (await list_files(path=".", context=context))['observation']
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
-        before = await read_file(path=path, context=context)
+        before = (await read_file(path=path, context=context))['observation']
         content_before = _strip_line_numbers(before)
 
         # Use a block that likely exists: first non-empty line
@@ -48,10 +48,11 @@ async def test_edit_file_replace_first_occurrence():
             replace_block=replace_block,
             context=context,
         )
-        assert "updated successfully" in result.lower() or "Error" in result
+        print(result)
+        assert "updated successfully" in result['observation'].lower() or "Error" in result['observation']
 
-        if "Error" not in result:
-            after = await read_file(path=path, context=context)
+        if "Error" not in result['observation']:
+            after = (await read_file(path=path, context=context))['observation']
             assert replace_block in _strip_line_numbers(after)
     finally:
         await context.release_resource(scope="rollout")
@@ -65,7 +66,7 @@ async def test_edit_file_search_block_not_found():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = await list_files(path=".", context=context)
+        listing = (await list_files(path=".", context=context))['observation']
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
@@ -75,7 +76,8 @@ async def test_edit_file_search_block_not_found():
             replace_block="replacement",
             context=context,
         )
-        assert "Error" in result
-        assert "not found" in result.lower() or "exact" in result.lower()
+        print(result)
+        assert "Error" in result['observation']
+        assert "not found" in result['observation'].lower() or "exact" in result.lower()
     finally:
         await context.release_resource(scope="rollout")

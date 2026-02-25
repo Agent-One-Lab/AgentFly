@@ -102,7 +102,7 @@ class LocalRunner(BaseRunner):
             kwargs["ports"] = spec.ports
 
         print(f"[LocalRunner]: starting kwargs: {kwargs}")
-        container = self.client.containers.run(image, **kwargs)
+        container = await asyncio.to_thread(self.client.containers.run, image, **kwargs)
         self._containers[container.name] = container
 
         if spec.category == "python_env":

@@ -1,7 +1,7 @@
 import json
 import re
 from typing import Dict, List, Optional
-from ..agent_base import BaseAgent
+from ...agent_base import BaseAgent
 
 # Match <function=name> ... </function> (non-greedy inner content, DOTALL for newlines)
 FUNCTION_BLOCK_PATTERN = re.compile(
@@ -20,7 +20,7 @@ PARAMETER_JSON_PATTERN = re.compile(
 )
 
 
-class SWEAgent(BaseAgent):
+class FunctionCallSWEAgent(BaseAgent):
     """
     Agent for SWE-bench-like tasks. Parses XML-style function calls:
     <function=name><parameter=key>value</parameter>...</function>

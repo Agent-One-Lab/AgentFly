@@ -87,7 +87,7 @@ reward_name="scienceworld_reward"
 
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=24
+max_turns=20
 lr_warmup_steps_ratio=0.08
 agent_backend="async_verl"
 total_training_steps=300

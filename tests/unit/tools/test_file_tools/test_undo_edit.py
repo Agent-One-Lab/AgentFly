@@ -28,11 +28,11 @@ async def test_undo_edit_reverts_last_edit():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = await list_files(path=".", context=context)
+        listing = (await list_files(path=".", context=context))['observation']
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
-        before = await read_file(path=path, context=context)
+        before = (await read_file(path=path, context=context))['observation']
         content_before = _strip_line_numbers(before)
         lines = [ln for ln in content_before.split("\n") if ln.strip()]
         if not lines:
@@ -40,21 +40,23 @@ async def test_undo_edit_reverts_last_edit():
         search_block = lines[0]
         replace_block = search_block + "  # undo_test"
 
-        edit_result = await edit_file(
+        edit_result = (await edit_file(
             path=path,
             search_block=search_block,
             replace_block=replace_block,
             context=context,
-        )
+        ))['observation']
+        print(f"edit_result: {edit_result}")
         if "Error" in edit_result:
             pytest.skip("Edit failed, cannot test undo")
-        after_edit = await read_file(path=path, context=context)
+        after_edit = (await read_file(path=path, context=context))['observation']
         assert replace_block in _strip_line_numbers(after_edit)
 
-        undo_result = await undo_edit(path=path, context=context)
+        undo_result = (await undo_edit(path=path, context=context))['observation']
+        print(f"undo_result: {undo_result}")
         assert "undone" in undo_result.lower() or "Error" in undo_result
 
-        after_undo = await read_file(path=path, context=context)
+        after_undo = (await read_file(path=path, context=context))['observation']
         assert search_block in _strip_line_numbers(after_undo)
         assert replace_block not in _strip_line_numbers(after_undo)
     finally:
@@ -69,13 +71,13 @@ async def test_undo_edit_no_backup_returns_error():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = await list_files(path=".", context=context)
+        listing = (await list_files(path=".", context=context))['observation']
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
-        result = await undo_edit(path=path, context=context)
+        result = (await undo_edit(path=path, context=context))['observation']
         # No prior edit: either "No backup" or success (if implementation allows)
-        assert isinstance(result, str)
+        print(f"observation: {result}")
         assert "No backup" in result or "undone" in result.lower()
     finally:
         await context.release_resource(scope="rollout")

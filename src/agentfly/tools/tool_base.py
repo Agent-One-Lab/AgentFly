@@ -320,7 +320,9 @@ class BaseTool:
                 f"observation is required for {self.name} if tool call returns a dict"
             )
             if self.max_length is not None:
-                result["observation"] = result["observation"][: self.max_length]
+                if len(result["observation"]) > self.max_length:
+                    result["observation"] = result["observation"][: self.max_length] + "...(truncated)"
+                    
             observation = result.pop("observation")
             info = result
             result_dict = {

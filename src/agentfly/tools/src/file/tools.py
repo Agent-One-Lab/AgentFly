@@ -3,6 +3,7 @@ File operation tools: module is mounted at INSTALL_PATH in the container;
 each tool acquires the container and runs file_manager.py with the corresponding tool name and params.
 """
 
+import asyncio
 import json
 import os
 
@@ -38,7 +39,12 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
     payload = json.dumps({"tool": tool_name, "params": params})
     escaped = _escape_shell_json(payload)
     cmd = f"python {INSTALL_PATH}/file_manager.py '{escaped}'"
-    return (await container.run_cmd(cmd)).decode("utf-8")
+    try:
+        raw = await container.run_cmd(cmd)
+    except asyncio.TimeoutError:
+        return "Error: Command timed out."
+    out = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+    return out or ""
 
 
 @tool(name="read_file")
