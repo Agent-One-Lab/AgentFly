@@ -109,7 +109,7 @@ async def chess_puzzle_reward(final_response: str, env: ChessPuzzleEnv) -> Dict[
                 centipawn_total += 50.0
 
     # Average centipawn score
-    avg_cp = centipawn_total / num_moves if num_moves > 0 else 50.0
+    avg_cp = centipawn_total / num_moves if num_moves > 0 else 0.0
     move_quality_reward = avg_cp / 100.0  # 0.0 to 1.0
 
     # Combine rewards

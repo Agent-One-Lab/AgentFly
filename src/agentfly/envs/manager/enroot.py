@@ -377,5 +377,9 @@ def from_env() -> EnrootClient:
 
 
 def clear_enroot_containers() -> None:
+    import shutil
+    if not shutil.which("enroot"):
+        print("enroot not found, skipping container cleanup")
+        return
     _run_enroot(["remove", "--force", "$(enroot list)"], capture=False)
     print("Cleared all enroot containers")

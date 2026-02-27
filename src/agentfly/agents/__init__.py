@@ -7,6 +7,7 @@ from .llm_backends import (
     ClientConfig,
 )
 from .react.react_agent import ReactAgent
+from .specialized.chess_agent import ChessAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
 from .specialized.hf_agent import HFAgent
@@ -17,6 +18,7 @@ __all__ = [
     "BaseAgent",
     "AutoAgent",
     "ReactAgent",
+    "ChessAgent",
     "CodeAgent",
     "ThinkAgent",
     "GUIAgent",

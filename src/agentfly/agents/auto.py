@@ -4,6 +4,7 @@ from ..rewards.reward_base import get_reward_from_name
 from ..tools import get_tools_from_names
 from .agent_base import BaseAgent
 from .react.react_agent import ReactAgent
+from .specialized.chess_agent import ChessAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
 from .specialized.hf_agent import HFAgent
@@ -169,6 +170,7 @@ class AutoAgent:
 
 # Auto-register built-in agent types
 AutoAgent.register_agent("react", ReactAgent)
+AutoAgent.register_agent("chess", ChessAgent)
 AutoAgent.register_agent("code", CodeAgent)
 AutoAgent.register_agent("openai", OpenAIAgent)
 AutoAgent.register_agent("think", ThinkAgent)

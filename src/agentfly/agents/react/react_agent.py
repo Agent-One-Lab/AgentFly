@@ -88,6 +88,7 @@ class ReactAgent(BaseAgent):
         task_info: str = None,
         **kwargs,
     ):
+        kwargs.pop("system_prompt", None)
         schema_list = [tool.schema for tool in tools]
         if task_info is None or task_info == "":
             task_info = ""
