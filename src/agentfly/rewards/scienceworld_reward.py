@@ -3,7 +3,7 @@ from .reward_base import reward
 from typing import List
 
 
-@reward(name="scienceworld_reward", env_cls=ScienceWorldEnv, pool_size=24)
+@reward(name="scienceworld_reward", env_cls=ScienceWorldEnv, pool_size=32)
 async def scienceworld_reward(final_response: str, trajectory: List[str], env: ScienceWorldEnv) -> dict:
     """
     Computes the reward for a given prediction in the ScienceWorld environment.

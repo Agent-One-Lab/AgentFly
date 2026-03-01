@@ -54,7 +54,7 @@ async def webshop_browser(action: str, value: str, env: WebAgentTextEnv):
     name="webshop_browser_action",
     description="Browse the webshop by searching or clicking. The action is either 'search' or 'click' and the value is the search query or the element to click. Clickables: 'Buy Now', 'Next >', '< Prev', 'Back to Search', 'Description', 'Features', 'Reviews', 'Attributes', product ASIN or ID like 'B079HGJ5MH' and their attributes or variants like 'Yellow', 'Blue', 'Small', 'Large', 'XL', '40x60', etc.",
     stateful=True,
-    pool_size=8,
+    pool_size=16,
 )
 async def webshop_browser_action(action: str, env: WebAgentTextEnv):
     """
@@ -67,6 +67,8 @@ async def webshop_browser_action(action: str, env: WebAgentTextEnv):
     Returns:
         str: The observation from the environment after performing the action, or an error message if the action is invalid or an exception occurs.
     """
+    if action.startswith("choose"):
+        action = "click" + action[6:]
     try:
         observation = await env.step(action)
         return observation
