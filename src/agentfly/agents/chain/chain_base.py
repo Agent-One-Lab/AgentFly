@@ -8,134 +8,20 @@ import time
 import uuid
 from collections import defaultdict
 from copy import deepcopy
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from termcolor import colored
 from tqdm.asyncio import tqdm_asyncio
 
 from ...core import Context
-from ...resources import ResourceEngine
 from ...tools.tool_base import submit_tool_call
 from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
 from ...utils.timing import Timer
 from ...utils.vision import image_to_data_uri
-from ..utils.messages import Messages, MessagesList
+from ..utils.messages import MessagesList
 from .streaming_observer import ConsoleStreamObserver, StreamEvent, StreamEventType
+from .structures import Chain, Node
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Node:
-    messages: Messages
-    is_terminal: bool = False
-    is_pruned: bool = False
-    type: Optional[str] = None
-    description: str = ""
-    observation: str = ""
-    observation_code: Optional[str] = None
-    parent: Optional["Node"] = None
-    children: List["Node"] = field(default_factory=list)
-
-    @property
-    def depth(self) -> int:
-        return 0 if self.parent is None else self.parent.depth + 1
-
-    def print_node(self, process_id: int = 0) -> None:
-        if process_id != 0:
-            return
-        color_converter = {
-            "Thought": "red",
-            "Action": "blue",
-            "Action Input": "cyan",
-            "Final Answer": "green",
-            "Reflection": "blue",
-        }
-        color = color_converter.get(self.type, "white")
-        print(colored(f"{self.type}: {self.description}", color=color))
-        if self.observation:
-            obs = (
-                self.observation
-                if len(self.observation) < 1536
-                else f"{self.observation[:1536]}...(len={len(self.observation)})"
-            )
-            print(colored(f"Observation: {obs}", color="yellow"))
-
-    def to_json(self, use_messages: bool = False) -> dict:
-        json_obj = {
-            "is_terminal": self.is_terminal,
-            "is_pruned": self.is_pruned,
-            "depth": self.depth,
-            "type": self.type,
-            "description": self.description,
-            "messages": self.messages if use_messages else [],
-        }
-        if self.observation:
-            json_obj["observation"] = self.observation
-        if self.observation_code is not None:
-            json_obj["observation_code"] = self.observation_code
-        return json_obj
-
-    def to_json_recursive(self, use_messages: bool = False) -> dict:
-        data = self.to_json(use_messages=use_messages)
-        data["children"] = [
-            child.to_json_recursive(use_messages=use_messages)
-            for child in self.children
-        ]
-        return data
-
-
-class Chain:
-    """
-    Manages a sequential chain of nodes (chain-of-thought).
-    Each node can have at most one child.
-    """
-
-    def __init__(self, info):
-        self.root: Optional[Node] = None
-        self.info: Dict[str, Any] = info
-
-    def add_node(
-        self,
-        is_terminal: bool = False,
-        is_pruned: bool = False,
-        type: Optional[str] = None,
-        description: str = "",
-        observation: str = "",
-        observation_code: Optional[str] = None,
-        messages: Optional[List[Any]] = None,
-    ) -> Node:
-        messages = Messages.from_turns(messages)
-        new_node = Node(
-            is_terminal=is_terminal,
-            is_pruned=is_pruned,
-            type=type,
-            description=description,
-            observation=observation,
-            observation_code=observation_code,
-            messages=messages,
-        )
-        if self.root is None:
-            self.root = new_node
-        else:
-            current = self.root
-            while len(current.children) > 0:
-                current = current.children[0]
-            current.children = [new_node]
-            new_node.parent = current
-        return new_node
-
-    def to_json(self) -> List[dict]:
-        chain_json = []
-        node = self.root
-        while node:
-            chain_json.append(node.to_json())
-            if node.children:
-                node = node.children[0]
-            else:
-                break
-        return chain_json
 
 
 class ChainRollout:
@@ -158,7 +44,7 @@ class ChainRollout:
         self.query_count: int = 0  # Number of interactions
         self.total_tokens: int = 0
         self.success_count: int = 0
-        self.chains = []
+        self.chains = {}
         self.current_nodes = {}
 
     @property
@@ -166,9 +52,10 @@ class ChainRollout:
         return self.timer.timing_data
 
     def to_json(self) -> dict:
+        chains_list = list(self.chains.values()) if isinstance(self.chains, dict) else self.chains
         return {
-            "finish": [chain.status_code == "success" for chain in self.chains],
-            "chains": [chain.to_json() for chain in self.chains],
+            "finish": [c.info.get("status_code") == "success" for c in chains_list],
+            "chains": [c.to_json() for c in chains_list],
         }
 
     def initialize_chains(
@@ -318,107 +205,25 @@ class ChainRollout:
         have_set_resources = False
 
         while not current_node.is_terminal and depth < max_turns:
-            newest_messages = current_node.messages.copy()
-
-            if not current_node.is_terminal:
-                # Generate response
-                new_msg = await self._generate_response(
-                    current_node=current_node,
-                    tools=tools,
-                    depth=depth,
-                    chain_id=chain_id,
-                    generation_config=generation_config,
-                    enable_streaming=enable_streaming,
-                )
-
-                newest_messages.append(new_msg)
-                thought_node = chain.add_node(
-                    type="Thought",
-                    messages=newest_messages.copy(),
-                    description=new_msg.get("content", ""),
-                )
-                thought_node.is_terminal = (
-                    new_msg.get("status", "continue") in self.terminal_status
-                )
-                current_node = thought_node
-
-                # Check if the thought node is terminal - if so, break the loop
-                if current_node.is_terminal:
-                    break
-
-            # Handle tool calls
-            num_parallel_tool_call = 0
-            if (
-                current_node.messages[-1].get("tool_calls")
-                and len(current_node.messages[-1]["tool_calls"]) > 0
-            ):
-                for tool_call in current_node.messages[-1]["tool_calls"]:
-                    # Validate tool call
-                    # We don't allow tool calls for unknow tools now
-                    is_valid = self.validate_tool_call(tool_call)
-
-                    if not is_valid:
-                        logger.debug(f"Invalid tool call: {tool_call}")
-                        continue
-                    else:
-                        logger.debug(f"Valid tool call: {tool_call}")
-
-                    result = await self._execute_tool_call(
-                        context,
-                        tool_call,
-                        newest_messages,
-                        chain,
-                        chain_id,
-                        depth,
-                        have_set_resources,
-                        enable_streaming,
-                    )
-                    num_parallel_tool_call += 1
-                    have_set_resources = True
-
-                    # Create action input node
-                    action_input_node = chain.add_node(
-                        type="Action Input",
-                        messages=newest_messages.copy(),
-                        description=result.get("arguments", ""),
-                    )
-
-                    # Process observation
-                    observation = result["observation"]
-
-                    action_input_node.observation = observation
-                    action_input_node.observation_code = result["status"]
-
-                    new_content = [{"type": "text", "text": observation}]
-                    # Handle multi-modal outputs
-                    if "image" in result:
-                        image = result["image"]
-                        image_base64 = image_to_data_uri(image)
-                        new_content.append({"type": "image", "image": image_base64})
-
-                    newest_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "tool_name": result["name"],
-                            "content": new_content,
-                        }
-                    )
-                    action_input_node.messages = newest_messages.copy()
-                    action_input_node.is_terminal = (
-                        result["status"] in self.terminal_status
-                    )
-
-            else:
-                # No tool calls, chain is finished
+            next_node, have_set_resources, should_continue = await self._run_one_turn(
+                chain_id=chain_id,
+                chain=chain,
+                current_node=current_node,
+                depth=depth,
+                tools=tools,
+                generation_config=generation_config,
+                context=context,
+                have_set_resources=have_set_resources,
+                enable_streaming=enable_streaming,
+            )
+            if not should_continue:
+                current_node = next_node
                 break
-
-            if num_parallel_tool_call == 0:
-                # No tool call, stop the task
-                break
-
-            current_node = action_input_node
+            current_node = next_node
             depth += 1
+
+        if "finish_reason" not in chain.info:
+            chain.info["finish_reason"] = "max_turns"
 
         # Finalize chain
         await self._finalize_chain(chain_id, chain, current_node, depth, context)
@@ -428,131 +233,332 @@ class ChainRollout:
         message_info = chain.info
         self.monitor_chain(trajectory=current_node.messages.messages, info=message_info)
 
+    async def _run_one_turn(
+        self,
+        chain_id: str,
+        chain: Chain,
+        current_node: Node,
+        depth: int,
+        tools: List[Dict],
+        generation_config: Dict[str, Any],
+        context: Context,
+        have_set_resources: bool,
+        enable_streaming: bool,
+    ) -> Tuple[Node, bool, bool]:
+        """
+        Run one turn: generate response, add thought node, process tool calls.
+
+        Returns:
+            (next_node, have_set_resources, should_continue). When should_continue
+            is False, the loop should break and next_node is the final node for this chain.
+        """
+        newest_messages = current_node.messages.copy()
+        max_model_len = getattr(self, "max_model_len", None)
+
+        # Terminate without generating if already at or over context length
+        if (
+            max_model_len is not None
+            and current_node.total_token_length >= max_model_len
+        ):
+            current_node.is_terminal = True
+            chain.info["finish_reason"] = "max_model_len"
+            return (current_node, have_set_resources, False)
+
+        # Generate response
+        new_msg, total_token_length = await self._generate_response(
+            current_node=current_node,
+            tools=tools,
+            depth=depth,
+            chain_id=chain_id,
+            generation_config=generation_config,
+            enable_streaming=enable_streaming,
+        )
+
+        newest_messages.append(new_msg)
+        thought_node = chain.add_node(
+            type="Thought",
+            messages=newest_messages.copy(),
+            description=new_msg.get("content", ""),
+        )
+        thought_node.total_token_length = (
+            total_token_length if total_token_length is not None else 0
+        )
+        thought_node.is_terminal = (
+            new_msg.get("status", "continue") in self.terminal_status
+        )
+        # Terminate if we hit or exceeded context length after this turn
+        if (
+            max_model_len is not None
+            and thought_node.total_token_length >= max_model_len
+        ):
+            thought_node.is_terminal = True
+            chain.info["finish_reason"] = "max_model_len"
+        elif thought_node.is_terminal:
+            chain.info["finish_reason"] = "terminal"
+
+        if thought_node.is_terminal:
+            return (thought_node, have_set_resources, False)
+
+        # Handle tool calls
+        num_parallel_tool_call = 0
+        action_input_node = None
+        running_total_token_length = thought_node.total_token_length
+        if (
+            thought_node.messages[-1].get("tool_calls")
+            and len(thought_node.messages[-1]["tool_calls"]) > 0
+        ):
+            for tool_call in thought_node.messages[-1]["tool_calls"]:
+                is_valid = self.validate_tool_call(tool_call)
+                if not is_valid:
+                    logger.debug(f"Invalid tool call: {tool_call}")
+                    continue
+                logger.debug(f"Valid tool call: {tool_call}")
+
+                result = await self._execute_tool_call(
+                    context,
+                    tool_call,
+                    newest_messages,
+                    chain,
+                    chain_id,
+                    depth,
+                    have_set_resources,
+                    enable_streaming,
+                )
+                num_parallel_tool_call += 1
+                have_set_resources = True
+
+                action_input_node = chain.add_node(
+                    type="Action Input",
+                    messages=newest_messages.copy(),
+                    description=result.get("arguments", ""),
+                )
+                observation = result["observation"]
+                action_input_node.observation = observation
+                action_input_node.observation_code = result["status"]
+                observation_token_length = self._get_observation_token_length(
+                    observation
+                )
+                action_input_node.total_token_length = (
+                    running_total_token_length + observation_token_length
+                )
+                running_total_token_length = action_input_node.total_token_length
+
+                # Terminate if context length exceeded after this tool observation
+                if (
+                    max_model_len is not None
+                    and action_input_node.total_token_length >= max_model_len
+                ):
+                    action_input_node.is_terminal = True
+                    chain.info["finish_reason"] = "max_model_len"
+                    return (action_input_node, have_set_resources, False)
+
+                new_content = [{"type": "text", "text": observation}]
+                if "image" in result:
+                    image_base64 = image_to_data_uri(result["image"])
+                    new_content.append({"type": "image", "image": image_base64})
+
+                newest_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "tool_name": result["name"],
+                        "content": new_content,
+                    }
+                )
+                action_input_node.messages = newest_messages.copy()
+                action_input_node.is_terminal = (
+                    result["status"] in self.terminal_status
+                )
+
+        if num_parallel_tool_call == 0:
+            chain.info["finish_reason"] = "no_tool_calls"
+            return (thought_node, have_set_resources, False)
+        if action_input_node is not None and action_input_node.is_terminal:
+            chain.info["finish_reason"] = "terminal"
+        return (action_input_node, have_set_resources, True)
+
+    def _normalize_full_response_content(self, content: Any) -> str:
+        """Convert message content (str or list of content blocks) to a single string."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list) and len(content) > 0:
+            if isinstance(content[0], dict) and "text" in content[0]:
+                return content[0]["text"]
+            return str(content)
+        return str(content)
+
+    def _normalize_generate_response(self, responses: Any) -> Dict[str, Any]:
+        """Unwrap backend response to a single dict. ClientBackend returns list of dicts."""
+        if isinstance(responses, list) and len(responses) == 1:
+            return responses[0]
+        if isinstance(responses, dict):
+            return responses
+        return {}
+
+    def _extract_total_length(self, responses: dict) -> Optional[int]:
+        """Extract total token length (after chat template) from generate_async response dict."""
+        if "total_lengths" not in responses:
+            return None
+        tl = responses["total_lengths"]
+        if tl is None:
+            return None
+        if hasattr(tl, "tolist"):  # e.g. torch tensor
+            tl = tl.tolist()
+        if isinstance(tl, list):
+            return int(tl[0]) if tl else None
+        return int(tl)
+
+    def _get_observation_token_length(self, observation: Any) -> int:
+        """Return token length of observation text. Uses self.tokenizer if available."""
+        tokenizer = getattr(self, "tokenizer", None)
+        if tokenizer is None:
+            return 0
+        text = observation if isinstance(observation, str) else str(observation)
+        try:
+            ids = tokenizer.encode(text, add_special_tokens=False)
+            return len(ids)
+        except Exception:
+            return 0
+
+    def _prepare_generation_config(
+        self,
+        generation_config: Optional[Dict[str, Any]],
+        current_node: Node,
+    ) -> Dict[str, Any]:
+        """Set max_tokens to max_model_len - total_token_length when not specified."""
+        config = dict(generation_config) if generation_config else {}
+        max_model_len = getattr(self, "max_model_len", None)
+        if max_model_len is not None and "max_tokens" not in config:
+            remaining = max_model_len - current_node.total_token_length
+            config["max_tokens"] = max(1, remaining)
+        return config
+
     async def _generate_response(
         self, current_node, tools, depth, chain_id, generation_config, enable_streaming
-    ):
-        """Generate response with optional streaming support."""
+    ) -> Tuple[Any, Optional[int]]:
+        """Generate response with optional streaming support. Returns (message, total_token_length)."""
+        effective_config = self._prepare_generation_config(
+            generation_config, current_node
+        )
         if enable_streaming:
-            # Emit generation start event
-            await self.streaming_manager.emit_event(
-                StreamEvent(
-                    event_type=StreamEventType.LLM_GENERATION_START,
-                    chain_id=chain_id,
-                    timestamp=time.time(),
-                    data={"depth": depth},
-                    step=depth,
-                    depth=depth,
-                )
+            return await self._generate_response_streaming(
+                current_node, tools, depth, chain_id, effective_config
             )
+        return await self._generate_response_non_streaming(
+            current_node, tools, depth, chain_id, effective_config
+        )
 
-            # Check if we have streaming capabilities
-            has_streaming = False
-            if hasattr(self, "generate_streaming"):
-                has_streaming = True
-            elif hasattr(self, "llm_engine") and hasattr(
-                self.llm_engine, "generate_streaming"
-            ):
-                has_streaming = True
+    async def _generate_response_streaming(
+        self, current_node, tools, depth, chain_id, generation_config
+    ):
+        """Generate response with streaming: emit events and optionally stream from LLM."""
+        await self.streaming_manager.emit_event(
+            StreamEvent(
+                event_type=StreamEventType.LLM_GENERATION_START,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={"depth": depth},
+                step=depth,
+                depth=depth,
+            )
+        )
 
-                # Create a wrapper to use the LLM engine's streaming
-                async def generate_streaming_wrapper(messages_list, **kwargs):
-                    async for chunk in self.llm_engine.generate_streaming(
-                        messages_list, **kwargs
-                    ):
-                        yield chunk
-
-                self.generate_streaming = generate_streaming_wrapper
-
-            if has_streaming:
-                # Collect full response from streaming
-                full_response = ""
-                async for chunk in self.generate_streaming(
-                    [current_node.messages.messages], tools=tools, **generation_config
+        has_streaming = False
+        if hasattr(self, "generate_streaming"):
+            has_streaming = True
+        elif hasattr(self, "llm_engine") and hasattr(
+            self.llm_engine, "generate_streaming"
+        ):
+            has_streaming = True
+            async def generate_streaming_wrapper(messages_list, **kwargs):
+                async for chunk in self.llm_engine.generate_streaming(
+                    messages_list, **kwargs
                 ):
-                    await self.streaming_manager.emit_event(
-                        StreamEvent(
-                            event_type=StreamEventType.LLM_GENERATION_CHUNK,
-                            chain_id=chain_id,
-                            timestamp=time.time(),
-                            data={"content": chunk},
-                            step=depth,
-                            depth=depth,
-                        )
-                    )
-                    # chunk is the whole generated text
-                    full_response = chunk
+                    yield chunk
+            self.generate_streaming = generate_streaming_wrapper
 
-                logger.debug(
-                    f"[ChainRollout._generate_response] full_response: {full_response}"
-                )
-
-                # Emit generation end event
-                await self.streaming_manager.emit_event(
-                    StreamEvent(
-                        event_type=StreamEventType.LLM_GENERATION_END,
-                        chain_id=chain_id,
-                        timestamp=time.time(),
-                        data={"full_response": full_response},
-                        step=depth,
-                        depth=depth,
-                    )
-                )
-
-                # Parse response
-                new_msg = self.parse([full_response])
-                return new_msg[0]
-            else:
-                # Fallback to non-streaming generation
-                responses = await self.generate_async(
-                    [current_node.messages.messages], tools=tools, **generation_config
-                )
-                new_msg = self.parse(responses)
-
-                # Emit a single chunk event for the full response
-                full_response = new_msg[0].get("content", "")
-                if isinstance(full_response, list) and len(full_response) > 0:
-                    # Handle case where content is a list of content blocks
-                    if (
-                        isinstance(full_response[0], dict)
-                        and "text" in full_response[0]
-                    ):
-                        full_response = full_response[0]["text"]
-                    else:
-                        full_response = str(full_response)
-                elif not isinstance(full_response, str):
-                    full_response = str(full_response)
-
+        if has_streaming:
+            full_response = ""
+            async for chunk in self.generate_streaming(
+                [current_node.messages.messages], tools=tools, **generation_config
+            ):
                 await self.streaming_manager.emit_event(
                     StreamEvent(
                         event_type=StreamEventType.LLM_GENERATION_CHUNK,
                         chain_id=chain_id,
                         timestamp=time.time(),
-                        data={"content": full_response},
+                        data={"content": chunk},
                         step=depth,
                         depth=depth,
                     )
                 )
-
-                # Emit generation end event
-                await self.streaming_manager.emit_event(
-                    StreamEvent(
-                        event_type=StreamEventType.LLM_GENERATION_END,
-                        chain_id=chain_id,
-                        timestamp=time.time(),
-                        data={"full_response": full_response},
-                        step=depth,
-                        depth=depth,
-                    )
-                )
-
-                return new_msg[0]
-        else:
-            # Non-streaming generation
-            responses = await self.generate_async(
-                [current_node.messages.messages], tools=tools, **generation_config
+                full_response = chunk
+            logger.debug(
+                f"[ChainRollout._generate_response] full_response: {full_response}"
             )
-            new_msg = self.parse(responses)
-            return new_msg[0]
+            await self._emit_generation_end(chain_id, depth, full_response)
+            new_msg = self.parse([full_response])
+            return (new_msg[0], None)
+
+        # Fallback to non-streaming when streaming not available
+        raw = await self.generate_async(
+            [current_node.messages.messages],
+            tools=tools,
+            return_dict=True,
+            **generation_config,
+        )
+        responses = self._normalize_generate_response(raw)
+        response_texts = responses.get("response_texts") or responses.get(
+            "reponse_texts"
+        )
+        new_msg = self.parse(response_texts)
+        full_response = self._normalize_full_response_content(
+            new_msg[0].get("content", "")
+        )
+        await self.streaming_manager.emit_event(
+            StreamEvent(
+                event_type=StreamEventType.LLM_GENERATION_CHUNK,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={"content": full_response},
+                step=depth,
+                depth=depth,
+            )
+        )
+        await self._emit_generation_end(chain_id, depth, full_response)
+        total_length = self._extract_total_length(responses)
+        return (new_msg[0], total_length)
+
+    async def _emit_generation_end(
+        self, chain_id: str, depth: int, full_response: str
+    ) -> None:
+        """Emit LLM_GENERATION_END streaming event."""
+        await self.streaming_manager.emit_event(
+            StreamEvent(
+                event_type=StreamEventType.LLM_GENERATION_END,
+                chain_id=chain_id,
+                timestamp=time.time(),
+                data={"full_response": full_response},
+                step=depth,
+                depth=depth,
+            )
+        )
+
+    async def _generate_response_non_streaming(
+        self, current_node, tools, depth, chain_id, generation_config
+    ) -> Tuple[Any, Optional[int]]:
+        """Generate response without streaming (no events). Returns (message, total_token_length)."""
+        raw = await self.generate_async(
+            [current_node.messages.messages],
+            return_dict=True,
+            tools=tools,
+            **generation_config,
+        )
+        responses = self._normalize_generate_response(raw)
+        response_texts = responses.get("response_texts")
+        new_msg = self.parse(response_texts)
+        total_length = self._extract_total_length(responses)
+        return (new_msg[0], total_length)
 
     def validate_tool_call(self, tool_call):
         tool_name = tool_call["function"]["name"]
@@ -649,8 +655,7 @@ class ChainRollout:
             chain.info["reward"] = None
 
 
-        # Release resources so other rollouts can use them
-        await context.release_resource(scope="rollout")
+        # Release global resources so other rollouts can use them
         await context.release_resource(scope="global")
 
         # Kill rollout-scoped resources

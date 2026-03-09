@@ -18,22 +18,9 @@ import sys
 from pathlib import Path
 from .utils_patch import _patch_run_patch_in_container
 
-# Ensure enroot-py is on path
-_root = Path(__file__).resolve().parent.parent.parent
-_enroot_src = _root / "enroot-py" / "src"
-if _enroot_src.is_dir() and str(_enroot_src) not in sys.path:
-    sys.path.insert(0, str(_enroot_src))
-
 
 
 def _install():
-    """Patch sys.modules so docker -> enroot.docker_compat, and patch profile for Enroot images."""
-    import enroot.docker_compat as docker_compat
-
-    sys.modules["docker"] = docker_compat
-    sys.modules["docker.models"] = docker_compat.models
-    sys.modules["docker.models.containers"] = docker_compat.models.containers
-    sys.modules["docker.errors"] = docker_compat.errors
 
     # Swebench docker_utils (exec_run_with_timeout, cleanup_container) use container.client.api
     # and container.stop(timeout=); enroot-py provides these, so no docker_utils patch needed.

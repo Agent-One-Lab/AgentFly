@@ -11,7 +11,7 @@ async def test_code_agent_end_to_end():
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
         template="qwen2.5",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
     )
 
     question1 = "Every morning Aya goes for a $9$-kilometer-long walk and stops at a coffee shop afterwards. When she walks at a constant speed of $s$ kilometers per hour, the walk takes her 4 hours, including $t$ minutes spent in the coffee shop. When she walks $s+2$ kilometers per hour, the walk takes her 2 hours and 24 minutes, including $t$ minutes spent in the coffee shop. Suppose Aya walks at $s+\frac{1}{2}$ kilometers per hour. Find the number of minutes the walk takes her, including the $t$ minutes spent in the coffee shop."

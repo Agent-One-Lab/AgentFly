@@ -10,7 +10,7 @@ async def test_quick_example():
         model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
         tools=[calculator],
         template="qwen2.5",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
     )
     messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]
     await agent.run(messages=messages, max_turns=3, num_chains=1)
@@ -61,7 +61,7 @@ async def define_tool_reward():
         tools=[calculator],
         template="qwen2.5",
         reward_fn=math_reward_string_equal,
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
     )
 
     messages = {

@@ -1,4 +1,4 @@
-from agentfly.agents import HFAgent, ClientConfig
+from agentfly.agents import HFAgent
 from agentfly.tools import code_interpreter
 
 
@@ -7,10 +7,11 @@ def test_agent_tool_parser():
         model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
         tool_parser_name="hermes",
         tools=[code_interpreter],
-        backend="client",
-        backend_config=ClientConfig(
-            base_url="http://localhost:8000/v1", api_key="EMPTY"
-        ),
+        backend_config={
+            "backend": "client",
+            "base_url": "http://localhost:8000/v1",
+            "api_key": "EMPTY",
+        },
     )
 
     responses = [

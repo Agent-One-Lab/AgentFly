@@ -31,7 +31,7 @@ async def test_react_agent_parse_run():
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
         template="qwen2.5",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
     )
 
     responses = [

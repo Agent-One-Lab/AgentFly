@@ -7,7 +7,11 @@ __all__ = [
     "InstructionPrompt",
     "InstructionSystemPrompt",
     "SystemPrompt",
+    "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
 ]
+
+# Marker command from InstructionSystemPrompt; when the model outputs this, status is set to terminal.
+COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
 # Placeholder for PR description; use .replace(INSTRUCTION_DESCRIPTION_PLACEHOLDER, description)
 # so descriptions that contain { or } (e.g. code) don't break .format().
@@ -16,7 +20,6 @@ INSTRUCTION_DESCRIPTION_PLACEHOLDER = "<<<PR_DESCRIPTION>>>"
 InstructionSystemPrompt = """You are a helpful assistant that can interact with a computer.
 
 Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
-Include a THOUGHT section before your command where you explain your reasoning process.
 Format your response as shown in <format_example>.
 
 <format_example>
@@ -48,12 +51,12 @@ This workflows should be done step-by-step so that you can iterate on your chang
 3. Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
     However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
 
+
 ## Formatting your response
 
 Here is an example of a correct response:
 
 <example_response>
-THOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.
 
 ```mswea_bash_command
 ls -la
@@ -73,12 +76,6 @@ EOF
 ```
 
 ### Edit files with sed:
-
-{%- if system == "Darwin" -%}
-<important>
-You are on MacOS. For all the below examples, you need to use `sed -i ''` instead of `sed -i`.
-</important>
-{%- endif -%}
 
 ```mswea_bash_command
 # Replace all occurrences
@@ -106,6 +103,8 @@ nl -ba filename.py | sed -n '10,20p'
 ```mswea_bash_command
 anything
 ```
+
+Remember that your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||)
 """
 
 SystemPrompt = """You are a helpful assistant that can interact with a computer.

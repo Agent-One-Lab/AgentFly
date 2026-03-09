@@ -14,7 +14,7 @@ async def test_image_editing():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",  # 实时显示处理过程
     )
 
@@ -130,7 +130,7 @@ async def test_specific_function():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
 
@@ -172,7 +172,7 @@ async def interactive_test():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
 

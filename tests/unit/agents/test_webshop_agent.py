@@ -14,7 +14,7 @@ async def test_webshop_agent_call():
         tools=tools,
         reward_fn=webshop_reward,
         template="qwen2.5",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         debug=True,
     )
 

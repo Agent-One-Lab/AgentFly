@@ -3,6 +3,8 @@ from ...core import Context
 from ...resources import ResourceSpec
 from .utils import get_patch_from_runtime
 from ...rewards.reward_base import reward
+from .r2e_gym.eval import reward_from_container
+from .r2e_gym.eval import setup_container_for_reward
 import asyncio
 
 # asyncio.to_thread only prevents blocking the event loop; it does not shorten wall-clock
@@ -11,6 +13,44 @@ import asyncio
 
 # Default timeout (seconds) for evaluate_swesmith; override via context.metadata["eval_timeout"].
 DEFAULT_EVAL_TIMEOUT = 300
+
+@reward(name="r2e_gym_reward")
+async def r2e_gym_reward(context: Context) -> dict:
+    image_id = context.metadata.get("image_id")
+    if not image_id:
+        return "Error: context.metadata['image_id'] is required for shell tool."
+    rollout_id = context.rollout_id
+    spec = ResourceSpec(
+        category="container",
+        image=image_id,
+    )
+
+    container = await context.acquire_resource(
+        spec=spec, id=rollout_id, scope="rollout", backend="local"
+    )
+
+    await asyncio.to_thread(setup_container_for_reward, container._container, dataset="r2e")
+
+    # wait_for ensures we get asyncio.TimeoutError after 125s; to_thread has no timeout.
+    # Inner reward_from_container uses timeout=120 for the test run and returns normally
+    # on its own timeout (TESTS_TIMEOUT); if the whole call hangs, wait_for fires.
+    try:
+        reward, out = await asyncio.wait_for(
+            asyncio.to_thread(
+                reward_from_container,
+                container._container,
+                context.metadata,
+                dataset="r2e",
+                timeout=120,
+                get_test_output=True,
+            ),
+            timeout=125,
+        )
+    except asyncio.TimeoutError:
+        return {"reward": 0.0, "eval_timeout": 1.0, "out": ""}
+   
+    return {"reward": reward, "out": out}
+
 
 
 @reward(name="swe_reward")

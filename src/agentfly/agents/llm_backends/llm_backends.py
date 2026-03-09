@@ -90,128 +90,6 @@ class LLMBackend:
         pass
 
 
-class TransformersBackend(LLMBackend):
-    """HuggingFace Transformers implementation for local model inference.
-
-    This backend uses the Hugging Face Transformers library to load and run models locally.
-    It supports both synchronous and asynchronous text generation with streaming capabilities.
-    """
-
-    def __init__(
-        self,
-        model_name_or_path: str,
-        template: str,
-        temperature: float = 1.0,
-        max_new_tokens: int = 1024,
-        **kwargs,
-    ):
-        """Initialize TransformersBackend.
-
-        Args:
-            model_name_or_path (str): Name or path of the pre-trained model to load.
-            template (str): Chat template to use for formatting messages.
-            temperature (float): Sampling temperature for text generation. Defaults to 1.0.
-            max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
-            **kwargs: Additional configuration parameters.
-        """
-        super().__init__(**kwargs)
-
-        self.model_name = model_name_or_path
-        self.temperature = temperature
-        self.template = template
-        self.max_new_tokens = max_new_tokens
-        # Load model and tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name,
-            trust_remote_code=True,
-        )
-        self.llm_engine = AutoModelForCausalLM.from_pretrained(
-            self.model_name, device_map="auto", trust_remote_code=True
-        )
-
-    def generate(self, messages_list: str, **kwargs) -> str:
-        """Generate text from prompt using Transformers"""
-        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
-        temperature = kwargs.get("temperature", self.temperature)
-
-        kwargs.update(
-            {
-                "max_new_tokens": max_new_tokens,
-                "temperature": temperature,
-                "do_sample": temperature > 0,
-            }
-        )
-
-        prompts, _ = self.apply_chat_template(messages_list, self.template)
-
-        inputs = self.tokenizer(
-            prompts, return_tensors="pt", padding=True, padding_side="left"
-        ).to(self.llm_engine.device)
-        input_length = inputs["input_ids"].shape[1]
-        outputs = self.llm_engine.generate(**inputs, **kwargs)[:, input_length:]
-
-        response_texts = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        return response_texts
-
-    async def generate_async(self, messages_list: str, **kwargs) -> str:
-        """Async wrapper for generate"""
-        return self.generate(messages_list, **kwargs)
-
-    async def generate_streaming(
-        self,
-        messages_list: List[List[Dict]],
-        streaming_callback: Optional[Callable] = None,
-        **kwargs,
-    ) -> AsyncGenerator[str, None]:
-        """Generate text with streaming support using Transformers"""
-        max_new_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
-        temperature = kwargs.get("temperature", self.temperature)
-
-        prompts, _ = self.apply_chat_template(messages_list, self.template)
-
-        inputs = self.tokenizer(
-            prompts, return_tensors="pt", padding=True, padding_side="left"
-        ).to(self.llm_engine.device)
-
-        # Use streaming generation
-        generated_tokens = []
-        for i in range(max_new_tokens):
-            outputs = self.llm_engine.generate(
-                **inputs,
-                max_new_tokens=1,
-                temperature=temperature,
-                do_sample=temperature > 0,
-                pad_token_id=self.tokenizer.eos_token_id,
-                use_cache=True,
-            )
-
-            new_token = outputs[0][-1].unsqueeze(0)
-            generated_tokens.append(new_token)
-
-            # Decode the new token
-            new_text = self.tokenizer.decode(new_token, skip_special_tokens=True)
-
-            if streaming_callback:
-                await streaming_callback(new_text)
-
-            yield new_text
-
-            # Check for EOS
-            if new_token.item() == self.tokenizer.eos_token_id:
-                break
-
-            # Update input for next iteration
-            inputs["input_ids"] = torch.cat(
-                [inputs["input_ids"], new_token.unsqueeze(0)], dim=1
-            )
-            inputs["attention_mask"] = torch.cat(
-                [
-                    inputs["attention_mask"],
-                    torch.ones(1, 1, device=inputs["attention_mask"].device),
-                ],
-                dim=1,
-            )
-
 
 class AsyncVLLMBackend(LLMBackend):
     """Asynchronous vLLM implementation for high-performance model inference.
@@ -427,7 +305,7 @@ class AsyncVerlBackend(LLMBackend):
             new_messages.append(new_message)
         return new_messages
 
-    async def generate_async(self, messages_list: str, **kwargs) -> str:
+    async def generate_async(self, messages_list: str, return_dict: bool = False, **kwargs) -> str:
         """Generate text from prompt using Verl"""
         # We need to build a DataProto from the prompts
 
@@ -469,6 +347,15 @@ class AsyncVerlBackend(LLMBackend):
             for response_id in response_ids
         ]
 
+        if return_dict:
+            attention_mask = gen_batch_output.batch["attention_mask"]
+            total_lengths = attention_mask.sum(dim=1)
+
+            return {
+                "response_texts": response_texts,
+                "total_lengths": total_lengths,
+            }
+
         return response_texts
 
 
@@ -483,11 +370,13 @@ class ClientBackend(LLMBackend):
     def __init__(
         self,
         model_name_or_path: str,
-        template: str,
         base_url: str = "http://localhost:8000/v1",
         max_requests_per_minute: int = 100,
         timeout: int = 600,
         api_key: str = "EMPTY",
+        max_tokens: int = 1024,
+        temperature: float = 1.0,
+        n: int = 1,
         **kwargs,
     ):
         """Initialize ClientBackend.
@@ -507,7 +396,6 @@ class ClientBackend(LLMBackend):
         # --- connection
         self.model_name = model_name_or_path
         self.base_url = base_url
-        self.template = template
 
         # Detect if it's a Gemini model
         self.is_gemini = self._is_gemini_model(model_name_or_path, base_url)
@@ -525,6 +413,12 @@ class ClientBackend(LLMBackend):
 
         # --- misc
         self.timeout = timeout
+
+        # --- generation parameters
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.n = n
+
 
     def _is_gemini_model(self, model_name: str, base_url: str) -> bool:
         """Check if the model is a Google Gemini model."""
@@ -583,17 +477,23 @@ class ClientBackend(LLMBackend):
         # Standard parameters
         if "temperature" in kwargs:
             config_kwargs["temperature"] = kwargs["temperature"]
+        elif self.temperature:
+            config_kwargs["temperature"] = self.temperature
 
         # Map 'n' to 'candidate_count'
         if "n" in kwargs:
             config_kwargs["candidate_count"] = kwargs["n"]
         elif "candidate_count" in kwargs:
             config_kwargs["candidate_count"] = kwargs["candidate_count"]
+        elif self.n:
+            config_kwargs["candidate_count"] = self.n
 
         if "max_tokens" in kwargs:
             config_kwargs["max_output_tokens"] = kwargs["max_tokens"]
         elif "max_new_tokens" in kwargs:
             config_kwargs["max_output_tokens"] = kwargs["max_new_tokens"]
+        elif self.max_tokens:
+            config_kwargs["max_output_tokens"] = self.max_tokens
 
         # FIX: Move tools into the config dictionary
         if "tools" in kwargs:
@@ -658,10 +558,17 @@ class ClientBackend(LLMBackend):
                     response_texts.append(cand_text)
                     all_tool_calls.append(cand_tool_calls if cand_tool_calls else None)
 
+            total_lengths = None
+            if hasattr(response, "usage_metadata") and response.usage_metadata is not None:
+                total_lengths = getattr(
+                    response.usage_metadata, "total_token_count", None
+                )
+
             return {
                 "response_texts": response_texts,
                 "tool_calls": all_tool_calls,
                 "response_dict": raw_response_dict,
+                "total_lengths": total_lengths,
             }
 
         except Exception as e:
@@ -670,6 +577,7 @@ class ClientBackend(LLMBackend):
                 "response_texts": [""],
                 "tool_calls": [None],
                 "response_dict": {"error": str(e)},
+                "total_lengths": None,
             }
 
     def _blocking_call_openai(self, messages: List[Dict], **kwargs) -> Dict:
@@ -692,11 +600,14 @@ class ClientBackend(LLMBackend):
         tool_calls = [
             choice["message"].get("tool_calls") for choice in resp_json["choices"]
         ]
+        usage = resp_json.get("usage") or {}
+        total_lengths = usage.get("total_tokens") if usage else None
 
         return {
             "response_texts": response_texts,
             "tool_calls": tool_calls,
             "response_dict": resp_json,
+            "total_lengths": total_lengths,
         }
 
     # --------------------------------------------------------------------- #
@@ -804,7 +715,7 @@ class ClientBackend(LLMBackend):
     def generate(
         self,
         messages: List[List[Dict]] | List[Dict],
-        return_full_response_dict: bool = False,
+        return_dict: bool = False,
         **kwargs,
     ) -> List[str] | asyncio.Task:
         """
@@ -844,6 +755,7 @@ class ClientBackend(LLMBackend):
                 response_texts = response_dict["response_texts"]
                 tool_calls = response_dict["tool_calls"]
                 full_response_dict = response_dict["response_dict"]
+                total_lengths = response_dict.get("total_lengths")
 
                 # Collect all response texts for non-full-response mode
                 all_response_texts.extend(response_texts)
@@ -854,10 +766,11 @@ class ClientBackend(LLMBackend):
                         "response_texts": response_texts,
                         "tool_calls": tool_calls,
                         "response_dict": full_response_dict,
+                        "total_lengths": total_lengths,
                     }
                 )
 
-            if return_full_response_dict:
+            if return_dict:
                 return final_response_dicts
             else:
                 return all_response_texts
@@ -873,9 +786,9 @@ class ClientBackend(LLMBackend):
         return loop.create_task(_runner())
 
     async def generate_async(
-        self, messages: List[List[Dict]] | List[Dict], **kwargs
+        self, messages: List[List[Dict]] | List[Dict], return_dict: bool = False, **kwargs
     ) -> List[str]:
-        return await self.generate(messages, **kwargs)
+        return await self.generate(messages, return_dict, **kwargs)
 
     # Background token‑bucket refill (one token each 60/max_rpm seconds)
     async def _refill_tokens(self):

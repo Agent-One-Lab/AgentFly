@@ -18,7 +18,7 @@ async def test_code_agent():
         tools=[code_interpreter],
         reward_fn=math_reward,
         template="qwen2.5-no-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
     await agent.run(
@@ -49,7 +49,7 @@ async def test_react_vqa_agent():
         model_name_or_path="Agent-One/Qwen2.5-VL-3B-VQA-React",
         tools=[answer_qa],
         template="qwen2.5-vl",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
     await agent.run(
@@ -77,7 +77,7 @@ async def test_react_vqa_retrieval_agent():
         model_name_or_path="Agent-One/Qwen2.5-VL-3B-Retrieval-React",
         tools=[asyncdense_retrieve, answer_qa],
         template="qwen2.5-vl",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
     await agent.run(
@@ -109,7 +109,7 @@ async def test_react_scienceworld_agent():
         tools=[scienceworld_explorer],
         reward_fn=scienceworld_reward,
         template="qwen2.5-no-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
     await agent.run(
@@ -138,7 +138,7 @@ async def test_react_webshop_agent():
         tools=[webshop_browser],
         reward_fn=webshop_reward,
         template="qwen2.5-no-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
     await agent.run(

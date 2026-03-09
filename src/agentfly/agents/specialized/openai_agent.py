@@ -7,26 +7,26 @@ from openai import OpenAI
 from ...tools import answer_qa
 from ...tools.decorator import tool
 from ..agent_base import BaseAgent
-from ..llm_backends.backend_configs import ClientConfig
 
 
 class OpenAIAgent(BaseAgent):
     def __init__(self, api_key="", base_url="https://api.openai.com/v1", **kwargs):
         assert api_key is not None and api_key != "", "API key is required"
-        backend = kwargs.get("backend", "client")
-        assert backend == "client", "OpenAI agent only supports client backend"
-        kwargs["backend"] = backend
-
-        # Create client-specific configuration
-        client_config = ClientConfig(
-            api_key=api_key,
-            base_url=base_url,
-            max_requests_per_minute=kwargs.get("max_requests_per_minute", 100),
-            timeout=kwargs.get("timeout", 600),
-            max_new_tokens=kwargs.get("max_new_tokens", 1024),
-            temperature=kwargs.get("temperature", 1.0),
-        )
-        kwargs["backend_config"] = client_config
+        # BaseAgent expects backend_config dict with "backend" and backend-specific params
+        user_backend_config = kwargs.pop("backend_config", None) or {}
+        if isinstance(user_backend_config, dict) and user_backend_config.get("backend") not in (None, "client"):
+            raise ValueError("OpenAI agent only supports client backend")
+        backend_config = {
+            "backend": "client",
+            "api_key": api_key,
+            "base_url": base_url,
+            "max_requests_per_minute": kwargs.pop("max_requests_per_minute", 100),
+            "timeout": kwargs.pop("timeout", 600),
+            "max_tokens": kwargs.pop("max_new_tokens", kwargs.pop("max_tokens", 1024)),
+            "temperature": kwargs.pop("temperature", 1.0),
+            **{k: v for k, v in user_backend_config.items() if k != "backend"},
+        }
+        kwargs["backend_config"] = backend_config
 
         # Initialize the base class
         super(OpenAIAgent, self).__init__(**kwargs)

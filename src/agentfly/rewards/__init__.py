@@ -24,7 +24,7 @@ from .reward_base import (
 )
 from .scienceworld_reward import scienceworld_reward
 from .webshop_reward import webshop_reward
-from .swe_rewards.swe_rewards import swe_reward
+from .swe_rewards.swe_rewards import swe_reward, r2e_gym_reward
 
 __all__ = [
     "BaseReward",
@@ -34,6 +34,7 @@ __all__ = [
     "register_reward",
     "reward",
     "swe_reward",
+    "r2e_gym_reward",
     "qa_em_reward",
     "qa_f1_reward",
     "qa_f1_reward_tool",

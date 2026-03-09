@@ -80,8 +80,7 @@ class BaseAgent(ChainRollout, ABC):
         system_prompt: str = None,
         tools: List = [],
         max_model_len: int = None,
-        backend: str = "async_vllm",
-        backend_config: Any = None,
+        backend_config: Optional[Dict[str, Any]] = None,
         reward_fn: Callable = None,
         streaming: str = "console",
         debug: bool = False,
@@ -100,17 +99,20 @@ class BaseAgent(ChainRollout, ABC):
             system_prompt: The system prompt to use for the agent.
             tools: The tools to use for the agent.
             debug: Whether to enable debug mode.
-            backend: The backend to use for the agent.
+            backend_config: Dict specifying the backend and its parameters. Must include "backend" (e.g. "async_vllm", "client").
+                Other keys are passed as kwargs to that backend (e.g. "gpu_memory_utilization" for async_vllm).
+                Defaults to {"backend": "async_vllm"}.
             tool_parser: Optional tool parser instance from vLLM. If provided, will be used for parsing tool calls.
             tool_parser_name: Optional name of the tool parser to use (e.g., "hermes", "pythonic"). If provided and tool_parser is None, will create a parser using this name.
 
         """
+        if backend_config is None:
+            backend_config = {"backend": "async_vllm"}
         self._validate_init_args(
             model_name_or_path,
             template,
             system_prompt,
             tools,
-            backend,
             backend_config,
             reward_fn,
             streaming,
@@ -124,7 +126,8 @@ class BaseAgent(ChainRollout, ABC):
         )
 
         self.debug = debug
-        self.backend = backend
+        self.backend_config = backend_config
+        self.backend = backend_config["backend"]
         self.tools = tools
         self.max_model_len = max_model_len
         self.tool_names = [tool.name for tool in tools]
@@ -133,17 +136,6 @@ class BaseAgent(ChainRollout, ABC):
             system_prompt = system_prompt.replace("\\n", "\n")
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
-
-        # Handle backend configuration
-        if backend_config is None:
-            # Use default configuration for the backend
-            config_class = BACKEND_CONFIGS.get(backend)
-            if config_class:
-                self.backend_config = config_class()
-            else:
-                self.backend_config = None
-        else:
-            self.backend_config = backend_config
 
         # Create appropriate tokenizer for trajectory processing
         self.tokenizer = create_tokenizer(model_name_or_path)
@@ -163,7 +155,7 @@ class BaseAgent(ChainRollout, ABC):
         else:
             self.jinja_template = get_template(self.template).jinja_template()
 
-        self.llm_engine = self._init_llm_engine(model_name_or_path, backend)
+        self.llm_engine = self._init_llm_engine(model_name_or_path, self.backend)
 
         self.wandb_project_name = wandb_project_name
         self.wandb_run_name = wandb_run_name
@@ -198,7 +190,6 @@ class BaseAgent(ChainRollout, ABC):
         template,
         system_prompt,
         tools,
-        backend,
         backend_config,
         reward_fn,
         streaming,
@@ -210,6 +201,11 @@ class BaseAgent(ChainRollout, ABC):
         tool_parser,
         tool_parser_name,
     ):
+        if not isinstance(backend_config, dict) or "backend" not in backend_config:
+            raise ValueError(
+                "backend_config must be a dict with at least a 'backend' key (e.g. {'backend': 'async_vllm'})."
+            )
+        backend = backend_config["backend"]
         if backend == "client":
             assert template is None, (
                 "For client backend, we do not support chat template. Set the template when deploying the model."
@@ -234,14 +230,21 @@ class BaseAgent(ChainRollout, ABC):
 
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         if isinstance(model_name_or_path, str):
-            # Extract backend-specific configuration
-            config_kwargs = {}
-            if self.backend_config:
-                config_kwargs = {
-                    k: v
-                    for k, v in self.backend_config.__dict__.items()
-                    if not k.startswith("_")
-                }
+            # Backend params: all keys in backend_config except "backend". Optionally merge with default config.
+            config_kwargs = {k: v for k, v in self.backend_config.items() if k != "backend"}
+            config_class = BACKEND_CONFIGS.get(backend)
+            if config_class:
+                try:
+                    default_instance = config_class()
+                    default_dict = {
+                        k: v
+                        for k, v in default_instance.__dict__.items()
+                        if not k.startswith("_")
+                    }
+                    default_dict.update(config_kwargs)
+                    config_kwargs = default_dict
+                except Exception:
+                    pass
 
             if backend == "async_vllm":
                 llm_engine = AsyncVLLMBackend(
@@ -255,9 +258,8 @@ class BaseAgent(ChainRollout, ABC):
                     **config_kwargs,
                 )
             elif backend == "client":
-                llm_engine = ClientBackend(
-                    model_name_or_path, self.template, **config_kwargs
-                )
+                # ClientBackend(model_name_or_path, base_url=..., ); no template as 2nd arg
+                llm_engine = ClientBackend(model_name_or_path, **config_kwargs)
             else:
                 raise ValueError(f"Backend {backend} is not supported.")
         else:
@@ -780,7 +782,7 @@ class BaseAgent(ChainRollout, ABC):
             elif len(aligned_values) == 1 and batch_size > 1:
                 aligned_values = aligned_values * batch_size
             if len(aligned_values) != batch_size:
-                self.logger.warning(
+                logger.warning(
                     f"Adjusting rm_{key} length from {len(aligned_values)} to {batch_size} to match batch size."
                 )
                 if len(aligned_values) < batch_size:

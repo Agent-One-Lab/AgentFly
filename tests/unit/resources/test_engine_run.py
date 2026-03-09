@@ -17,5 +17,5 @@ async def test_engine_run():
     result = await container.run_cmd("echo 'hello, world!'")
     print(result)
 
-        await ResourceEngine.release(id="test_0123")
+    await ResourceEngine.release(id="test_0123")
     

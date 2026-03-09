@@ -10,7 +10,6 @@ from typing import Dict, List
 import click
 
 from ..agents import HFAgent
-from ..agents.llm_backends.backend_configs import ClientConfig
 
 
 def gather_responses(trajectories: List[Dict]):
@@ -48,13 +47,13 @@ def main(
         agent = HFAgent(
             model_name_or_path=model_name_or_path,
             tools=[],
-            backend="client",
-            backend_config=ClientConfig(
-                base_url="http://0.0.0.0:8000/v1",
-                api_key=api_key,
-                max_new_tokens=30720,
-                timeout=2400,
-            ),
+            backend_config={
+                "backend": "client",
+                "base_url": "http://0.0.0.0:8000/v1",
+                "api_key": api_key,
+                "max_tokens": 30720,
+                "timeout": 2400,
+            },
             local_cache_dir="test_cache",
         )
         await agent.run(

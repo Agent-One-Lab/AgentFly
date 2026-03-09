@@ -79,17 +79,18 @@ class ContainerResource(BaseResource):
         """
         Execute a shell command in the container.
 
-        The command is run as ``sh -c "<cmd>"`` so that shell features (cd, &&, ||,
+        The command is run as ``bash -c "<cmd>"`` so that shell features (cd, &&, ||,
         pipes, redirects) work. Without this, exec_run would treat the first token
         as the executable (e.g. "cd" would be run as a program and fail, since cd
-        is a shell builtin).
+        is a shell builtin). Using bash allows ANSI-C quoting (e.g. ``$'line1\nline2'``)
+        so that ``\\n`` is interpreted as a newline in multi-line python -c commands.
 
         Args:
-            cmd: Shell command string (executed with sh -c).
-            timeout: Optional timeout in seconds. If the command does not complete
-                within this time, asyncio.TimeoutError is raised. The command
-                may still run in the container after timeout; callers should
-                catch and handle as needed.
+            cmd: Shell command string (executed with bash -c).
+            timeout: Optional timeout in seconds. If provided, the command is
+                wrapped with the shell ``timeout`` utility so that it is
+                terminated inside the container when the timeout elapses. When
+                a timeout occurs, asyncio.TimeoutError is raised.
             workdir: Optional working directory inside the container for this exec.
             user: Optional user (name or uid) to run the command as.
             environment: Optional dict of env vars for this exec only.
@@ -100,10 +101,15 @@ class ContainerResource(BaseResource):
             Command stdout as string (decoded from bytes if needed).
 
         Raises:
-            asyncio.TimeoutError: If timeout is set and the command does not
-                complete within that time.
+            asyncio.TimeoutError: If timeout is set and the command is
+                terminated by the shell ``timeout`` utility.
         """
-        exec_args: list = ["sh", "-c", cmd]
+        shell_cmd = cmd
+        if timeout is not None:
+            # coreutils timeout returns exit code 124 when the command times out
+            shell_cmd = f"timeout {timeout}s {cmd}"
+
+        exec_args: list = ["bash", "-c", shell_cmd]
         kwargs: dict = {**exec_kwargs}
         if workdir is not None:
             kwargs["workdir"] = workdir
@@ -111,13 +117,17 @@ class ContainerResource(BaseResource):
             kwargs["user"] = user
         if environment is not None:
             kwargs["environment"] = environment
-        coro = asyncio.to_thread(
+
+        result = await asyncio.to_thread(
             self._container.exec_run, exec_args, **kwargs
         )
-        if timeout is not None:
-            result = await asyncio.wait_for(coro, timeout=timeout)
-        else:
-            result = await coro
+
+        exit_code = getattr(result, "exit_code", None)
+        if timeout is not None and exit_code == 124:
+            raise asyncio.TimeoutError(
+                f"Command timed out after {timeout} seconds: {cmd}"
+            )
+
         output = result.output if hasattr(result, "output") else str(result)
         if isinstance(output, bytes):
             return output.decode("utf-8", errors="replace")

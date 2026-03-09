@@ -7,7 +7,7 @@ async def test_image_agent():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
     messages_list = [

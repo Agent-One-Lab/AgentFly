@@ -1,4 +1,4 @@
-from agentfly.agents.chain.chain_base import Chain, Node
+from agentfly.agents.chain.structures import Chain, Node
 from agentfly.agents.utils.messages import Messages
 
 

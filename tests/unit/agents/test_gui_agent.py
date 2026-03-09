@@ -24,7 +24,7 @@ class TestGUIAgent:
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
             tools=[pyautogui_code_generator],
-            backend="async_vllm",
+            backend_config={"backend": "async_vllm"},
         )
         assert agent is not None
         assert agent.system_prompt is not None
@@ -37,7 +37,7 @@ class TestGUIAgent:
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
             tools=[],
-            backend="async_vllm",
+            backend_config={"backend": "async_vllm"},
         )
 
         responses = [
@@ -59,7 +59,7 @@ class TestGUIAgent:
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
             tools=[],
-            backend="async_vllm",
+            backend_config={"backend": "async_vllm"},
         )
 
         responses = [
@@ -78,7 +78,7 @@ class TestGUIAgent:
             model_name_or_path="ByteDance-Seed/UI-TARS-1.5-7B",
             template="qwen2.5-vl",
             tools=[],
-            backend="async_vllm",
+            backend_config={"backend": "async_vllm"},
         )
 
         responses = [""]

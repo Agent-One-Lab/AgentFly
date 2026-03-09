@@ -17,7 +17,7 @@ def test_agent_initialization_backend(backend: str):
             "Qwen/Qwen2.5-3B-Instruct",
             tools=tools,
             template=None if backend == "client" else "qwen2.5",
-            backend=backend,
+            backend_config={"backend": backend},
         )
         print("Agent initialized successfully")
     except Exception as e:
@@ -42,7 +42,7 @@ def test_code_agent_initialization(backend: str):
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
         template=None if backend == "client" else "qwen2.5",
-        backend=backend,
+        backend_config={"backend": backend},
     )
 
 
@@ -56,7 +56,7 @@ def test_react_agent_initialization(backend: str):
         tools=tools,
         template=None if backend == "client" else "qwen2.5",
         task_info=task_info,
-        backend=backend,
+        backend_config={"backend": backend},
     )
 
     # Check system prompt contains task info and tools
@@ -73,5 +73,5 @@ def test_think_agent_initialization(backend: str):
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,
         template=None if backend == "client" else "qwen2.5",
-        backend=backend,
+        backend_config={"backend": backend},
     )

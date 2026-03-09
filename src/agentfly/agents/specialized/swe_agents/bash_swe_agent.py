@@ -1,4 +1,5 @@
 from .prompts import (
+    COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT,
     INSTRUCTION_DESCRIPTION_PLACEHOLDER,
     InstructionPrompt,
     InstructionSystemPrompt,
@@ -81,12 +82,20 @@ class BashSWEAgent(BaseAgent):
                 }
             )
 
+        # Per InstructionSystemPrompt: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT ends the task
+        is_complete = (
+            command is not None
+            and COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT in command
+        )
+
+        status = "terminal" if is_complete else ("continue" if formatted_tool_calls else "terminal")
+
         return {
             "role": "assistant",
             "content": [{"type": "text", "text": response}],
             "tool_calls": formatted_tool_calls,
             "loss": True,
-            "status": "continue" if formatted_tool_calls else "terminal",
+            "status": status,
         }
 
     def parse(self, responses: List[str]) -> List[Dict]:
