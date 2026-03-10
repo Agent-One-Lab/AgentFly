@@ -8,6 +8,7 @@ so the resource engine can manage containers via LocalRunner.
 from __future__ import annotations
 
 import asyncio
+import shlex
 from typing import Any, Optional, TYPE_CHECKING
 
 from .types import BaseResource, ResourceSpec, ResourceStatus
@@ -106,8 +107,10 @@ class ContainerResource(BaseResource):
         """
         shell_cmd = cmd
         if timeout is not None:
-            # coreutils timeout returns exit code 124 when the command times out
-            shell_cmd = f"timeout {timeout}s {cmd}"
+            # timeout(1) runs a single COMMAND; it does not run a shell. So "timeout 5s cd /x && foo"
+            # would try to exec "cd", which fails (cd is a builtin). Run the user command as one
+            # shell invocation: timeout Ns bash -c '<quoted cmd>'.
+            shell_cmd = f"timeout {timeout}s bash -c {shlex.quote(cmd)}"
 
         exec_args: list = ["bash", "-c", shell_cmd]
         kwargs: dict = {**exec_kwargs}

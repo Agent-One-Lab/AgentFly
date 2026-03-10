@@ -151,7 +151,7 @@ slurm/
 /*.jpg
 /*.png
 
-# Notebooks, images, and temp files
+# Notebooks, images, doc files, and temp files
 agentfly/tests/*.ipynb
 agentfly/tests/*.jpg
 agentfly/tests/*.jpeg
@@ -162,6 +162,7 @@ temp/
 test_outputs/
 agentfly/data/
 *.ipynb
+*.pdf
 
 # training scripts
 training_scripts/

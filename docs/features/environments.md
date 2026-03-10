@@ -1,20 +1,35 @@
 # Environments
 
-We define an `environment` to be the unit resource that we can scale up. An environment plays several roles:
+We define an **environment** as a *resource-backed execution context* that agents can interact with via tools and rewards. In the current design, most environments are implemented as:
 
-1. The basic unit for isolation: Operations like executing code, writing files will aftect states and possibly cause safety issues. Therefore, AgentFly supports using a docker container as the backend of the environment. Operations can be done inside container for safe and keep different tasks separated.
+- A concrete resource class (e.g. `PythonSandboxEnv`, `ALFWorldEnv`, `WebAgentTextEnv`, `ScienceWorldEnv`) that subclasses `ContainerResource` or a similar base.
+- A corresponding `ResourceSpec` (e.g. `PythonSandboxSpec`, `ALFWorldSpec`, `WebShopSpec`, `ScienceWorldSpec`) that describes how to start and scale that resource (image, ports, limits, etc.).
 
-2. The basic unit for scaling: We can set the pool size in tool or reward definition. This is the maximum number of instances that the resource manager will open and keep for that environment. Scaling can be done by setting a larger pool size.
+Environments play two main roles:
+
+1. **Isolation**: Operations like executing code or running simulators are done inside containers or dedicated processes, so different tasks and rollouts do not interfere with each other.
+2. **Scaling**: The `ResourceEngine` can maintain multiple instances of the same environment, controlled by fields such as `max_global_num` in the `ResourceSpec` and engine configuration.
 
 ## Resource Management System
 
-Tools and rewards share a resource pool, which keeps a number of environment instances. When acquiring, the pool will return the instance to the tool or reward, and annoate it with the `id`. Later, all requests with the same `id` will obtain the same instance. If requested with a new `id`, the pool will return a new instance or stuck the request if there is no available instance. Until other tools or rewards released the environment, it will go back to the pool. And new requests can be further processed on.
+Tools and rewards no longer talk to an `EnvironmentManager` directly. Instead, they use the **rollout `Context`** to acquire and manage resources:
+
+- `context.acquire_resource(spec=..., scope="rollout" | "global", backend="local")` returns a resource instance (e.g. `PythonSandboxEnv`, `ALFWorldEnv`, `WebAgentTextEnv`, `ScienceWorldEnv`).
+- The `Context` keeps track of which specs have been acquired for the current rollout and whether this is the first acquisition (via `is_spec_acquired` and `last_acquire_was_first`), so tools can decide when to call `reset`.
+- The underlying **`ResourceEngine`** handles pooling, starting, resetting, and ending resources across backends (local, Slurm, etc.).
+
+Sharing works by spec and scope:
+
+- Tools and rewards that call `context.acquire_resource` with the **same `ResourceSpec` and scope** in the same rollout will share the same environment instance.
+- Different rollouts get their own instances automatically; you do not need to pass explicit ids in the tool or reward definitions.
 
 ## Definition
 
-Compared to tools and rewards, environments are more complex since we need environments to be robust enough. Currently you need to define the following interfaces:
+Environment classes remain responsible for the *interaction protocol* with the underlying system. Typically, they implement:
 
-- `start`: (asynchronous) Start the environment. (e.g. for docker, start the container.)
-- `reset`: (asynchronous) Reset the environment to initial state. This is to avoid the restart while still obtaining a new environment.
-- `step`: Main interface to interact with the environment (e.g. for code interpreter, execute the code and return results).
-- `aclose` (asynchronous) Close the environment.
+- `start`: (asynchronous) Start the resource (e.g. container, local process) and connect any necessary clients (HTTP, sockets, etc.).
+- `reset`: (asynchronous) Reset the environment state (e.g. load a new task, clear globals) without restarting the whole resource when possible.
+- `step`: Main interface to interact with the environment (e.g. for code interpreter, execute the code and return results; for ALFWorld/WebShop/ScienceWorld, perform an action and return observations/rewards).
+- `end` / `close`: (asynchronous) Cleanly terminate or close the resource when no longer needed.
+
+From the perspective of tools and rewards, environments are accessed **only via `Context` and `ResourceSpec`**; the details of pooling and lifecycle are abstracted away by the `ResourceEngine`.

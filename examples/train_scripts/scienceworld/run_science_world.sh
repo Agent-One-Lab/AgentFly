@@ -89,10 +89,9 @@ entropy_coeff=0.001
 kl_loss_type=mse
 max_turns=20
 lr_warmup_steps_ratio=0.08
-agent_backend="async_verl"
 total_training_steps=300
 
-project_name="Algorithm"
+project_name="Resource"
 experiment_name="scienceworld_qwen2.5-3b-instruct_resource"
 
 python -m agentfly.cli train \
@@ -108,7 +107,6 @@ python -m agentfly.cli train \
     agent.init_config.tools=$tools \
     agent.init_config.template=$template \
     agent.init_config.model_name_or_path=$model \
-    agent.init_config.backend=${agent_backend} \
     agent.init_config.reward_name=$reward_name \
     agent.generation_config.max_tokens=$max_new_tokens_per_turn \
     agent.max_turns=${max_turns} \

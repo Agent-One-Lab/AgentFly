@@ -21,20 +21,28 @@ def calculator(expression: str):
         return f"Error: {str(e)}"
 ```
 
-## Stateful Tool with Environment
+## Stateful Tool with ResourceEngine
 
 ```python
+from agentfly.core import Context
+from agentfly.envs.python_env import PythonSandboxSpec
 from agentfly.tools import tool
-from agentfly.envs import BaseEnv
 
-class MyEnv(BaseEnv):
-    # Environment implementation
-    pass
+@tool(
+    name="env_tool",
+    description="Run an action in a sandboxed Python environment",
+    stateful=True,
+)
+async def env_tool(action: str, context: Context) -> str:
+    """
+    Run an action in the Python sandbox environment.
 
-@tool(name="env_tool", env_cls=MyEnv, pool_size=4)
-async def env_tool(action: str, env: MyEnv):
-    result = await env.step(action)
-    return result
+    Args:
+        action (str): Code or command to run in the sandbox.
+        context (Context): Injected rollout context; used to acquire the sandbox resource.
+    """
+    env = await context.acquire_resource(spec=PythonSandboxSpec, scope="global", backend="local")
+    return await env.step(action)
 ```
 
 ## Tool with Schema

@@ -54,6 +54,7 @@ def setup_container_for_reward(
     container,
     dataset: str,
     ds: dict | None = None,
+    setup_timeout: int = 60,
 ) -> None:
     """
     Ensure the container has a runnable /run_tests.sh so reward_from_container can run tests.
@@ -69,6 +70,7 @@ def setup_container_for_reward(
         container: Docker SDK container object.
         dataset: One of "swebench", "swebench_verified", "swesmith", "r2e".
         ds: Required for dataset "swesmith"; optional otherwise.
+        setup_timeout: Timeout (seconds) applied to individual setup shell commands.
     """
 
     if dataset not in ("swebench", "swebench_verified", "swesmith", "r2e"):
@@ -77,11 +79,17 @@ def setup_container_for_reward(
             "Expected one of: swebench, swebench_verified, swesmith, r2e"
         )
 
-    def exec_run(cmd: list | str, workdir: str = "/testbed"):
+    def exec_run(cmd: list | str, workdir: str = "/testbed", timeout: int | None = None):
+        """Run a short setup command inside the container with a hard timeout."""
+        if timeout is None:
+            timeout = setup_timeout
         if isinstance(cmd, str):
-            cmd = ["/bin/sh", "-c", cmd]
+            inner_cmd = ["/bin/sh", "-c", cmd]
+        else:
+            inner_cmd = cmd
+        full_cmd = ["timeout", str(timeout), *inner_cmd]
         r = container.exec_run(
-            cmd=cmd,
+            cmd=full_cmd,
             workdir=workdir,
             stdout=True,
             stderr=True,
@@ -140,10 +148,17 @@ def setup_container_for_reward(
         return
 
 
-def _ensure_r2e_tests_in_testbed(container) -> None:
+def _ensure_r2e_tests_in_testbed(container, timeout: int = 60) -> None:
     """Ensure /testbed/r2e_tests exists (symlink). run_tests.sh runs from /testbed and expects r2e_tests."""
     container.exec_run(
-        cmd=["/bin/sh", "-c", "([ -d /r2e_tests ] && ln -sf /r2e_tests /testbed/r2e_tests) || ([ -d /root/r2e_tests ] && ln -sf /root/r2e_tests /testbed/r2e_tests) || true"],
+        cmd=[
+            "timeout",
+            str(timeout),
+            "/bin/sh",
+            "-c",
+            "([ -d /r2e_tests ] && ln -sf /r2e_tests /testbed/r2e_tests) || "
+            "([ -d /root/r2e_tests ] && ln -sf /root/r2e_tests /testbed/r2e_tests) || true",
+        ],
         workdir="/",
         stdout=True,
         stderr=True,
@@ -158,30 +173,42 @@ def _run_tests_in_container(
 ) -> str:
     """Run the test script in container and return raw output. Uses dataset to pick command if /run_tests.sh is missing."""
     if dataset == "r2e":
-        _ensure_r2e_tests_in_testbed(container)
+        # Ensure r2e_tests symlink exists; cap this small helper at at most 60s even
+        # if the main test timeout is larger.
+        _ensure_r2e_tests_in_testbed(container, timeout=min(timeout, 60))
     # Prefer /run_tests.sh if it exists (after setup), else use dataset-specific command
     if dataset and dataset in _TEST_CMD_BY_DATASET:
         test_cmd = _TEST_CMD_BY_DATASET[dataset]
     else:
         test_cmd = "/run_tests.sh"
     command = f"timeout {timeout} {test_cmd}"
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    timed_out = False
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                container.exec_run,
-                cmd=["/bin/sh", "-c", command],
-                workdir="/testbed",
-                stdout=True,
-                stderr=True,
-                environment={"PATH": DOCKER_PATH},
-            )
-            exec_result = future.result(timeout=timeout + 5)
+        future = executor.submit(
+            container.exec_run,
+            cmd=["/bin/sh", "-c", command],
+            workdir="/testbed",
+            stdout=True,
+            stderr=True,
+            environment={"PATH": DOCKER_PATH},
+        )
+        exec_result = future.result(timeout=timeout + 5)
         out = exec_result.output.decode("utf-8", errors="replace")
         return re.sub(r"\x1b\[[0-9;]*m|\r", "", out)
     except concurrent.futures.TimeoutError:
+        timed_out = True
+        # Do not wait for the stuck exec_run thread; otherwise shutdown(wait=True)
+        # would block indefinitely when the container does not respond.
+        executor.shutdown(wait=False)
         return TESTS_TIMEOUT
     except Exception:
+        timed_out = True
+        executor.shutdown(wait=False)
         return TESTS_ERROR
+    finally:
+        if not timed_out:
+            executor.shutdown(wait=True)
 
 
 def _reward_swebench(ds: dict, out: str, get_test_output: bool):
@@ -231,7 +258,13 @@ def _reward_swesmith(ds: dict, out: str, get_test_output: bool):
     return reward
 
 
-def _reward_r2e(container, ds: dict, out: str, get_test_output: bool):
+def _reward_r2e(
+    container,
+    ds: dict,
+    out: str,
+    get_test_output: bool,
+    timeout: int = 60,
+):
     """R2E-Gym-Lite / r2e-edits: parse log and compare to expected_output_json."""
     repo_name = ds.get("repo_name", ds.get("repo", ""))
     parse = parse_log_fn(repo_name)(out)
@@ -241,15 +274,27 @@ def _reward_r2e(container, ds: dict, out: str, get_test_output: bool):
     try:
         expected_json = ds.get("expected_output_json")
         if not expected_json:
-            # Try reading from container (R2E dockers may write it here)
+            # Try reading from container (R2E dockers may write it here). Use a short timeout so
+            # a stuck filesystem or container cannot hang reward evaluation indefinitely.
             result = container.exec_run(
-                cmd=["/bin/sh", "-c", "cat /root/expected_test_output.json 2>/dev/null || cat /testbed/expected_test_output.json 2>/dev/null || echo '{}'"],
+                cmd=[
+                    "timeout",
+                    str(min(timeout, 60)),
+                    "/bin/sh",
+                    "-c",
+                    "cat /root/expected_test_output.json 2>/dev/null || "
+                    "cat /testbed/expected_test_output.json 2>/dev/null || echo '{}'",
+                ],
                 workdir="/testbed",
                 stdout=True,
                 stderr=True,
                 environment={"PATH": DOCKER_PATH},
             )
-            expected_json = result.output.decode("utf-8", errors="replace") if result.output else "{}"
+            expected_json = (
+                result.output.decode("utf-8", errors="replace")
+                if result.output
+                else "{}"
+            )
         if isinstance(expected_json, dict):
             expected = expected_json
         else:
@@ -318,7 +363,7 @@ def reward_from_container(
         return _reward_swebench(ds, out, get_test_output)
     if dataset == "swesmith":
         return _reward_swesmith(ds, out, get_test_output)
-    return _reward_r2e(container, ds, out, get_test_output)
+    return _reward_r2e(container, ds, out, get_test_output, timeout=timeout)
 
 
 if __name__ == "__main__":

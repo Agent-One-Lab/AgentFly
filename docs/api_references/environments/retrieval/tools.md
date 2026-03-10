@@ -6,7 +6,7 @@ The Retrieval tools provide semantic search capabilities for document retrieval 
 
 ### asyncdense_retrieve
 
-::: agentfly.tools.src.search.async_dense_retriever.asyncdense_retrieve
+::: agentfly.tools.src.search.async_dense_retriever.async_dense_retrieve
     options:
       show_source: true
 

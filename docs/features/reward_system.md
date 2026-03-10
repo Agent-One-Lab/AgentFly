@@ -5,7 +5,7 @@ We put reward calculation into the agent side instead of trainer side and use a 
 2. Reward calculation can be designed to be asynchronous for efficiency.
 
 ### Definition
-Similar to tools, we can decide whether to use environments in the reward definition. The return should either be a value, or a dictionary containing `reward` as one of keys. We can use decorator `@tool` or inherit from the `BaseReward` class. Any additional keys in the returned dict (e.g. `em`, `f1`, `fmt`) are passed through and documented in training and validation.
+Similar to tools, reward functions can be **purely functional** (no external resources) or **stateful** (using environments/resources via `Context`). The return should either be a float value, or a dictionary containing `reward` as one of keys. We can use the `@reward` decorator or inherit from the `BaseReward` class. Any additional keys in the returned dict (e.g. `em`, `f1`, `fmt`) are passed through and documented in training and validation.
 
 
 
@@ -36,8 +36,11 @@ class APIReward(BaseReward):
 
         return result['reward']
 
-@reward(name="webshop_reward", env_cls=WebAgentTextEnv, pool_size=8)
-async def webshop_reward(final_response: str, env: WebAgentTextEnv, task_id: int) -> dict:
+from agentfly.core import Context
+from agentfly.envs.webshop_text_env import WebShopSpec
+
+@reward(name="webshop_reward")
+async def webshop_reward(final_response: str, context: Context, task_id: int) -> dict:
     """
     Calculates the reward for the WebShop environment based on the environment state. Match the purchased product with the golden answer characteristics.
     Actual logic for reward calculation is in the environment and partially in step method of the environment.
@@ -45,14 +48,15 @@ async def webshop_reward(final_response: str, env: WebAgentTextEnv, task_id: int
 
     Args:
         final_response (str): The agent's predicted action or response. Not used in this reward function.
-        env (WebAgentTextEnv): The environment instance for the WebShop task.
+        context (Context): Injected rollout context; used to acquire the WebShop resource.
         task_id (int): The identifier for the current task. Used to match with golden answer.
 
     Returns:
         dict: A dictionary containing the reward (float) and output (str) from the environment step. If an error occurs, returns a reward of 0.0 and an error message as output.
     """
     try:
-        result = await env.step('get_reward', task_id)
+        env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
+        result = await env.step("get_reward", task_id)
         return {
             "reward": result["reward"],
             "output": result["observation"],
@@ -67,13 +71,13 @@ async def webshop_reward(final_response: str, env: WebAgentTextEnv, task_id: int
 
 ## Predefined Fields
 
-When agent uses the reward function, it will detects automatically for three keys: `final_response`, `trajectory`, and `id` and assign these values to rewards.
+When an agent uses a reward function, it will automatically detect and fill several special fields when they appear in the reward signature: `final_response`, `trajectory`, and (via `Context`) the rollout-level identifiers.
 
-- `final_response`: The final response the agent generate for the task.
+- `final_response`: The final response the agent generates for the task.
 - `trajectory`: The whole interaction trajectory.
-- `id`: The trajectory id. This will be the within the trajectory. And tools and rewards will share the same id for the same task. So tools and rewards are assigned same environments.
+- `context`: The rollout execution context, which knows the rollout id, group id and provides `acquire_resource` for sharing environments with tools.
 
-When defining the function, you can set these (except `id`) to your arguments and directly use them in you reward calculation. For `id`, you can give `env` as argument and directly use it. The chain rollout will ensure the reward give the same environment as in tools for the same task.
+When defining the function, you can set these to your arguments and directly use them in reward calculation. For stateful rewards that need to share an environment with tools, prefer taking a `context: Context` argument and using `context.acquire_resource(...)` with the same `ResourceSpec` as the corresponding tools.
 
 ## Additional Fields
 

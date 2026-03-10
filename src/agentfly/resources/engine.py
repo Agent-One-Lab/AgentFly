@@ -147,6 +147,7 @@ class ResourceEngine:
         id: str,
         spec: ResourceSpec,
         backend: str = "local",
+        acquire_timeout: Optional[float] = 600.0,
     ) -> BaseResource:
         """
         Acquire a resource for the given id. Same id returns the same resource.
@@ -154,13 +155,32 @@ class ResourceEngine:
         Semantics:
         - Prefer taking from the free queue for (spec, backend).
         - If none free and under max_global_num, create a new resource (slot reserved under lock).
-        - If at max_global_num and none free, wait until another thread releases one.
+        - If at max_global_num and none free, wait until another thread releases one or timeout.
+
+        Args:
+            acquire_timeout: Max seconds to wait for a free resource or for same-id start.
+                Default 600. None means wait indefinitely.
         """
         key = _pool_key(spec, backend)
         runner = cls._runners.get(backend)
         if runner is None:
             raise ValueError(f"Unknown backend: {backend}")
         cond = cls._get_condition()
+        deadline = (asyncio.get_event_loop().time() + acquire_timeout) if acquire_timeout is not None else None
+
+        async def wait_with_timeout() -> bool:
+            if deadline is None:
+                await cond.wait()
+                return True
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                return False
+            try:
+                await asyncio.wait_for(cond.wait(), timeout=remaining)
+                return True
+            except asyncio.TimeoutError:
+                return False
+
         async with cond:
             while True:
                 # If already acquired (or being acquired) for this id, return or wait.
@@ -169,7 +189,10 @@ class ResourceEngine:
                     if resource is not None:
                         return resource
                     # placeholder present; wait for the first caller to finish starting it
-                    await cond.wait()
+                    if not await wait_with_timeout():
+                        raise asyncio.TimeoutError(
+                            f"Resource acquisition timed out (id={id!r}, pool={key}) after waiting for placeholder."
+                        )
                     continue
 
                 # Take from the free queue if available.
@@ -183,11 +206,22 @@ class ResourceEngine:
                     # Reserve a slot using the actual id as placeholder
                     cls._acquired[id] = (None, key)
                     break
-                await cond.wait()
+                if not await wait_with_timeout():
+                    raise asyncio.TimeoutError(
+                        f"Resource acquisition timed out (id={id!r}, pool={key}); no free resource and at capacity."
+                    )
 
-        # Start the resource outside the lock
+        # Start the resource outside the lock (bound start time so a stuck create doesn't hang)
+        start_timeout = min(600.0, acquire_timeout) if acquire_timeout is not None else 600.0
         try:
-            resource = await runner.start_resource(spec)
+            resource = await asyncio.wait_for(runner.start_resource(spec), timeout=start_timeout)
+        except asyncio.TimeoutError:
+            async with cond:
+                cls._acquired.pop(id, None)
+                cond.notify_all()
+            raise asyncio.TimeoutError(
+                f"Resource start timed out (id={id!r}, pool={key}) after {start_timeout}s."
+            )
         except Exception:
             # Clean up the placeholder if starting fails so others can try
             async with cond:

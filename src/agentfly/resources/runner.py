@@ -94,7 +94,7 @@ class LocalRunner(BaseRunner):
             "name": name,
             "detach": True,
             "remove": False,
-            "timeout": 60,
+            "timeout": 180,
             "environment": spec.environment or {},
             "mount": spec.mount or {},
         }

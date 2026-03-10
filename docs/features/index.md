@@ -10,3 +10,4 @@ Learn about the core features and concepts in AgentFly.
 - [Tool System](tool_system.md) - How the tool system works
 - [Reward System](reward_system.md) - Reward function design
 - [Environments](environments.md) - Environment management
+- [System Architecture](system_architecture.md) - Four-layer design (agent, rollout, context, resource)

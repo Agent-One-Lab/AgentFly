@@ -7,7 +7,7 @@
 ## Function Signature
 
 ```python
-async def alfworld_episode_reward(prediction: str, env: ALFWorldEnv) -> Dict[str, Any]
+async def alfworld_episode_reward(prediction: str, context: Context) -> Dict[str, Any]
 ```
 
 ## Description
@@ -15,17 +15,17 @@ async def alfworld_episode_reward(prediction: str, env: ALFWorldEnv) -> Dict[str
 Evaluates agent performance in ALFWorld tasks by checking the episode completion status and reward from the environment state.
 
 **Parameters:**
-- **prediction** (str): Agent's predicted action or response (not directly used)
-- **env** (ALFWorldEnv): ALFWorld environment instance
+- **prediction** (str): Agent's predicted action or response (not directly used).
+- **context** (`Context`): Rollout execution context used to acquire the ALFWorld resource.
 
 **Returns:**
 Dict[str, Any]: Dictionary containing:
-- **reward** (float): Environment reward value for current state
+- **reward** (float): Environment reward value for current state.
 
 **Decorator Configuration:**
-- **name**: "alfworld_episode_reward"
-- **env_cls**: ALFWorldEnv
-- **pool_size**: 8
+- **name**: `"alfworld_episode_reward"`
+- **resource_spec**: `ALFWorldSpec`
+- **backend**: `"local"`
 
 ## Technical Details
 
@@ -43,18 +43,14 @@ Dict[str, Any]: Dictionary containing:
 **Example Usage:**
 
 ```python
-from agentfly.rewards import get_reward_from_name
-from agentfly.envs import ALFWorldEnv
+from agentfly.core import Context
+from agentfly.rewards.alfworld_reward import alfworld_episode_reward
 
-# Get reward function
-reward_fn = get_reward_from_name("alfworld_episode_reward")
-
-# Create environment
-env = ALFWorldEnv()
-await env.start()
-
-# Get reward for current state
-result = await reward_fn("take apple", env=env)
+# Inside a rollout, `context` is injected and passed through to rewards.
+result = await alfworld_episode_reward(
+    prediction="take apple",
+    context=context,
+)
 print(result)  # {"reward": 0.0} or {"reward": 1.0} if task completed
 ```
 

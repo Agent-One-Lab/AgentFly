@@ -29,27 +29,43 @@ async def r2e_gym_reward(context: Context) -> dict:
         spec=spec, id=rollout_id, scope="rollout", backend="local"
     )
 
-    await asyncio.to_thread(setup_container_for_reward, container._container, dataset="r2e")
+    # Allow configuring evaluation timeout via context.metadata["eval_timeout"].
+    eval_timeout = context.metadata.get("eval_timeout", DEFAULT_EVAL_TIMEOUT)
 
-    # wait_for ensures we get asyncio.TimeoutError after 125s; to_thread has no timeout.
-    # Inner reward_from_container uses timeout=120 for the test run and returns normally
-    # on its own timeout (TESTS_TIMEOUT); if the whole call hangs, wait_for fires.
     try:
+        # Setup phase: create /run_tests.sh and related symlinks inside the container.
+        # Use a bounded timeout so container setup cannot hang indefinitely.
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                setup_container_for_reward,
+                container._container,
+                dataset="r2e",
+                setup_timeout=eval_timeout,
+            ),
+            timeout=eval_timeout + 10,
+        )
+    except asyncio.TimeoutError:
+        return {"reward": 0.0, "eval_timeout": 1.0, "out": ""}
+
+    try:
+        # Test run + grading. reward_from_container applies timeout to the inner
+        # test command; wait_for bounds the overall wall-clock time from the
+        # trainer's point of view.
         reward, out = await asyncio.wait_for(
             asyncio.to_thread(
                 reward_from_container,
                 container._container,
                 context.metadata,
                 dataset="r2e",
-                timeout=120,
+                timeout=eval_timeout,
                 get_test_output=True,
             ),
-            timeout=125,
+            timeout=eval_timeout + 10,
         )
     except asyncio.TimeoutError:
         return {"reward": 0.0, "eval_timeout": 1.0, "out": ""}
-   
-    return {"reward": reward, "out": out}
+
+    return {"reward": reward, "eval_timeout": 0.0, "out": out}
 
 
 

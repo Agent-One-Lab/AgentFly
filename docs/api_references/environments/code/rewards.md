@@ -13,24 +13,24 @@ The Code reward system provides evaluation functions for code execution tasks. T
 **Function Signature:**
 
 ```python
-async def code_reward_test(prediction: str, env: PythonSandboxEnv) -> Dict[str, Any]
+async def code_reward_test(prediction: str, context: Context) -> dict
 ```
 
-**Description:** Evaluate the reward for code execution based on successful completion
+**Description:** Evaluate the reward for code execution based on successful completion.
 
 **Parameters:**
-- **prediction** (str): The code snippet to execute and evaluate
-- **env** (PythonSandboxEnv): The Python sandbox environment instance for code execution
+- **prediction** (str): The code snippet to execute and evaluate.
+- **context** (`Context`): Rollout execution context used to acquire the Python sandbox resource.
 
 **Returns:**
-- **Dict[str, Any]**: Dictionary containing:
-    - **reward** (float): 1.0 for successful execution, 0.0 for failures
-    - **output** (str): The execution result or error message
+- **dict**: Dictionary containing:
+    - **reward** (float): 1.0 for successful execution, 0.0 for failures.
+    - **output** (str): The execution result or error message.
 
 **Reward Configuration:**
-- **Environment Class**: ``PythonSandboxEnv``
-- **Pool Size**: 16 concurrent instances
-- **Name**: "code_reward_test"
+- **Resource Spec**: `PythonSandboxSpec` (container-based Python HTTP sandbox).
+- **Backend**: `"local"` (enroot-based container runner).
+- **Name**: `"code_reward_test"`.
 
 ## Reward Structure
 
@@ -54,23 +54,20 @@ This outcome-based approach focuses on:
 Evaluate simple code snippets:
 
 ```python
+from agentfly.core import Context
 from agentfly.rewards.code_reward import code_reward_test
-from agentfly.envs.python_env import PythonSandboxEnv
 
-# Create environment
-env = await PythonSandboxEnv.acquire()
-
-# Successful code execution
+# Inside a rollout, `context` is injected and passed through to rewards.
+# Example (simplified):
 result = await code_reward_test(
     prediction="print('Hello, World!')",
-    env=env
+    context=context,
 )
 # Returns: {"reward": 1.0, "output": "Hello, World!\n"}
 
-# Failed code execution
 result = await code_reward_test(
     prediction="print('Hello World'",  # Syntax error
-    env=env
+    context=context,
 )
 # Returns: {"reward": 0.0, "output": "SyntaxError: ..."}
 ```
@@ -80,12 +77,17 @@ result = await code_reward_test(
 Create specialized reward functions for specific tasks:
 
 ```python
+from agentfly.core import Context
+from agentfly.envs.python_env import PythonSandboxSpec
 from agentfly.rewards.reward_base import reward
 
-@reward(name="math_code_reward", env_cls=PythonSandboxEnv, pool_size=8)
-async def math_code_reward(prediction: str, env: PythonSandboxEnv) -> dict:
+@reward(name="math_code_reward")
+async def math_code_reward(prediction: str, context: Context) -> dict:
     """Reward function for mathematical computation tasks"""
     try:
+        env = await context.acquire_resource(
+            spec=PythonSandboxSpec, scope="global", backend="local"
+        )
         result = await env.step(prediction)
 
         # Check if output contains expected mathematical result

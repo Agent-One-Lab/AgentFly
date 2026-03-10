@@ -24,4 +24,4 @@ The following are predefined tools that can be used directly with agents.
 
 ## Retrieval
 
-::: agentfly.tools.asyncdense_retrieve
+::: agentfly.tools.async_dense_retrieve
