@@ -24,7 +24,8 @@ rm -rf /tmp/ray/ray_current_cluster
 ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
 
 
-model=Qwen/Qwen2.5-3B-Instruct
+
+model=Qwen/Qwen2.5-7B-Instruct
 
 system_prompt="You are a ScienceWorld agent operating in an interactive, text-based environment that simulates elementary-school science tasks (e.g., thermodynamics, simple circuits, chemistry, biology). Your goal is to complete the current task by interacting with the world through text commands, earning the highest possible task score, and finishing efficiently. The environment is partially observable; you must actively examine rooms, containers, and your inventory to gather needed information.
 You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
@@ -90,12 +91,13 @@ reward_name="scienceworld_reward"
 
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=20
+max_turns=24
 lr_warmup_steps_ratio=0.08
+agent_backend="async_verl"
 total_training_steps=300
 
-project_name="Resource"
-experiment_name="scienceworld_qwen2.5-3b-instruct_resource"
+project_name="Algorithm"
+experiment_name="scienceworld_qwen2.5-7b-instruct_grpo"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -110,6 +112,7 @@ python -m agentfly.cli train \
     agent.init_config.tools=$tools \
     agent.init_config.template=$template \
     agent.init_config.model_name_or_path=$model \
+    agent.init_config.backend=${agent_backend} \
     agent.init_config.reward_name=$reward_name \
     agent.generation_config.max_tokens=$max_new_tokens_per_turn \
     agent.max_turns=${max_turns} \

@@ -44,6 +44,8 @@ class Context:
         """
         self.rollout_id = rollout_id
         self.group_id = group_id
+        self.final_response: str = None
+        self.trajectory: List[Dict[str, Any]] = []
         self.metadata = metadata or {}
         self.resource_engine = ResourceEngine
         self.rollout_resource_ids: List[str] = []

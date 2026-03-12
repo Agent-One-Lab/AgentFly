@@ -121,9 +121,22 @@ class ContainerResource(BaseResource):
         if environment is not None:
             kwargs["environment"] = environment
 
-        result = await asyncio.to_thread(
-            self._container.exec_run, exec_args, **kwargs
-        )
+        # Outer timeout: if the container/enroot exec_run never returns (e.g. container
+        # frozen), we must not wait forever. When timeout is set, cap wall-clock wait
+        # at timeout + 60s; otherwise use a large default so one stuck exec cannot hang
+        # the step for hours.
+        wall_timeout = (timeout + 60.0) if timeout is not None else 3600.0
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._container.exec_run, exec_args, **kwargs
+                ),
+                timeout=wall_timeout,
+            )
+        except asyncio.TimeoutError:
+            raise asyncio.TimeoutError(
+                f"Command did not complete within {wall_timeout}s (container may be unresponsive): {cmd}"
+            )
 
         exit_code = getattr(result, "exit_code", None)
         if timeout is not None and exit_code == 124:

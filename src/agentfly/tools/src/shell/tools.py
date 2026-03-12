@@ -19,7 +19,7 @@ def _ensure_str(output) -> str:
     return output if output is not None else ""
 
 
-async def _run_shell(context: Context, cmd: str, timeout: int = 120) -> str:
+async def _run_shell(context: Context, cmd: str) -> str:
     """
     Acquire container from context and run the given shell command.
 
@@ -49,7 +49,7 @@ async def _run_shell(context: Context, cmd: str, timeout: int = 120) -> str:
         # Use a bounded timeout so git operations cannot hang indefinitely.
         commit = context.metadata.get("git_commit_hash", None)
         if commit is not None:
-            git_timeout = max(timeout, 300)
+            git_timeout = 300
             await container.run_cmd(
                 "git fetch", timeout=git_timeout, workdir=WORKSPACE_DIR
             )
@@ -59,21 +59,21 @@ async def _run_shell(context: Context, cmd: str, timeout: int = 120) -> str:
                 workdir=WORKSPACE_DIR,
             )
     try:
-        raw = await container.run_cmd(cmd, timeout=timeout, workdir=WORKSPACE_DIR)
+        raw = await container.run_cmd(cmd, timeout=300, workdir=WORKSPACE_DIR)
     except asyncio.TimeoutError:
         return "Error: Command timed out."
     return _ensure_str(raw)
 
 
 @tool(name="run_shell_command", max_length=10000)
-async def run_shell_command(cmd: str, context: Context, timeout: int = 120):
+async def run_shell_command(cmd: str, context: Context):
     """
     Runs a shell command in the container workspace.
 
     Args:
-        cmd: The shell command to run (e.g. "ls -la", "cat file.txt", "pwd").
+        cmd (str): The shell command to run (e.g. "ls -la", "cat file.txt", "pwd").
             For multi-line python -c code, use bash ANSI-C quoting so newlines work:
             python3 -c $'line1\\nline2\\nline3' (the \\n are real newlines inside the container).
-        timeout: Timeout in seconds for the shell command inside the container.
+        context (Context): Injected rollout context; used to acquire the container resource.
     """
-    return await _run_shell(context, cmd, timeout=timeout)
+    return await _run_shell(context, cmd)

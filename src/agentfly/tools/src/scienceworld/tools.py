@@ -25,7 +25,9 @@ async def scienceworld_explorer(action: str, context: Context):
         # If this spec is not in resource_acquired yet, we will need to reset after acquire.
         need_reset = not context.is_spec_acquired(ScienceWorldSpec)
         env = await context.acquire_resource(
-            spec=ScienceWorldSpec, scope="global", backend="local"
+            spec=ScienceWorldSpec,
+            scope="global",
+            backend="local",
         )
         if need_reset:
             await env.reset(env_args=context.metadata)

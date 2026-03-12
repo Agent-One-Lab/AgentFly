@@ -43,8 +43,8 @@ def _format_retriever_error(
 
 
 @tool(
-    name="async_dense_retrieve_api",
-    description="Retrieve wiki documents via the deployed retriever API. Same as async_dense_retrieve but calls a remote service.",
+    name="search", # Using search as the name maybe confusing, but we keep it to align with search-r1
+    description="Search wiki documents based on provided query.",
     max_length=8192,
 )
 async def async_dense_retrieve_api(query: str):

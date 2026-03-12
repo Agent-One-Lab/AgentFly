@@ -1,6 +1,7 @@
 from ..core import Context
 from ..envs.scienceworld_env import ScienceWorldSpec
 from .reward_base import reward
+from typing import List
 
 
 @reward(name="scienceworld_reward")
@@ -16,7 +17,20 @@ async def scienceworld_reward(final_response: str, context: Context) -> dict:
     Returns:
         dict: A dictionary containing the reward and the observation output after taking the 'get_reward' step.
     """
-    env = await context.acquire_resource(spec=ScienceWorldSpec, scope="global", backend="local")
+    trajectory = context.trajectory
+    if len(trajectory) < 4:
+        return {
+            "reward": 0.0,
+            "acc": 0.0,
+            "output": "Not enough steps to get reward",
+        }
+
+    env = await context.acquire_resource(
+        spec=ScienceWorldSpec,
+        scope="global",
+        backend="local",
+    )
+
     result = await env.step("get_reward")
     if result["reward"] >= 1:
         acc = 1.0

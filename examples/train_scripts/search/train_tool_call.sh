@@ -21,10 +21,14 @@ rm -rf /tmp/ray/ray_current_cluster
 ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
 
 
-model=Qwen/Qwen2.5-3B-Instruct
+# model=Qwen/Qwen2.5-7B-Instruct
+model=Qwen/Qwen3-8B
+template="qwen3-think"
+
+agent_type=hf
 lr=5e-7
 max_model_len=16384
-max_new_tokens_per_turn=512
+max_new_tokens_per_turn=378
 val_batch_size=512
 train_batch_size=256
 num_chains=5
@@ -33,13 +37,12 @@ train_dataset="./data/rlhf/qa/nq_hotpotqa_train.json"
 eval_dataset="./data/rlhf/qa/nq_hotpotqa_test.json"
 system_prompt="Answer the given question. At the start of each turn, you must conduct some reasoning. After reasoning, if you find you lack some knowledge, you can call a search engine by generating the tool calling and it will return the top searched results. You can search as many times as your want. If you find no further external knowledge needed, you need to provide a short and simple answer by calling the answer tool."
 # tools="[google_search,answer_qa]"
-tools="[async_dense_retrieve_api,answer_qa]"
+tools="[search,answer]"
 # tools="[dense_retrieve,answer_qa]"
 # reward_name="qa_f1_reward"
 # reward_name="qa_em_reward"
 reward_name="qa_em_reward_tool_call"
 train_on_last_turn=False
-experiment_name="search_qa_em_reward_tool_call_3_turns"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
@@ -48,13 +51,14 @@ adv_estimator=grpo
 
 entropy_coeff=0.001
 kl_loss_type=low_var_kl
-agent_type=hf
-max_turns=3
-# template="qwen2.5"
+max_turns=4
 tool_parser_name="hermes"
-total_training_steps=1005
+total_training_steps=200
 lr_warmup_steps_ratio=0.03
-project_name="Algorithm"
+project_name="ToolCall"
+
+base_name=$(basename $model)
+experiment_name=${base_name}_${reward_name}_${adv_estimator}
 
 python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -79,7 +83,7 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$train_batch_size \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=$kl_coef \
     actor_rollout_ref.actor.kl_loss_type=$kl_loss_type \
@@ -87,11 +91,11 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     critic.model.path=$model \
     critic.ppo_mini_batch_size=$train_batch_size \

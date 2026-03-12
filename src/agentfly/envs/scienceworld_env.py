@@ -14,6 +14,13 @@ from typing import Any, Union
 import httpx
 
 from ..resources import ContainerResource, ResourceSpec
+# Transport errors that may be transient (server disconnect, read timeout, etc.)
+TRANSIENT_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.ReadTimeout,
+    httpx.ConnectError,
+    httpx.WriteTimeout,
+)
 
 
 ScienceWorldSpec = ResourceSpec(
@@ -84,7 +91,14 @@ class ScienceWorldEnv(ContainerResource):
         await super().start()
         await self._connect()
         await self._wait_ready()
-        await self._client.get("/load?task_name=boil&variation_idx=0")
+        for attempt in range(3):
+            try:
+                await self._client.get("/load?task_name=boil&variation_idx=0")
+                break
+            except TRANSIENT_ERRORS:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(1.0 * (2**attempt))
 
     async def reset(self, env_args: Any = None) -> str:
         env_args = env_args or {}

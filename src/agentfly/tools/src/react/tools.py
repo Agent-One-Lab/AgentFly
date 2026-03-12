@@ -3,7 +3,7 @@ from ...decorator import tool
 
 @tool(
     name="answer",
-    description="Give the final answer. The answer should be put inside the \\boxed{} tag.",
+    description="Give the final answer. The answer should be simple, short, and direct.",
     status="finish",
 )
 def answer(answer: str):

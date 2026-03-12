@@ -75,6 +75,10 @@ async def search(req: SearchRequest):
 
 
 def main():
+    """
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH}"
+    python -m agentfly.tools.src.search.retriever_server
+    """
     host = os.environ.get("RETRIEVER_HOST", "0.0.0.0")
     port = int(os.environ.get("RETRIEVER_PORT", "8765"))
     uvicorn.run(app, host=host, port=port, log_level="info")

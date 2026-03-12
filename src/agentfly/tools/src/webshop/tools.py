@@ -23,7 +23,11 @@ async def webshop_browser(action: str, value: str, context: Context):
         str: The observation from the environment after performing the action, or an error message if the action is invalid or an exception occurs.
     """
     try:
-        env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
+        env = await context.acquire_resource(
+            spec=WebShopSpec,
+            scope="global",
+            backend="local",
+        )
         if action == "search":
             observation = await env.step(f"search[{value}]")
         elif action == "click":
@@ -36,6 +40,36 @@ async def webshop_browser(action: str, value: str, context: Context):
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
 
+
+@tool(
+    name="webshop_browser_action",
+    description="Browse the webshop by searching or clicking. The action is either 'search' or 'click' and the value is the search query or the element to click. Clickables: 'Buy Now', 'Next >', '< Prev', 'Back to Search', 'Description', 'Features', 'Reviews', 'Attributes', product ASIN or ID like 'B079HGJ5MH' and their attributes or variants like 'Yellow', 'Blue', 'Small', 'Large', 'XL', '40x60', etc.",
+    stateful=True,
+    pool_size=16,
+)
+async def webshop_browser_action(action: str, context: Context):
+    """
+    Interact with the webshop environment by performing a search or clicking an element.
+
+    Args:
+        action (str): The action to perform, either 'search' or 'click'.
+        context (Context): Injected rollout context; used to acquire the WebShop resource.
+
+    Returns:
+        str: The observation from the environment after performing the action, or an error message if the action is invalid or an exception occurs.
+    """
+    if action.startswith("choose"):
+        action = "click" + action[6:]
+    try:
+        env = await context.acquire_resource(
+            spec=WebShopSpec,
+            scope="global",
+            backend="local",
+        )
+        observation = await env.step(action)
+        return observation
+    except Exception as e:
+        return f"Error: {str(e)}\n{traceback.format_exc()}"
 
 if __name__ == "__main__":
     print(webshop_browser.schema)

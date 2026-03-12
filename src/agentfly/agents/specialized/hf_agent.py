@@ -32,7 +32,7 @@ class SearchR1Agent(BaseAgent):
         self,
         model_name_or_path: str,
         tool_parser_name: Optional[str] = None,
-        search_tool_name: str = "async_dense_retrieve_api",
+        search_tool_name: str = "search",
         **kwargs,
     ):
         super().__init__(

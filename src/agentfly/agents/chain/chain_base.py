@@ -633,6 +633,10 @@ class ChainRollout:
         if self._reward_fn is not None:
             trajectory = current_node.messages.messages
             final_response = self.extract_final_response(trajectory)
+
+            context.trajectory = trajectory
+            context.final_response = final_response
+            
             other_args = {
                 k: v
                 for k, v in chain.info.items()

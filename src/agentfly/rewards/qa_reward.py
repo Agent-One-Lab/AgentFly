@@ -199,6 +199,9 @@ def _format_ok(final_response: str, trajectory: List) -> tuple:
                     answer = tool_call["function"]["arguments"]["answer"]
                 else:
                     answer = tool_call["function"]["arguments"]
+    elif last_message["role"] == "tool":
+        has_tool_call_answer = True
+        answer = last_message["content"][0]["text"]
 
     format_dict = {
         "has_think": previous_have_think,

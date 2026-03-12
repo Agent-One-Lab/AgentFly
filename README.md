@@ -193,7 +193,7 @@ https://github.com/user-attachments/assets/b8f42534-8d40-48a0-a264-f378e479bb3a
 
 
 ## Contribute & Discussion
-[WeChat|微信](assets/images/wechat.jpg)
+[WeChat|微信](https://agent-one-lab.github.io/assets/agentfly/wechat.jpg)
 
 [Discord](https://discord.gg/Ze5Z9QhhJ3)
 
