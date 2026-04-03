@@ -1,29 +1,4 @@
 
-# Run in single node
-
-set -x
-
-export head_node=${nodes[0]}
-
-head_node_ip=$(hostname --ip-address)
-port=6379
-address_head=$head_node_ip:$port
-
-# export VLLM_ATTENTION_BACKEND=XFORMERS
-# export GLOO_SOCKET_IFNAME=ens10f0np0
-export VLLM_USE_V1=1
-export HYDRA_FULL_ERROR=1
-
-# export VERL_LOGGING_LEVEL=DEBUG
-
-# Remove existing Ray cluster
-ray stop
-rm -rf /tmp/ray/ray_current_cluster
-
-# Start Ray head node
-ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
-
-
 # model=Qwen/Qwen2.5-3B-Instruct
 # template="qwen3-instruct-no-tool"
 

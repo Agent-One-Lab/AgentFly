@@ -10,10 +10,13 @@ from __future__ import annotations
 import abc
 from typing import Any, Dict, List, Optional
 import asyncio
+import logging
 from enroot import from_env, random_name
 from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
 from .containers import ContainerResource, create_ray_container_resource
 from .types import BaseResource, ResourceSpec, ResourceStatus
+
+logger = logging.getLogger(__name__)
 
 
 async def _start_enroot_container(
@@ -42,7 +45,7 @@ async def _start_enroot_container(
         "mount": spec.mount or {},
     }
 
-    print(f"[{runner_label}]: creating container image={image} kwargs: {create_kwargs}")
+    logger.debug(f"[{runner_label}]: creating container image={image} kwargs: {create_kwargs}")
     try:
         if hasattr(client.containers, "create_async"):
             container = await client.containers.create_async(image, **create_kwargs)
@@ -52,7 +55,7 @@ async def _start_enroot_container(
                 image,
                 **create_kwargs,
             )
-        print(f"[{runner_label}]: starting container name={name} kwargs: {start_kwargs}")
+        logger.debug(f"[{runner_label}]: starting container name={name} kwargs: {start_kwargs}")
         if hasattr(container, "start_async"):
             await container.start_async(**start_kwargs)
         else:

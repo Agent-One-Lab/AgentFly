@@ -25,19 +25,6 @@ import re
 import concurrent.futures
 import asyncio
 
-from r2egym.agenthub.trajectory.swebench_utils import get_logs_eval, make_test_spec
-from r2egym.repo_analysis.execution_log_parser import parse_log_fn, decolor_dict_keys
-from swebench.harness.constants import (
-    FAIL_TO_PASS,
-    KEY_INSTANCE_ID,
-    PASS_TO_PASS,
-    ResolvedStatus,
-    TESTS_ERROR,
-    TESTS_TIMEOUT,
-)
-from swebench.harness.grading import get_eval_tests_report, get_resolution_status
-from swebench.harness.log_parsers import get_eval_type
-
 # Match R2E-Gym Docker runtime PATH for /run_tests.sh
 DOCKER_PATH = "/root/.venv/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -204,6 +191,8 @@ def _run_tests_in_container(
     dataset: str | None = None,
 ) -> str:
     """Run the test script in container and return raw output. Uses dataset to pick command if /run_tests.sh is missing."""
+    from swebench.harness.constants import TESTS_ERROR, TESTS_TIMEOUT
+
     if dataset == "r2e":
         # Ensure r2e_tests symlink exists; cap this small helper at at most 60s even
         # if the main test timeout is larger.
@@ -245,6 +234,16 @@ def _run_tests_in_container(
 
 def _reward_swebench(ds: dict, out: str, get_test_output: bool):
     """SWE-Bench / SWE-Bench Verified: grade via FAIL_TO_PASS and PASS_TO_PASS."""
+    from r2egym.agenthub.trajectory.swebench_utils import get_logs_eval, make_test_spec
+    from swebench.harness.constants import (
+        FAIL_TO_PASS,
+        KEY_INSTANCE_ID,
+        PASS_TO_PASS,
+        ResolvedStatus,
+    )
+    from swebench.harness.grading import get_eval_tests_report, get_resolution_status
+    from swebench.harness.log_parsers import get_eval_type
+
     test_spec = make_test_spec(ds)
     eval_status_map, found = get_logs_eval(test_spec, out)
     if not found:
@@ -266,6 +265,8 @@ def _reward_swebench(ds: dict, out: str, get_test_output: bool):
 
 def _reward_swesmith(ds: dict, out: str, get_test_output: bool):
     """SWE-Smith: parse pytest-style log and check FAIL_TO_PASS / PASS_TO_PASS."""
+    from r2egym.repo_analysis.execution_log_parser import parse_log_fn
+
     repo = ds.get("repo", ds.get("repo_name", ""))
     parse = parse_log_fn(repo)(out)
     if not parse:
@@ -298,6 +299,8 @@ def _reward_r2e(
     timeout: int = 60,
 ):
     """R2E-Gym-Lite / r2e-edits: parse log and compare to expected_output_json."""
+    from r2egym.repo_analysis.execution_log_parser import decolor_dict_keys, parse_log_fn
+
     repo_name = ds.get("repo_name", ds.get("repo", ""))
     parse = parse_log_fn(repo_name)(out)
     parse = decolor_dict_keys(parse)
@@ -518,6 +521,8 @@ async def _run_tests_in_container_async(
     timeout: int = 300,
     dataset: str | None = None,
 ) -> str:
+    from swebench.harness.constants import TESTS_ERROR, TESTS_TIMEOUT
+
     if dataset == "r2e":
         await _ensure_r2e_tests_in_testbed_async(container, timeout=min(timeout, 60))
     test_cmd = _TEST_CMD_BY_DATASET.get(dataset, "/run_tests.sh") if dataset else "/run_tests.sh"
@@ -554,6 +559,8 @@ async def _reward_r2e_async(
     get_test_output: bool,
     timeout: int = 60,
 ):
+    from r2egym.repo_analysis.execution_log_parser import decolor_dict_keys, parse_log_fn
+
     repo_name = ds.get("repo_name", ds.get("repo", ""))
     parse = parse_log_fn(repo_name)(out)
     parse = decolor_dict_keys(parse)

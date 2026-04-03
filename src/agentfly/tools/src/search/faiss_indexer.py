@@ -1,6 +1,4 @@
 import logging
-
-import faiss
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -17,6 +15,11 @@ class Indexer:
         use_gpu=False,
         num_gpus=1,
     ):
+        try:
+            import faiss
+        except ImportError:
+            raise ImportError("faiss is not installed, please install it using `conda install pytorch::faiss-gpu`")
+
         self.similarity = similarity
         self.use_gpu = use_gpu
         self.num_gpus = num_gpus
