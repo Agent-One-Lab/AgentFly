@@ -13,157 +13,28 @@ The Code environment provides tools for executing Python code in secure, isolate
 **Function Signature:**
 
 ```python
-async def code_interpreter(code: str, env: PythonSandboxEnv) -> str
+async def code_interpreter(code: str, context: Context) -> str
 ```
 
-**Description:** Execute Python code in a secure Docker container sandbox and return the output from stdout or stderr
+**Description:** Execute Python code in a sandboxed container environment acquired via `context.acquire_resource(...)`, and return the output from stdout or stderr.
 
 **Parameters:**
 - **code** (str): The Python code to execute in the sandbox environment
-- **env** (PythonSandboxEnv): The Python sandbox environment instance for code execution
+- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
 
 **Returns:**
 - **str**: The output from code execution (stdout) or error messages (stderr)
 
 **Tool Configuration:**
-- **Environment Class**: ``PythonSandboxEnv``
-- **Pool Size**: 32 concurrent instances
-- **Stateful**: True (maintains state between calls)
-- **Description**: "Run the code in docker container and return the output from stdout or stderr"
+- **ResourceSpec**: `PythonSandboxSpec`
+- **Resource scope**: `global` (the sandbox is released when the rollout ends)
+- **Stateful behavior**: variable state persists within the same acquired sandbox instance.
 
 ## Usage Examples
 
-### Basic Code Execution
+### Usage with an Agent (recommended)
 
-Execute simple Python expressions and statements:
-
-```python
-from agentfly.tools import code_interpreter
-from agentfly.envs.python_env import PythonSandboxEnv
-
-# Create environment
-env = await PythonSandboxEnv.acquire()
-
-# Basic calculations
-result = await code_interpreter(
-    code="print(2 + 2 * 3)",
-    env=env
-)
-# Output: "8"
-
-# Variable assignment and use
-await code_interpreter(
-    code="x = 42\ny = x * 2",
-    env=env
-)
-
-result = await code_interpreter(
-    code="print(f'Result: {y}')",
-    env=env
-)
-# Output: "Result: 84"
-```
-
-### Data Analysis and Libraries
-
-Use standard Python libraries for data processing:
-
-```python
-# Import and use libraries
-code = '''
-import math
-import json
-
-data = [1, 2, 3, 4, 5]
-mean = sum(data) / len(data)
-std_dev = math.sqrt(sum((x - mean) ** 2 for x in data) / len(data))
-
-result = {
-    "data": data,
-    "mean": mean,
-    "std_dev": std_dev
-}
-
-print(json.dumps(result, indent=2))
-'''
-
-result = await code_interpreter(code=code, env=env)
-```
-
-### Error Handling
-
-The tool gracefully handles errors and exceptions:
-
-```python
-# Syntax error example
-result = await code_interpreter(
-    code="print('Hello World'",  # Missing closing parenthesis
-    env=env
-)
-# Returns error message with details
-
-# Runtime error example
-result = await code_interpreter(
-    code="print(undefined_variable)",
-    env=env
-)
-# Returns: "NameError: name 'undefined_variable' is not defined"
-```
-
-### State Persistence
-
-Variables and imports persist within the same environment session:
-
-```python
-# Define functions and variables
-await code_interpreter(
-    code='''
-    def fibonacci(n):
-        if n <= 1:
-            return n
-        return fibonacci(n-1) + fibonacci(n-2)
-
-    # Cache some results
-    fib_cache = {i: fibonacci(i) for i in range(10)}
-    ''',
-    env=env
-)
-
-# Use previously defined function and data
-result = await code_interpreter(
-    code="print([fib_cache[i] for i in range(5)])",
-    env=env
-)
-# Output: "[0, 1, 1, 2, 3]"
-```
-
-### File Operations
-
-Work with files within the sandbox:
-
-```python
-# Create and write to files
-await code_interpreter(
-    code='''
-    with open('data.txt', 'w') as f:
-        f.write('Hello, World!\\nLine 2\\nLine 3')
-    ''',
-    env=env
-)
-
-# Read and process files
-result = await code_interpreter(
-    code='''
-    with open('data.txt', 'r') as f:
-        lines = f.readlines()
-
-    print(f"File has {len(lines)} lines")
-    for i, line in enumerate(lines, 1):
-        print(f"Line {i}: {line.strip()}")
-    ''',
-    env=env
-)
-```
+In AgentFly rollouts, `code_interpreter` is invoked via a tool call and receives `context: Context` automatically. The tool acquires a sandboxed environment via `PythonSandboxSpec` and returns stdout/stderr.
 
 ### Integration with ReactAgent
 
@@ -184,7 +55,7 @@ react_agent = ReactAgent(
     reward_fn=code_reward_test,
     template="qwen-chat",
     task_info=task_info,
-    backend="async_vllm",
+    backend_config={"backend": "async_vllm"},
     debug=True
 )
 

@@ -70,7 +70,7 @@ agent = HFAgent(
     tools=[calculator],
     template="qwen2.5",
     reward_fn=math_reward_string_equal,
-    backend="async_vllm",
+    backend_config={"backend": "async_vllm"},
 )
 ```
 

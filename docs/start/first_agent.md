@@ -9,7 +9,7 @@ agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
     tools=[calculator],
     template="qwen2.5",
-    backend="async_vllm",
+    backend_config={"backend": "async_vllm"},
 )
 ```
 

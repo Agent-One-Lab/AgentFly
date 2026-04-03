@@ -1,6 +1,6 @@
 # ALFWorld Environment
 
-The ALFWorldEnv class provides a Python interface to interact with ALFWorld environments running in Docker containers.
+`ALFWorldEnv` is a managed resource created by `ResourceEngine` runners. In AgentFly, tools and rewards acquire it via `Context.acquire_resource(spec=ALFWorldSpec, ...)`.
 
 ## Class Reference
 
@@ -15,11 +15,15 @@ The ALFWorldEnv class provides a Python interface to interact with ALFWorld envi
 ### Basic Usage
 
 ```python
-from agentfly.envs.alfworld_env import ALFWorldEnv
+from agentfly.core import Context
+from agentfly.envs.alfworld_env import ALFWorldSpec
 
-# Create environment with default settings
-env = ALFWorldEnv()
-await env.start()
+context = Context(rollout_id="demo")
+env = await context.acquire_resource(
+    spec=ALFWorldSpec,
+    scope="rollout",
+    backend="local",
+)
 
 # Reset to start a new episode
 obs, info = await env.reset()
@@ -29,14 +33,35 @@ print(f"Initial observation: {obs}")
 obs, reward, done, info = await env.step("go to kitchen")
 print(f"Reward: {reward}, Done: {done}")
 
-# Clean up
-await env.aclose()
+# Cleanup (kill rollout-scoped resource)
+await context.end_resource(scope="rollout")
 ```
 
 ### Custom Configuration
 
 ```python
-# Create environment with custom settings
+# NOTE: Acquire `ALFWorldEnv` via `Context`/`ResourceEngine` (not via `ALFWorldEnv(...)` constructor).
+# Most task customization is done via `await env.reset(env_args=...)` once the managed environment is acquired.
+# Recommended example (Context-based)
+from agentfly.core import Context
+from agentfly.envs.alfworld_env import ALFWorldSpec
+
+context = Context(rollout_id="demo")
+env = await context.acquire_resource(
+    spec=ALFWorldSpec,
+    scope="rollout",
+    backend="local",
+)
+
+# Reset to a specific task
+obs, info = await env.reset(
+    env_args={"task_id": "trial_T20190907_212755_456877"}
+)
+
+# Cleanup (kill rollout-scoped resource)
+await context.end_resource(scope="rollout")
+
+# --- Legacy snippet below (deprecated) ---
 env = ALFWorldEnv(
     image="custom/alfworld-env:latest",
     cpu=4,
@@ -52,26 +77,9 @@ obs, info = await env.reset(
 )
 ```
 
-## Configuration Parameters
+## Configuration parameters (via `ALFWorldSpec`)
 
-The ALFWorldEnv class accepts the following configuration parameters:
+In AgentFly, `ALFWorldEnv` is configured through `ALFWorldSpec` (a `ResourceSpec`) and acquired via `Context.acquire_resource(...)`.
 
-### Docker Settings
-
-* **image**: Docker image to use (default: ``bitalov/alfworld-http-env-3:latest``)
-* **runtime**: Docker runtime (default: ``runc``)
-* **cpu**: Number of CPU cores (default: ``2``)
-* **mem**: Memory allocation (default: ``2g``)
-
-### Environment Settings
-
-* **train_eval**: Data split to use (default: ``train``)
-* **batch_size**: Batch size for ALFWorld (default: ``1``)
-* **config_path**: Optional custom ALFWorld config file path
-* **max_episodes**: Maximum episodes before restart (default: ``50``)
-
-### Network Settings
-
-* **host_ip**: Host IP for port mapping (default: ``127.0.0.1``)
-* **container_port**: Container internal port (default: ``8000``)
-* **start_timeout**: Startup timeout in seconds (default: ``120.0``)
+- Container image/ports/concurrency are encoded in `ALFWorldSpec` (including `ALFWorldSpec.max_global_num`).
+- For per-episode task selection, call `await env.reset(env_args=...)` after acquiring the environment.

@@ -15,14 +15,18 @@ The environment is built on the `PythonSandboxEnv` class, which spawns Docker co
 
 ## Quick Start
 
-For most use cases, you can use the PythonSandboxEnv class directly:
+For most use cases, you interact with the code sandbox through `Context` and the resource engine (this is how tools/rewards acquire environments during rollouts):
 
 ```python
-from agentfly.envs.python_env import PythonSandboxEnv
+from agentfly.core import Context
+from agentfly.envs.python_env import PythonSandboxSpec
 
-# Create and start the environment
-env = PythonSandboxEnv()
-await env.start()
+context = Context(rollout_id="demo")
+env = await context.acquire_resource(
+    spec=PythonSandboxSpec,
+    scope="rollout",
+    backend="local",
+)
 
 # Execute Python code
 result = await env.step("print('Hello, World!')")
@@ -32,6 +36,9 @@ print(result)  # Output: Hello, World!
 await env.step("x = 42")
 result = await env.step("print(x)")
 print(result)  # Output: 42
+
+# Release/kill the rollout-scoped resource
+await context.end_resource(scope="rollout")
 ```
 
 For HTTP-based integration, see the [HTTP Server](http_server.md) documentation.

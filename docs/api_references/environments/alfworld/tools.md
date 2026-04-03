@@ -13,14 +13,14 @@ The ALFWorld tools provide a Python interface for agents to interact with ALFWor
 **Function Signature:**
 
 ```python
-async def alfworld_step(action: str, env: ALFWorldEnv) -> dict
+async def alfworld_step(action: str, context: Context) -> dict
 ```
 
 **Description:** Take an action in the ALFWorld environment and return the observation
 
 **Parameters:**
 - **action** (str): The action command to execute in the environment. Examples: "go to kitchen", "take apple", "open fridge", "look around"
-- **env** (ALFWorldEnv): The ALFWorld environment instance to interact with
+- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
 
 **Returns:**
 dict: A dictionary containing:
@@ -38,13 +38,13 @@ dict: A dictionary containing:
 **Function Signature:**
 
 ```python
-async def alfworld_reset(env: ALFWorldEnv) -> str
+async def alfworld_reset(context: Context) -> str
 ```
 
 **Description:** Reset the ALFWorld environment to start a new episode
 
 **Parameters:**
-- **env** (ALFWorldEnv): The ALFWorld environment instance to reset
+- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
 
 **Returns:**
 str: The initial observation containing the task description and starting state of the environment
@@ -58,13 +58,13 @@ str: The initial observation containing the task description and starting state 
 **Function Signature:**
 
 ```python
-async def alfworld_get_admissible_commands(env: ALFWorldEnv) -> str
+async def alfworld_get_admissible_commands(context: Context) -> str
 ```
 
 **Description:** Get the list of admissible commands for the current state in ALFWorld
 
 **Parameters:**
-- **env** (ALFWorldEnv): The ALFWorld environment instance to query
+- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
 
 **Returns:**
 str: A newline-separated string of valid commands that can be executed in the current state
@@ -78,13 +78,13 @@ str: A newline-separated string of valid commands that can be executed in the cu
 **Function Signature:**
 
 ```python
-async def alfworld_get_task_objective(env: ALFWorldEnv) -> str
+async def alfworld_get_task_objective(context: Context) -> str
 ```
 
 **Description:** Get the current task objective/goal from the ALFWorld environment
 
 **Parameters:**
-- **env** (ALFWorldEnv): The ALFWorld environment instance to query
+- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
 
 **Returns:**
 str: A formatted string containing the task objective and task type. Format: "Task: [objective]\nTask Type: [type]"
@@ -134,7 +134,7 @@ react_agent = ReactAgent(
     reward_fn=alfworld_episode_reward,
     template="qwen-chat",
     task_info=task_info,
-    backend="async_vllm",
+    backend_config={"backend": "async_vllm"},
     debug=True
 )
 ```
@@ -163,9 +163,6 @@ await react_agent.run_async(
 
 ## Tool Configuration
 
-### Pool Sizes and Statefulness
+These tools acquire an ALFWorld container from the `ResourceEngine` via `context.acquire_resource(spec=ALFWorldSpec, scope="global", backend="local")`.
 
-* **alfworld_step**: Pool size 8, stateless - For frequent action execution
-* **alfworld_reset**: Pool size 32, stateful - For episode initialization
-* **alfworld_get_admissible_commands**: Pool size 8, stateless - For state queries
-* **alfworld_get_task_objective**: Pool size 8, stateless - For task information
+The maximum concurrent environments is controlled by `ALFWorldSpec.max_global_num` (currently `32`). Pooling/sharing is handled by `Context`/`ResourceEngine`; you don't pass explicit `env` instances to these tools.
