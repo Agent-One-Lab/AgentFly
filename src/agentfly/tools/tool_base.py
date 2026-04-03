@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Any, Callable, List, Optional
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
+from .. import TOOL_ERROR_AS_OBSERVATION
 
 logger = logging.getLogger(__name__)
 
@@ -209,30 +210,37 @@ class BaseTool:
             )
 
     def _execute_user_function_sync(self, **kwargs):
-        """Execute the user function synchronously. Catches user function errors and converts them to strings."""
+        """Execute the user function synchronously.
+
+        On error: returns str(e) if ``TOOL_ERROR_AS_OBSERVATION`` is True,
+        otherwise re-raises.
+        """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
             if self.instance is None:
                 raise ValueError(f"Instance not set for method tool {self.name}")
 
-        # Execute user function and catch errors, converting them to strings
         try:
             if self.is_method:
                 return self.user_func(self.instance, **kwargs)
             else:
                 return self.user_func(**kwargs)
         except Exception as e:
-            # Convert user function execution errors to strings
-            return str(e)
+            if TOOL_ERROR_AS_OBSERVATION:
+                return str(e)
+            raise
 
     async def _execute_user_function_async(self, **kwargs):
-        """Execute the user function, handling both sync and async functions. Catches user function errors and converts them to strings."""
+        """Execute the user function, handling both sync and async functions.
+
+        On error: returns str(e) if ``agentfly.TOOL_ERROR_AS_OBSERVATION`` is True,
+        otherwise re-raises.
+        """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
             if self.instance is None:
                 raise ValueError(f"Instance not set for method tool {self.name}")
 
-        # Execute user function and catch errors, converting them to strings
         try:
             if self.is_method:
                 if inspect.iscoroutinefunction(self.user_func):
@@ -245,8 +253,9 @@ class BaseTool:
                 else:
                     return self.user_func(**kwargs)
         except Exception as e:
-            # Convert user function execution errors to strings
-            return str(e)
+            if TOOL_ERROR_AS_OBSERVATION:
+                return str(e)
+            raise
 
     def __call__(self, **kwargs):
         """
@@ -279,7 +288,7 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (errors from user function are already converted to strings)
+        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
         result = self._execute_user_function_sync(**kwargs)
 
         # Format and return result
@@ -294,7 +303,7 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (errors from user function are already converted to strings)
+        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
         result = await self._execute_user_function_async(**kwargs)
 
         # Format and return result

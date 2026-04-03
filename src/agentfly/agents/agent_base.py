@@ -18,6 +18,7 @@ from termcolor import colored
 
 from ..templates import *  # noqa: F403
 from ..tools.tool_base import BaseTool
+from ..core.context_config import ContextConfig
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
 from ..utils.verl import pad_tensor_to_rank_size
 from .chain.chain_base import ChainRollout
@@ -320,6 +321,7 @@ class BaseAgent(ChainRollout, ABC):
         messages: Union[List[dict], np.ndarray, Dict],
         max_turns: int,
         generation_config: Optional[Dict[str, Any]] = {},
+        context_config: Optional[ContextConfig] = None,
         **kwargs,
     ):
         """
@@ -329,7 +331,8 @@ class BaseAgent(ChainRollout, ABC):
             messages: List of messages to generate responses for.
             max_turns: The maximum number of turns to generate.
             generation_config: The generation configuration.
-            **kwargs: Additional keyword arguments for generation.
+            context_config: Optional settings for :class:`~agentfly.core.context.Context` (resource backend).
+            **kwargs: Additional keyword arguments for generation (passed to ``run_async``).
 
         """
         processed_messages = self._preprocess_messages(messages)
@@ -339,6 +342,7 @@ class BaseAgent(ChainRollout, ABC):
             processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
+            context_config=context_config,
             **kwargs,
         )
 

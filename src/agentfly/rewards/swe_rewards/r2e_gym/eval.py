@@ -23,6 +23,7 @@ requires ds to build the test script.
 import json
 import re
 import concurrent.futures
+import asyncio
 
 from r2egym.agenthub.trajectory.swebench_utils import get_logs_eval, make_test_spec
 from r2egym.repo_analysis.execution_log_parser import parse_log_fn, decolor_dict_keys
@@ -99,14 +100,37 @@ def setup_container_for_reward(
 
     if dataset == "r2e":
         # R2E images have r2e_tests at /r2e_tests; run_tests.sh runs from /testbed and expects r2e_tests there.
-        # DockerRuntime.setup_env() does: mv /r2e_tests /root/r2e_tests; ln -s /root/r2e_tests /testbed/r2e_tests.
-        # Without that, create a symlink so /testbed/r2e_tests exists (point to /r2e_tests if still there).
+        # R2E-Gym's DockerRuntime.setup_env() does:
+        #   mv /r2e_tests /root/r2e_tests
+        #   ln -s /root/r2e_tests /testbed/r2e_tests
+        # to avoid path/symlink issues when the test root is referenced via multiple roots.
         exec_run(
-            "[ -d /r2e_tests ] && ln -sf /r2e_tests /testbed/r2e_tests || true",
+            # If /root/r2e_tests is already a symlink (from a previous broken setup),
+            # remove it so the subsequent mv/link results in a stable single-root tree.
+            "[ -L /root/r2e_tests ] && rm -f /root/r2e_tests || true",
+            workdir="/",
+        )
+        exec_run(
+            # Make this idempotent: if /root/r2e_tests already exists, mv would create
+            # /root/r2e_tests/r2e_tests (recursive nesting). Instead, drop the source.
+            "[ -d /r2e_tests ] && [ ! -d /root/r2e_tests ] && mv /r2e_tests /root/r2e_tests || true",
+            workdir="/",
+        )
+        exec_run(
+            # If the destination already exists, remove the source to prevent recursion
+            # and to ensure later /testbed/r2e_tests links are stable.
+            "[ -d /r2e_tests ] && [ -d /root/r2e_tests ] && rm -rf /r2e_tests || true",
             workdir="/",
         )
         exec_run(
             "[ -d /root/r2e_tests ] && ln -sf /root/r2e_tests /testbed/r2e_tests || true",
+            workdir="/",
+        )
+        exec_run(
+            # Harden against accidental nested move behavior across repeated calls:
+            # if /root/r2e_tests already contains a child named r2e_tests, remove it
+            # to prevent pytest from traversing the same tests via multiple roots.
+            "[ -e /root/r2e_tests/r2e_tests ] && rm -rf /root/r2e_tests/r2e_tests || true",
             workdir="/",
         )
         # Create /run_tests.sh that delegates to the real script. R2E Dockerfiles put it at /testbed/run_tests.sh.
@@ -156,8 +180,16 @@ def _ensure_r2e_tests_in_testbed(container, timeout: int = 60) -> None:
             str(timeout),
             "/bin/sh",
             "-c",
-            "([ -d /r2e_tests ] && ln -sf /r2e_tests /testbed/r2e_tests) || "
-            "([ -d /root/r2e_tests ] && ln -sf /root/r2e_tests /testbed/r2e_tests) || true",
+            # If /testbed/r2e_tests is already a symlink to a directory, `ln -sf SOURCE DEST`
+            # may treat DEST as a directory (because it follows symlinks) and create
+            # /testbed/r2e_tests/r2e_tests instead of replacing the symlink.
+            # Avoid this by removing DEST first.
+            "desired=''; "
+            "[ -d /root/r2e_tests ] && desired=/root/r2e_tests || true; "
+            "[ -z \"$desired\" ] && [ -d /r2e_tests ] && desired=/r2e_tests || true; "
+            "[ -z \"$desired\" ] && exit 0; "
+            "rm -rf /testbed/r2e_tests || true; "
+            "ln -s \"$desired\" /testbed/r2e_tests || true",
         ],
         workdir="/",
         stdout=True,
@@ -364,6 +396,219 @@ def reward_from_container(
     if dataset == "swesmith":
         return _reward_swesmith(ds, out, get_test_output)
     return _reward_r2e(container, ds, out, get_test_output, timeout=timeout)
+
+
+async def _exec_run_any(container, **kwargs):
+    """Use native async exec when available; fallback to thread-wrapped sync exec."""
+    if hasattr(container, "exec_run_async"):
+        return await container.exec_run_async(**kwargs)
+    return await asyncio.to_thread(container.exec_run, **kwargs)
+
+
+async def setup_container_for_reward_async(
+    container,
+    dataset: str,
+    ds: dict | None = None,
+    setup_timeout: int = 60,
+) -> None:
+    if dataset not in ("swebench", "swebench_verified", "swesmith", "r2e"):
+        raise ValueError(
+            f"Unknown dataset: {dataset!r}. "
+            "Expected one of: swebench, swebench_verified, swesmith, r2e"
+        )
+
+    async def exec_run(cmd: list | str, workdir: str = "/testbed", timeout: int | None = None):
+        if timeout is None:
+            timeout = setup_timeout
+        inner_cmd = ["/bin/sh", "-c", cmd] if isinstance(cmd, str) else cmd
+        full_cmd = ["timeout", str(timeout), *inner_cmd]
+        await _exec_run_any(
+            container,
+            cmd=full_cmd,
+            workdir=workdir,
+            stdout=True,
+            stderr=True,
+            environment={"PATH": DOCKER_PATH},
+        )
+
+    if dataset == "r2e":
+        await exec_run("[ -L /root/r2e_tests ] && rm -f /root/r2e_tests || true", workdir="/")
+        await exec_run(
+            "[ -d /r2e_tests ] && [ ! -d /root/r2e_tests ] && mv /r2e_tests /root/r2e_tests || true",
+            workdir="/",
+        )
+        await exec_run(
+            "[ -d /r2e_tests ] && [ -d /root/r2e_tests ] && rm -rf /r2e_tests || true",
+            workdir="/",
+        )
+        await exec_run(
+            "[ -d /root/r2e_tests ] && ln -sf /root/r2e_tests /testbed/r2e_tests || true",
+            workdir="/",
+        )
+        await exec_run(
+            "[ -e /root/r2e_tests/r2e_tests ] && rm -rf /root/r2e_tests/r2e_tests || true",
+            workdir="/",
+        )
+        await exec_run("echo '#!/bin/sh' > /run_tests.sh", workdir="/")
+        await exec_run(
+            "echo 'if [ -f /testbed/run_tests.sh ]; then cd /testbed && exec bash /testbed/run_tests.sh \"$@\"; fi' >> /run_tests.sh",
+            workdir="/",
+        )
+        await exec_run(
+            "echo 'if [ -f /root/run_tests.sh ]; then exec bash /root/run_tests.sh \"$@\"; fi' >> /run_tests.sh",
+            workdir="/",
+        )
+        await exec_run("chmod +x /run_tests.sh", workdir="/")
+        return
+
+    if dataset in ("swebench", "swebench_verified"):
+        await exec_run("test -f /run_tests.sh && chmod +x /run_tests.sh")
+        return
+
+    if dataset == "swesmith":
+        if ds is None:
+            raise ValueError("setup_container_for_reward_async(..., dataset='swesmith') requires ds")
+        import base64
+        from r2egym.swesmith.utils import get_test_command
+
+        test_command, _ = get_test_command(ds)
+        content = "\n".join(
+            [
+                "#!/bin/bash",
+                "set -uxo pipefail",
+                "source /opt/miniconda3/bin/activate",
+                "conda activate testbed",
+                "cd testbed/",
+                ": '>>>>> Start Test Output'",
+                test_command,
+                ": '>>>>> End Test Output'",
+            ]
+        ) + "\n"
+        b64 = base64.b64encode(content.encode()).decode()
+        await exec_run(
+            f"echo '{b64}' | base64 -d > /run_tests.sh && chmod +x /run_tests.sh",
+            workdir="/",
+        )
+
+
+async def _ensure_r2e_tests_in_testbed_async(container, timeout: int = 60) -> None:
+    await _exec_run_any(
+        container,
+        cmd=[
+            "timeout",
+            str(timeout),
+            "/bin/sh",
+            "-c",
+            "desired=''; "
+            "[ -d /root/r2e_tests ] && desired=/root/r2e_tests || true; "
+            "[ -z \"$desired\" ] && [ -d /r2e_tests ] && desired=/r2e_tests || true; "
+            "[ -z \"$desired\" ] && exit 0; "
+            "rm -rf /testbed/r2e_tests || true; "
+            "ln -s \"$desired\" /testbed/r2e_tests || true",
+        ],
+        workdir="/",
+        stdout=True,
+        stderr=True,
+        environment={"PATH": DOCKER_PATH},
+    )
+
+
+async def _run_tests_in_container_async(
+    container,
+    timeout: int = 300,
+    dataset: str | None = None,
+) -> str:
+    if dataset == "r2e":
+        await _ensure_r2e_tests_in_testbed_async(container, timeout=min(timeout, 60))
+    test_cmd = _TEST_CMD_BY_DATASET.get(dataset, "/run_tests.sh") if dataset else "/run_tests.sh"
+    command = f"timeout {timeout} {test_cmd}"
+    # Host-side exec timeout (enroot-py / Ray actor): guest `timeout` does not bound the
+    # host `enroot exec` process. Pass timeout= so RayContainerResource.raw_exec_run applies
+    # a host guard; keep slack above guest timeout to avoid racing the outer asyncio.wait_for.
+    host_exec_cap = float(timeout) + 30.0
+    try:
+        exec_result = await asyncio.wait_for(
+            _exec_run_any(
+                container,
+                cmd=["/bin/sh", "-c", command],
+                workdir="/testbed",
+                stdout=True,
+                stderr=True,
+                environment={"PATH": DOCKER_PATH},
+                timeout=host_exec_cap,
+            ),
+            timeout=host_exec_cap,
+        )
+        out = exec_result.output.decode("utf-8", errors="replace")
+        return re.sub(r"\x1b\[[0-9;]*m|\r", "", out)
+    except asyncio.TimeoutError:
+        return TESTS_TIMEOUT
+    except Exception:
+        return TESTS_ERROR
+
+
+async def _reward_r2e_async(
+    container,
+    ds: dict,
+    out: str,
+    get_test_output: bool,
+    timeout: int = 60,
+):
+    repo_name = ds.get("repo_name", ds.get("repo", ""))
+    parse = parse_log_fn(repo_name)(out)
+    parse = decolor_dict_keys(parse)
+    parse = {k.split(" - ")[0]: parse[k] for k in sorted(parse.keys())}
+    try:
+        expected_json = ds.get("expected_output_json")
+        if not expected_json:
+            result = await _exec_run_any(
+                container,
+                cmd=[
+                    "timeout",
+                    str(min(timeout, 60)),
+                    "/bin/sh",
+                    "-c",
+                    "cat /root/expected_test_output.json 2>/dev/null || "
+                    "cat /testbed/expected_test_output.json 2>/dev/null || echo '{}'",
+                ],
+                workdir="/testbed",
+                stdout=True,
+                stderr=True,
+                environment={"PATH": DOCKER_PATH},
+            )
+            expected_json = result.output.decode("utf-8", errors="replace") if result.output else "{}"
+        expected = expected_json if isinstance(expected_json, dict) else json.loads(expected_json)
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return (0.0, out) if get_test_output else 0.0
+
+    expected = decolor_dict_keys(expected)
+    expected = {k.split(" - ")[0]: expected[k] for k in sorted(expected.keys())}
+    if len(parse) != len(expected):
+        reward = 0.0
+    else:
+        reward = 1.0 if all((not k) or (k in expected and parse[k] == expected[k]) for k in parse) else 0.0
+    return (reward, out) if get_test_output else reward
+
+
+async def reward_from_container_async(
+    container,
+    ds: dict,
+    dataset: str,
+    timeout: int = 300,
+    get_test_output: bool = False,
+):
+    if dataset not in ("swebench", "swebench_verified", "swesmith", "r2e"):
+        raise ValueError(
+            f"Unknown dataset: {dataset!r}. "
+            "Expected one of: swebench, swebench_verified, swesmith, r2e"
+        )
+
+    out = await _run_tests_in_container_async(container, timeout=timeout, dataset=dataset)
+    if dataset in ("swebench", "swebench_verified"):
+        return _reward_swebench(ds, out, get_test_output)
+    if dataset == "swesmith":
+        return _reward_swesmith(ds, out, get_test_output)
+    return await _reward_r2e_async(container, ds, out, get_test_output, timeout=timeout)
 
 
 if __name__ == "__main__":

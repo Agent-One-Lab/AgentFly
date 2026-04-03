@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm.asyncio import tqdm_asyncio
 
-from ...core import Context
+from ...core import Context, ContextConfig
 from ...tools.tool_base import submit_tool_call
 from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
 from ...utils.timing import Timer
@@ -38,6 +38,7 @@ class ChainRollout:
         self.global_step = 0
         self.finished_chains_count = 0
         self.monitor_info = defaultdict(list)
+        self.chain_rollout_seconds: Dict[str, float] = {}
 
     def reset(self) -> None:
         self.status_code: str = "continue"
@@ -46,6 +47,7 @@ class ChainRollout:
         self.success_count: int = 0
         self.chains = {}
         self.current_nodes = {}
+        self.chain_rollout_seconds = {}
 
     @property
     def timing_data(self):
@@ -101,10 +103,18 @@ class ChainRollout:
         return messages
 
     def validate_run_args(
-        self, max_turns: int, num_chains: int, enable_streaming: bool
+        self,
+        max_turns: int,
+        num_chains: int,
+        enable_streaming: bool,
+        max_concurrent_chains: Optional[int],
     ):
         assert max_turns >= 1, "max_turns must be at least 1."
         assert num_chains >= 1, "num_chains must be at least 1."
+        if max_concurrent_chains is not None:
+            assert (
+                max_concurrent_chains >= 1
+            ), "max_concurrent_chains must be at least 1 when set."
         for observer in self.streaming_manager.observers:
             if isinstance(observer, ConsoleStreamObserver) and enable_streaming:
                 assert num_chains == 1, (
@@ -118,6 +128,8 @@ class ChainRollout:
         num_chains: int,
         generation_config: Optional[Dict[str, Any]] = None,
         enable_streaming: bool = False,
+        max_concurrent_chains: Optional[int] = None,
+        context_config: Optional[ContextConfig] = None,
     ):
         """
         Run the chain-based rollout with optional streaming support.
@@ -126,11 +138,16 @@ class ChainRollout:
             max_steps: Maximum number of steps for each chain.
             start_messages: List of messages to start the chains.
             num_chains: Number of chains to run for each message.
+            max_concurrent_chains: Maximum number of chains to execute concurrently
+                across the whole rollout. If None, all chains are scheduled at once.
             generation_config: Generation configuration dictionary.
             enable_streaming: Whether to enable streaming mode.
             streaming_callback: Optional callback for streaming events.
+            context_config: Optional :class:`~agentfly.core.context_config.ContextConfig` for tool resources (backend).
         """
-        self.validate_run_args(max_turns, num_chains, enable_streaming)
+        self.validate_run_args(
+            max_turns, num_chains, enable_streaming, max_concurrent_chains
+        )
         Monitor.ensure_started()
         self.reset()
 
@@ -139,9 +156,14 @@ class ChainRollout:
         tool_schemas = [tool.schema for tool in self.tools]
 
         done_q = asyncio.Queue()
-        tasks = [
-            asyncio.create_task(
-                self._run_single_chain(
+
+        sem: Optional[asyncio.Semaphore] = None
+        if max_concurrent_chains is not None:
+            sem = asyncio.Semaphore(int(max_concurrent_chains))
+
+        async def _run_single_chain_guarded(cid: str, node: Node) -> None:
+            if sem is None:
+                await self._run_single_chain(
                     cid,
                     node,
                     chains[cid],
@@ -150,8 +172,24 @@ class ChainRollout:
                     generation_config=generation_config,
                     done_queue=done_q,
                     enable_streaming=enable_streaming,
+                    context_config=context_config,
                 )
-            )
+                return
+            async with sem:
+                await self._run_single_chain(
+                    cid,
+                    node,
+                    chains[cid],
+                    tool_schemas,
+                    max_turns=max_turns,
+                    generation_config=generation_config,
+                    done_queue=done_q,
+                    enable_streaming=enable_streaming,
+                    context_config=context_config,
+                )
+
+        tasks = [
+            asyncio.create_task(_run_single_chain_guarded(cid, node))
             for cid, node in first_nodes.items()
         ]
 
@@ -176,6 +214,7 @@ class ChainRollout:
         generation_config: Dict[str, Any],
         done_queue: asyncio.Queue,
         enable_streaming: bool = False,
+        context_config: Optional[ContextConfig] = None,
     ):
         """
         Run a single chain with optional streaming support. It supports parallel tool calls (running multiple tool calls for a single turn).
@@ -190,14 +229,18 @@ class ChainRollout:
             generation_config: The generation configuration.
             done_queue: The queue to put the result of the chain.
             enable_streaming: Whether to enable streaming.
+            context_config: Passed to :class:`~agentfly.core.context.Context` for resource backend.
 
         """
+
+        chain_started_at = time.monotonic()
 
         # Build Context from rollout data for tools that need it
         context = Context(
             rollout_id=chain_id,
             group_id=chain.info.get("group_id"),
             metadata=chain.info,
+            context_config=context_config,
         )
 
         current_node = first_node
@@ -227,6 +270,11 @@ class ChainRollout:
 
         # Finalize chain
         await self._finalize_chain(chain_id, chain, current_node, depth, context)
+
+        chain_elapsed = time.monotonic() - chain_started_at
+        self.chain_rollout_seconds[chain_id] = chain_elapsed
+        chain.info["rollout_time_sec"] = chain_elapsed
+
         await done_queue.put((chain_id, chain, current_node))
 
         self.finished_chains_count += 1
@@ -339,7 +387,7 @@ class ChainRollout:
                     observation
                 )
                 action_input_node.total_token_length = (
-                    running_total_token_length + observation_token_length
+                    running_total_token_length + observation_token_length + 15 # We add additional 15 tokens here for tool observation prefix (e.g. <|im_start|>user<tool_response> )
                 )
                 running_total_token_length = action_input_node.total_token_length
 
@@ -666,6 +714,34 @@ class ChainRollout:
         await context.end_resource(scope="rollout")
 
     def monitor_step(self) -> None:
+        if self.chain_rollout_seconds:
+            vals = list(self.chain_rollout_seconds.values())
+            min_t = min(vals)
+            max_t = max(vals)
+            avg_t = sum(vals) / len(vals)
+
+            logger.info(
+                "Chain rollout time stats (s): count=%d min=%.3f max=%.3f avg=%.3f",
+                len(vals),
+                min_t,
+                max_t,
+                avg_t,
+            )
+
+            for name, value in (
+                ("Agent/rollout/time/min", min_t),
+                ("Agent/rollout/time/max", max_t),
+                ("Agent/rollout/time/avg", avg_t),
+            ):
+                emit(
+                    MetricEvent(
+                        kind="scalar",
+                        name=name,
+                        value=value,
+                        x=self.global_step,
+                        x_name="Agent/rollout/step",
+                    )
+                )
         messages = self.get_messages()
         avg_turns = 0
         avg_tool_calls = 0
@@ -741,6 +817,32 @@ class ChainRollout:
             x_name="Agent/rollout/step",
         )
         emit(evt)
+
+        if self.chain_rollout_seconds:
+            slowest_chain_id = max(
+                self.chain_rollout_seconds, key=self.chain_rollout_seconds.get
+            )
+            if (
+                slowest_chain_id in self.current_nodes
+                and slowest_chain_id in self.chains
+            ):
+                slowest_message = {
+                    "chain_id": slowest_chain_id,
+                    "rollout_time_sec": self.chain_rollout_seconds[slowest_chain_id],
+                    "messages": self.current_nodes[slowest_chain_id].messages.messages,
+                    **self.chains[slowest_chain_id].info,
+                }
+                slowest_message_json = json.dumps(
+                    serialize_for_json(slowest_message), indent=2
+                )
+                evt = MetricEvent(
+                    kind="text",
+                    name="Agent/rollout/slowest_message",
+                    value=slowest_message_json,
+                    x=self.global_step,
+                    x_name="Agent/rollout/step",
+                )
+                emit(evt)
 
         for k, v in self.monitor_info.items():
             if k != "Agent/chains":  # We don't log number of chains

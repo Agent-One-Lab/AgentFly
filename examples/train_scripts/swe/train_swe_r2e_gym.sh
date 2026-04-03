@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=train
 #SBATCH --time=200:00:00
-#SBATCH --nodes=2
-#SBATCH --ntasks=2
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --account=iq
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
@@ -13,7 +13,6 @@
 # Get the list of allocated nodes
 nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
 echo "Nodes to check: ${nodes[@]}"
-
 
 set -x
 
@@ -63,10 +62,11 @@ sleep 10
 model=Qwen/Qwen3-32B
 lr=4e-7
 max_model_len=32768
-max_new_tokens_per_turn=2048
+max_new_tokens_per_turn=4096
 val_batch_size=512
-train_batch_size=16
-num_chains=4
+train_batch_size=32
+num_chains=8
+max_concurrent_chains=64
 mini_batch_size=$((train_batch_size * num_chains))
 kl_coef=0.001
 train_dataset="./data/rlhf/os/r2e-gym-lite.json"
@@ -74,7 +74,7 @@ eval_dataset="./data/rlhf/os/r2e-gym-lite.json"
 tools="[run_shell_command]"
 reward_name="r2e_gym_reward"
 train_on_last_turn=False
-experiment_name="test_swe_train"
+experiment_name="test_swe_train_r2e_gym_64chains"
 
 # Long-context: use_remove_padding=True + ulysses_sequence_parallel_size=4 splits the sequence across
 # 4 GPUs so activation memory per GPU is ~4x lower while keeping full max_model_len (e.g. 32768).
@@ -88,11 +88,11 @@ adv_estimator=grpo
 entropy_coeff=0.001
 kl_loss_type=mse
 agent_type=bash_swe
-max_turns=30
+max_turns=24
 template="qwen3-miniswe"
 tool_parser_name="hermes"
-total_training_steps=100
-lr_warmup_steps_ratio=0.02
+total_training_steps=300
+lr_warmup_steps_ratio=0.01
 project_name="Resource"
 
 python -m agentfly.cli train \
@@ -110,13 +110,15 @@ python -m agentfly.cli train \
     agent.init_config.tool_parser_name=$tool_parser_name \
     agent.init_config.tools=${tools} \
     agent.init_config.reward_name=${reward_name} \
-    agent.generation_config.max_tokens=$max_new_tokens_per_turn \
-    agent.max_turns=${max_turns} \
-    agent.num_chains=$num_chains \
+    agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=$num_chains \
+    agent.run_config.max_concurrent_chains=$max_concurrent_chains \
+    agent.run_config.context_config.resource_backend=ray \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=True \
-    actor_rollout_ref.actor.ulysses_sequence_parallel_size=4 \
+    actor_rollout_ref.actor.ulysses_sequence_parallel_size=2 \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
@@ -126,14 +128,14 @@ python -m agentfly.cli train \
     actor_rollout_ref.actor.entropy_coeff=$entropy_coeff \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.model.enable_activation_offload=True \
-    actor_rollout_ref.actor.fsdp_config.param_offload=True \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
-    actor_rollout_ref.ref.ulysses_sequence_parallel_size=4 \
+    actor_rollout_ref.ref.ulysses_sequence_parallel_size=2 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     critic.model.path=$model \
     critic.ppo_mini_batch_size=$train_batch_size \
@@ -147,6 +149,6 @@ python -m agentfly.cli train \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=${worker_num} \
     trainer.save_freq=25 \
-    trainer.test_freq=200 \
+    trainer.test_freq=${total_training_steps} \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=False

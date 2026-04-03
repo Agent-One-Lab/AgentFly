@@ -1,18 +1,27 @@
-from .swesmith_patch import evaluate_swesmith
+import asyncio
+from typing import Any
+
 from ...core import Context
 from ...resources import ResourceSpec
-from .utils import get_patch_from_runtime
+from ...resources.containers.ray_container_resource import RayContainerResource
 from ...rewards.reward_base import reward
-from .r2e_gym.eval import reward_from_container
-from .r2e_gym.eval import setup_container_for_reward
-import asyncio
+from .r2e_gym.eval import reward_from_container_async, setup_container_for_reward_async
+from .swesmith_patch import evaluate_swesmith
+from .utils import get_patch_from_runtime
 
 # asyncio.to_thread only prevents blocking the event loop; it does not shorten wall-clock
 # time. Within one reward the steps are inherently sequential (need patch before evaluate).
 # For parallelism: use num_chains > 1 so multiple rewards run concurrently across rollouts.
 
 # Default timeout (seconds) for evaluate_swesmith; override via context.metadata["eval_timeout"].
-DEFAULT_EVAL_TIMEOUT = 300
+DEFAULT_EVAL_TIMEOUT = 240
+
+
+def _sync_docker_like_container(container: Any) -> Any:
+    """R2E / SWE eval helpers expect ``.exec_run`` on the raw enroot handle; Ray uses a sync proxy."""
+    if isinstance(container, RayContainerResource):
+        return container.sync_exec_run_proxy()
+    return container._container
 
 @reward(name="r2e_gym_reward")
 async def r2e_gym_reward(context: Context) -> dict:
@@ -26,7 +35,7 @@ async def r2e_gym_reward(context: Context) -> dict:
     )
 
     container = await context.acquire_resource(
-        spec=spec, id=rollout_id, scope="rollout", backend="local"
+        spec=spec, id=rollout_id, scope="rollout", backend=context.resource_backend
     )
 
     # Allow configuring evaluation timeout via context.metadata["eval_timeout"].
@@ -36,11 +45,9 @@ async def r2e_gym_reward(context: Context) -> dict:
         # Setup phase: create /run_tests.sh and related symlinks inside the container.
         # Use a bounded timeout so container setup cannot hang indefinitely.
         await asyncio.wait_for(
-            asyncio.to_thread(
-                setup_container_for_reward,
-                container._container,
+            setup_container_for_reward_async(
+                _sync_docker_like_container(container),
                 dataset="r2e",
-                setup_timeout=eval_timeout,
             ),
             timeout=eval_timeout + 10,
         )
@@ -52,9 +59,8 @@ async def r2e_gym_reward(context: Context) -> dict:
         # test command; wait_for bounds the overall wall-clock time from the
         # trainer's point of view.
         reward, out = await asyncio.wait_for(
-            asyncio.to_thread(
-                reward_from_container,
-                container._container,
+            reward_from_container_async(
+                _sync_docker_like_container(container),
                 context.metadata,
                 dataset="r2e",
                 timeout=eval_timeout,
@@ -99,7 +105,7 @@ async def swe_reward(context: Context) -> dict:
                 evaluate_swesmith,
                 sample=context.metadata,
                 patch=git_patch,
-                container=container._container,
+                container=_sync_docker_like_container(container),
             ),
             timeout=eval_timeout,
         )

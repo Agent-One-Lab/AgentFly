@@ -12,7 +12,7 @@ import asyncio
 import time
 from typing import Any
 import httpx
-from ..resources import ResourceSpec, ContainerResource
+from ..resources import ContainerResource, ResourceSpec
 
 PythonSandboxSpec = ResourceSpec(
     category="python_env",
