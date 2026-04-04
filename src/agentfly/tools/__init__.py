@@ -19,6 +19,7 @@ from .src.ui.tools import pyautogui_code_generator
 from .src.webshop.tools import webshop_browser
 from .tool_base import BaseTool
 from .src.file.tools import grep_search, list_files
+from .src.context.tools import summarize
 
 @tool()
 def hallucination_tool(tool_name):
@@ -35,6 +36,7 @@ __all__ = [
     "BaseTool",
     "code_interpreter",
     "CodeInterpreterTool",
+    "summarize",
     "alfworld_step",
     "alfworld_get_task_objective",
     "alfworld_get_admissible_commands",

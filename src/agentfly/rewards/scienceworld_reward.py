@@ -37,8 +37,11 @@ async def scienceworld_reward(final_response: str, context: Context) -> dict:
     else:
         acc = 0.0
 
+    reward = acc * 10.0
+
     return {
-        "reward": result["reward"],
+        "reward": reward,
         "acc": acc,
+        "score": result["reward"],
         "output": result["observation"],
     }

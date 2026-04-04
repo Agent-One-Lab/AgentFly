@@ -32,7 +32,7 @@ ScienceWorldSpec = ResourceSpec(
         "start_timeout": 10.0,
         "host_ip": "127.0.0.1",
     },
-    max_global_num=24,
+    max_global_num=48,
 )
 
 

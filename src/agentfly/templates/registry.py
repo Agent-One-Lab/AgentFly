@@ -17,6 +17,7 @@ register_template(
         system_template="<|im_start|>system\n{system_message}\n<|im_end|>\n",
         user_template="<|im_start|>user\n{content}\n<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        generation_prompt="<|im_start|>assistant\n",
         tool_template="<observation>{observation}</observation>\n",
         stop_words=["<|im_end|>"],
     )

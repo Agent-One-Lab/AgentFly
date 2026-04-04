@@ -17,7 +17,8 @@ from ...tools.tool_base import submit_tool_call
 from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
 from ...utils.timing import Timer
 from ...utils.vision import image_to_data_uri
-from ..utils.messages import MessagesList
+from ..utils.messages import Messages, MessagesList
+from agentfly.tools.src.context.tools import fold_messages_with_summarize
 from .streaming_observer import ConsoleStreamObserver, StreamEvent, StreamEventType
 from .structures import Chain, Node
 
@@ -82,8 +83,8 @@ class ChainRollout:
 
         return chains, start_nodes
 
-    def get_messages(self) -> List[Any]:
-        messages = []
+    def get_trajectories(self) -> List[Any]:
+        trajectories = []
         # Sort by (group_idx, chain_idx) so trajectories are in deterministic order
         items = list(self.current_nodes.items())
         items.sort(
@@ -93,12 +94,18 @@ class ChainRollout:
             )
         )
         for id, node in items:
-            info = self.chains[id].info
-            message_item = {}
-            message_item["messages"] = node.messages.messages
-            message_item.update(info)
-            messages.append(message_item)
-        return messages
+            chain = self.chains[id]
+            info = chain.info
+            trajectory_item = {}
+            # Concatenate all stored history segments for this chain.
+            # Histories may contain multiple segments when context tools are used.
+            all_segments = []
+            for segment in chain.histories:
+                all_segments.append(segment)
+            trajectory_item["trajectory_segments"] = all_segments
+            trajectory_item.update(info)
+            trajectories.append(trajectory_item)
+        return trajectories
 
     def validate_run_args(
         self, max_turns: int, num_chains: int, enable_streaming: bool
@@ -227,11 +234,12 @@ class ChainRollout:
 
         # Finalize chain
         await self._finalize_chain(chain_id, chain, current_node, depth, context)
+
         await done_queue.put((chain_id, chain, current_node))
 
         self.finished_chains_count += 1
         message_info = chain.info
-        self.monitor_chain(trajectory=current_node.messages.messages, info=message_info)
+        self.monitor_chain(trajectory=chain.histories, info=message_info)
 
     async def _run_one_turn(
         self,
@@ -266,6 +274,7 @@ class ChainRollout:
 
         # Generate response
         new_msg, total_token_length = await self._generate_response(
+            chain=chain,
             current_node=current_node,
             tools=tools,
             depth=depth,
@@ -357,15 +366,19 @@ class ChainRollout:
                     image_base64 = image_to_data_uri(result["image"])
                     new_content.append({"type": "image", "image": image_base64})
 
-                newest_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call["id"],
-                        "tool_name": result["name"],
-                        "content": new_content,
-                    }
+                # Apply context folding based on the tool result (currently only summarize).
+                updated_messages = self.apply_context_folding(
+                    chain=chain,
+                    messages=newest_messages,
+                    tool_name=tool_call["function"]["name"],
+                    observation=observation,
+                    tool_call_id=tool_call["id"],
+                    tool_result_name=result["name"],
+                    new_content=new_content,
                 )
-                action_input_node.messages = newest_messages.copy()
+
+                action_input_node.messages = updated_messages
+                newest_messages = updated_messages.copy()
                 action_input_node.is_terminal = (
                     result["status"] in self.terminal_status
                 )
@@ -375,7 +388,58 @@ class ChainRollout:
             return (thought_node, have_set_resources, False)
         if action_input_node is not None and action_input_node.is_terminal:
             chain.info["finish_reason"] = "terminal"
+
         return (action_input_node, have_set_resources, True)
+
+    def apply_context_folding(
+        self,
+        chain: Chain,
+        messages: Messages,
+        tool_name: str,
+        observation: Any,
+        tool_call_id: str,
+        tool_result_name: str,
+        new_content: List[Dict[str, Any]],
+    ) -> Messages:
+        """
+        Apply context folding based on the tool that was just executed.
+
+        Args:
+            chain: The current Chain object (used to record full histories).
+            messages: The current full Messages object before applying the tool.
+            tool_name: Name of the tool that was executed.
+            observation: Tool observation returned by the tool.
+            tool_call_id: ID of the tool call.
+            tool_result_name: Name of the tool result (tool implementation name).
+            new_content: Content payload for the tool message.
+
+        Returns:
+            Updated Messages object after folding / appending the tool message.
+        """
+        tool_turn: Dict[str, Any] = {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_result_name,
+            "content": new_content,
+        }
+
+        # Currently we only support summarize; other tools are no-ops.
+        if tool_name == "summarize" and isinstance(observation, str):
+            # Before folding, append the full messages to the chain histories
+            # so training can still access the original, unfused trajectory.
+            chain.histories.append(messages.messages)
+
+            # Delegate folding policy to the tool module to get a folded view
+            # of the history up to this point, then append the tool message.
+            folded_turns = fold_messages_with_summarize(messages.messages, observation)
+            # folded_turns.append(tool_turn)
+            meta = messages.meta
+            return Messages.from_turns(folded_turns, **meta)
+
+        # Default behavior for non-folding tools: just append the tool message.
+        turns = messages.messages + [tool_turn]
+        meta = messages.meta
+        return Messages.from_turns(turns, **meta)
 
     def _normalize_full_response_content(self, content: Any) -> str:
         """Convert message content (str or list of content blocks) to a single string."""
@@ -434,7 +498,7 @@ class ChainRollout:
         return config
 
     async def _generate_response(
-        self, current_node, tools, depth, chain_id, generation_config, enable_streaming
+        self, chain, current_node, tools, depth, chain_id, generation_config, enable_streaming
     ) -> Tuple[Any, Optional[int]]:
         """Generate response with optional streaming support. Returns (message, total_token_length)."""
         effective_config = self._prepare_generation_config(
@@ -442,14 +506,14 @@ class ChainRollout:
         )
         if enable_streaming:
             return await self._generate_response_streaming(
-                current_node, tools, depth, chain_id, effective_config
+                chain=chain, current_node=current_node, tools=tools, depth=depth, chain_id=chain_id, generation_config=effective_config
             )
         return await self._generate_response_non_streaming(
-            current_node, tools, depth, chain_id, effective_config
+            chain=chain, current_node=current_node, tools=tools, depth=depth, chain_id=chain_id, generation_config=effective_config
         )
 
     async def _generate_response_streaming(
-        self, current_node, tools, depth, chain_id, generation_config
+        self, chain, current_node, tools, depth, chain_id, generation_config
     ):
         """Generate response with streaming: emit events and optionally stream from LLM."""
         await self.streaming_manager.emit_event(
@@ -497,7 +561,7 @@ class ChainRollout:
                 f"[ChainRollout._generate_response] full_response: {full_response}"
             )
             await self._emit_generation_end(chain_id, depth, full_response)
-            new_msg = self.parse([full_response])
+            new_msg = self.parse([full_response], [current_node.messages.messages])
             return (new_msg[0], None)
 
         # Fallback to non-streaming when streaming not available
@@ -511,7 +575,7 @@ class ChainRollout:
         response_texts = responses.get("response_texts") or responses.get(
             "reponse_texts"
         )
-        new_msg = self.parse(response_texts)
+        new_msg = self.parse(response_texts, [current_node.messages.messages])
         full_response = self._normalize_full_response_content(
             new_msg[0].get("content", "")
         )
@@ -545,7 +609,7 @@ class ChainRollout:
         )
 
     async def _generate_response_non_streaming(
-        self, current_node, tools, depth, chain_id, generation_config
+        self, chain, current_node, tools, depth, chain_id, generation_config
     ) -> Tuple[Any, Optional[int]]:
         """Generate response without streaming (no events). Returns (message, total_token_length)."""
         raw = await self.generate_async(
@@ -556,7 +620,7 @@ class ChainRollout:
         )
         responses = self._normalize_generate_response(raw)
         response_texts = responses.get("response_texts")
-        new_msg = self.parse(response_texts)
+        new_msg = self.parse(response_texts, [current_node.messages.messages])
         total_length = self._extract_total_length(responses)
         return (new_msg[0], total_length)
 
@@ -629,12 +693,19 @@ class ChainRollout:
         return result
 
     async def _finalize_chain(self, chain_id, chain, current_node, depth, context):
+
+        # Always record the final trajectory segment so that histories capture
+        chain.histories.append(current_node.messages.messages)
+
         """Finalize the chain with reward calculation and cleanup."""
         if self._reward_fn is not None:
-            trajectory = current_node.messages.messages
-            final_response = self.extract_final_response(trajectory)
+            # flatten the histories
+            full_trajectory = []
+            for segment in chain.histories:
+                full_trajectory.extend(segment)
+            final_response = self.extract_final_response(full_trajectory)
 
-            context.trajectory = trajectory
+            context.trajectory = full_trajectory
             context.final_response = final_response
             
             other_args = {
@@ -647,7 +718,7 @@ class ChainRollout:
             reward = self._reward_fn(
                 final_response=final_response,
                 **other_args,
-                trajectory=trajectory,
+                trajectory=chain.histories,
                 id=chain_id,
                 context=context,
             )
@@ -666,112 +737,151 @@ class ChainRollout:
         await context.end_resource(scope="rollout")
 
     def monitor_step(self) -> None:
-        messages = self.get_messages()
+        trajectories = self.get_trajectories()
         avg_turns = 0
         avg_tool_calls = 0
+        avg_segments = 0
         # avg_response_length = 0
         tool_calls_by_name = defaultdict(int)
 
-        for message in messages:
-            for msg in message["messages"]:
-                if msg["role"] == "assistant":
-                    avg_turns += 1
-                if msg["role"] == "tool":
-                    avg_tool_calls += 1
-                    tool_call_name = msg["tool_name"]
-                    tool_calls_by_name[tool_call_name] += 1
+        for trajectory in trajectories:
+            for segment in trajectory["trajectory_segments"]:
+                avg_segments += 1
+                for msg in segment:
+                    if msg["role"] == "assistant":
+                        avg_turns += 1
+                        if "tool_calls" in msg:
+                            for tool_call in msg["tool_calls"]:
+                                tool_call_name = tool_call["function"]["name"]
+                                if tool_call_name in ["summarize"]:
+                                    tool_calls_by_name["summarize"] += 1
 
-        avg_turns /= len(messages)
-        avg_tool_calls /= len(messages)
+                    if msg["role"] == "tool":
+                        avg_tool_calls += 1
+                        tool_call_name = msg["tool_name"]
+                        tool_calls_by_name[tool_call_name] += 1
+
+        avg_turns /= len(trajectories)
+        avg_tool_calls /= len(trajectories)
+        avg_segments /= len(trajectories)
 
         ent = MetricEvent(
             kind="scalar",
-            name="Agent/rollout/step",
+            name="agent/rollout/avg_segments",
+            value=avg_segments,
+            x=self.global_step,
+            x_name="agent/rollout/step",
+        )
+        emit(ent)
+
+        ent = MetricEvent(
+            kind="scalar",
+            name="agent/rollout/step",
             value=self.global_step,
             x=self.global_step,
-            x_name="Agent/rollout/step",
+            x_name="agent/rollout/step",
         )
         emit(ent)
 
         evt = MetricEvent(
             kind="scalar",
-            name="Agent/rollout/avg_turns",
+            name="agent/rollout/avg_turns",
             value=avg_turns,
             x=self.global_step,
-            x_name="Agent/rollout/step",
+            x_name="agent/rollout/step",
         )
         emit(evt)
 
         evt = MetricEvent(
             kind="scalar",
-            name="Agent/rollout/avg_tool_calls",
+            name="agent/rollout/avg_tool_calls",
             value=avg_tool_calls,
             x=self.global_step,
-            x_name="Agent/rollout/step",
+            x_name="agent/rollout/step",
         )
         emit(evt)
 
         for tool_name, tool_call_count in tool_calls_by_name.items():
             evt = MetricEvent(
                 kind="scalar",
-                name=f"Agent/rollout/tool_calls/{tool_name}",
-                value=tool_call_count,
+                name=f"agent/rollout/tool_calls/{tool_name}",
+                value=tool_call_count/len(trajectories),
                 x=self.global_step,
-                x_name="Agent/rollout/step",
+                x_name="agent/rollout/step",
             )
             emit(evt)
 
         evt = MetricEvent(
             kind="scalar",
-            name="Agent/rollout/step",
+            name="agent/rollout/step",
             value=self.global_step,
             x=self.global_step,
-            x_name="Agent/rollout/step",
+            x_name="agent/rollout/step",
         )
         emit(evt)
 
-        sample_message_json = json.dumps(
-            serialize_for_json(random.choice(messages)), indent=2
+        sample_trajectory_json = json.dumps(
+            serialize_for_json(random.choice(trajectories)), indent=2
         )
         evt = MetricEvent(
             kind="text",
-            name="Agent/rollout/sample_message",
-            value=sample_message_json,
+            name="agent/rollout/sample_trajectory",
+            value=sample_trajectory_json,
             x=self.global_step,
-            x_name="Agent/rollout/step",
+            x_name="agent/rollout/step",
         )
         emit(evt)
 
         for k, v in self.monitor_info.items():
-            if k != "Agent/chains":  # We don't log number of chains
+            if k != "agent/chains":  # We don't log number of chains
                 evt = MetricEvent(
                     kind="list",
                     name=k,
                     value=v,
-                    x=self.monitor_info["Agent/chains"],
+                    x=self.monitor_info["agent/chains"],
+                )
+                emit(evt)
+
+        reward_values, other_values = self.rewards
+        avg_reward = sum(reward_values) / len(reward_values)
+        evt = MetricEvent(
+            kind="scalar",
+            name="agent/rollout/reward",
+            value=avg_reward,
+            x=self.global_step,
+            x_name="agent/rollout/step",
+        )
+        emit(evt)
+        for key, value in other_values.items():
+            if isinstance(value[0], float) or isinstance(value[0], int):
+                avg_value = sum(value) / len(value)
+                evt = MetricEvent(
+                    kind="scalar",
+                    name=f"agent/rollout/{key}",
+                    value=avg_value,
                 )
                 emit(evt)
 
     def monitor_chain(self, trajectory, info) -> None:
-        self.monitor_info["Agent/chains"].append(self.finished_chains_count)
+        self.monitor_info["agent/chains"].append(self.finished_chains_count)
 
         # We only log the trajectory to local jsonl file, for wandb much bandwidth is needed
         evt = MetricEvent(
             sinks=["jsonl"],
             kind="text",
-            name="Agent/rollout/trajectory",
+            name="agent/rollout/trajectory",
             value=json.dumps(serialize_for_json(trajectory), indent=2),
             x=self.global_step,
-            x_name="Agent/rollout/step",
+            x_name="agent/rollout/step",
         )
         emit(evt)
 
         evt = MetricEvent(
             sinks=["jsonl"],
             kind="text",
-            name="Agent/rollout/info",
+            name="agent/rollout/info",
             value=json.dumps(serialize_for_json(info), indent=2),
             x=self.global_step,
-            x_name="Agent/rollout/step",
+            x_name="agent/rollout/step",
         )
         emit(evt)

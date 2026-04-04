@@ -397,60 +397,39 @@ class BaseAgent(ChainRollout, ABC):
     def timing_data(self):
         return self.timer.timing_data
 
+    def postprocess_trajectories(self, trajectories: List[Dict]) -> List[Dict]:
+        """
+        Preprocess the trajectories of the agent.
+        """
+        return trajectories
+
     @property
     def trajectories(self):
         """Get the trajectories of the agent."""
-        trajectories = self.get_messages()
+
+        trajectories = self.get_trajectories()
+        trajectories = self.postprocess_trajectories(trajectories)
         return trajectories
 
     def tokenize_trajectories(
         self,
+        messages_list,
         template=None,
         tokenizer=None,
+        processor=None,
         return_reward_mask: bool = False,
         concatenate_mm_inputs: bool = True,
         train_on_last_turn: bool = False,
-        world_size: int = 1,
     ):
-        if tokenizer is None:
-            tokenizer = self.tokenizer
 
-        trajectories = self.trajectories
-        messages_list = []
-        other_info_list = []
-        for trajectory in trajectories:
-            messages = trajectory["messages"]
-            messages_list.append(messages)
-            info = {}
-            for key, value in trajectory.items():
-                if key != "messages":
-                    info[key] = value
-
-            other_info_list.append(info)
-
-        repeated_nums = [1] * len(messages_list)
-        if train_on_last_turn:
-            # Split each trajectory into multiple message lists (one per assistant turn)
-            messages_list = [
-                split_messages_with_assistant(messages) for messages in messages_list
-            ]
-            repeated_nums = [len(messages) for messages in messages_list]
-            # Repeat other_info_list so each sub-conversation has aligned info
-            other_info_list = [
-                info
-                for i, info in enumerate(other_info_list)
-                for _ in range(repeated_nums[i])
-            ]
-            # Flatten messages_list to a single list of conversations
-            messages_list = [
-                messages for sub_list in messages_list for messages in sub_list
-            ]
+        # TODO: we will remove this argument in the future
+        train_on_last_turn = False
 
         inputs = tokenize_conversations(
             messages_list,
             tokenizer=tokenizer,
             template=template or self.template,
-            processor=self.processor,
+            processor=processor or self.processor,
             max_length=self.max_model_len,
             return_reward_mask=return_reward_mask,
             add_generation_prompt=True,
@@ -463,36 +442,36 @@ class BaseAgent(ChainRollout, ABC):
         )
         inputs["position_ids"] = position_ids
 
-        assert inputs["input_ids"].shape[0] == len(other_info_list)
-
-        if world_size > 1:
-            pad_size = (
-                world_size - inputs["input_ids"].shape[0] % world_size
-            ) % world_size
-            for k, v in inputs.items():
-                inputs[k] = pad_tensor_to_rank_size(v, world_size)
-            if pad_size > 0:
-                # Pad other_info_list with copies of the last element (matches last-row repeat in pad_tensor_to_rank_size)
-                other_info_list = other_info_list + [other_info_list[-1]] * pad_size
-                # Add pad_size to the last element of repeated_nums since padding repeats the last sample
-                repeated_nums = repeated_nums[:-1] + [repeated_nums[-1] + pad_size]
-
-        return inputs, other_info_list, repeated_nums
+        return inputs
 
     def extract_final_response(self, messages: List[Dict[str, Any]]) -> str:
-        last_message_content = messages[-1]["content"][0]["text"]
-        last_message_role = messages[-1]["role"]
-        # First try extracting the response if it is returned from a tool
-        if last_message_role == "assistant":
-            return last_message_content
-        elif last_message_role == "tool":
-            return last_message_content
-        else:
-            raise ValueError(
-                f"The last message role must be assistant or tool, but got {last_message_role}"
-            )
+        """
+        Extract the final response text from a trajectory.
 
-    def parse(self, responses: List[str]) -> List[Dict]:
+        We scan messages in reverse order and take the last assistant/tool
+        message as the final response.
+        """
+        for msg in reversed(messages):
+            last_message_role = msg.get("role")
+            if last_message_role not in ("assistant", "tool"):
+                continue
+            content = msg.get("content") or []
+            if (
+                isinstance(content, list)
+                and content
+                and isinstance(content[0], dict)
+                and content[0].get("type") == "text"
+            ):
+                return content[0].get("text", "")
+            # Fallback: stringify first content part if structure is unexpected
+            if isinstance(content, list) and content:
+                return str(content[0])
+
+        raise ValueError(
+            "No assistant or tool message found in trajectory when extracting final response."
+        )
+
+    def parse(self, responses: List[str], current_segments: List[List[Dict]]) -> List[Dict]:
         """
         This method is used to define the interaction logic of the agent. It can be used to parse the tool call from the response.
         If tool_parser is provided, it will use the vLLM tool parser by default. Otherwise, subclasses should override this method.
@@ -680,13 +659,9 @@ class BaseAgent(ChainRollout, ABC):
 
     @property
     def rewards(self):
-        messages_list = []
-        # answers = []
         reward_values = []
         other_values = defaultdict(list)
         for trajectory in self.trajectories:
-            messages = trajectory["messages"]
-            messages_list.append(messages)
             reward_value_or_dict = trajectory["reward"]
 
             if isinstance(reward_value_or_dict, dict):
@@ -729,17 +704,97 @@ class BaseAgent(ChainRollout, ABC):
             print(text)
 
     def get_verl_data_proto(
-        self, train_on_last_turn: bool = False, world_size: int = 1
+        self,
+        train_on_last_turn: bool = False,
+        world_size: int = 1,
+        reward_on_last_segment_only: bool = False,
     ):
-        inputs, other_info_list, repeated_nums = self.tokenize_trajectories(
+        trajectories = self.trajectories
+        segments_list = []
+        other_info_list = []
+        for batch_idx, trajectory in enumerate(trajectories):
+            trajectory_segments = trajectory["trajectory_segments"]
+            for segment_idx, segment in enumerate(trajectory_segments):
+                segments_list.append(segment)
+                info = {
+                    key: value for key, value in trajectory.items() if key != "trajectory_segments"
+                }
+                info["batch_idx"] = batch_idx
+                info["segment_idx"] = segment_idx
+                other_info_list.append(info)
+
+        inputs = self.tokenize_trajectories(
+            messages_list=segments_list,
+            tokenizer=self.tokenizer,
+            processor=self.processor,
             return_reward_mask=True,
             concatenate_mm_inputs=False,
-            world_size=world_size,
             train_on_last_turn=train_on_last_turn,
         )
 
+        reward_values, other_values = self.rewards
+
+        # Expand to segment level:
+        # - Default: trajectory i has n_i segments -> repeat reward i for all n_i segments.
+        # - If reward_on_last_segment_only=True: use 0.0 for first n_i-1 segments, reward i only on the last.
+        reward_on_last_segment_only = True
+        reward_values_segment: List[float] = []
+        for trajectory in trajectories:
+            n = len(trajectory["trajectory_segments"])
+            r = trajectory["reward"]
+            if isinstance(r, dict):
+                r = r["reward"]
+            if reward_on_last_segment_only:
+                if n <= 0:
+                    continue
+                reward_values_segment.extend([0.0] * (n - 1))
+                reward_values_segment.append(r)
+            else:
+                reward_values_segment.extend([r] * n)
+        num_trajectories = len(trajectories)
+        other_values_segment = {}
+        for key, values in other_values.items():
+            # When reward is scalar (not dict), that trajectory never appends to other_values[key],
+            # so values may be shorter than num_trajectories. Pad to match.
+            if len(values) < num_trajectories:
+                values = list(values) + [0.0] * (num_trajectories - len(values))
+            other_values_segment[key] = []
+            for traj_idx, trajectory in enumerate(trajectories):
+                n = len(trajectory["trajectory_segments"])
+                val = values[traj_idx]
+                other_values_segment[key].extend([val] * n)
+        reward_values = reward_values_segment
+        other_values = other_values_segment
+
+        # Number of segments per trajectory (one integer per trajectory).
+        repeat_times = [len(t["trajectory_segments"]) for t in trajectories]
+
+        if world_size > 1:
+            pad_size = (
+                world_size - inputs["input_ids"].shape[0] % world_size
+            ) % world_size
+            for k, v in inputs.items():
+                inputs[k] = pad_tensor_to_rank_size(v, world_size)
+            if pad_size > 0:
+                # Pad other_info_list with copies of the last element (matches last-row repeat in pad_tensor_to_rank_size)
+                other_info_list = other_info_list + [other_info_list[-1]] * pad_size
+                # Pad reward_values and other_values to match the padded inputs
+                reward_values = reward_values + [reward_values[-1]] * pad_size
+                other_values = {
+                    k: v + [v[-1]] * pad_size for k, v in other_values.items()
+                }
+                # Add pad_size to the last trajectory's segment count
+                repeat_times[-1] += pad_size
+
         group_ids_list = [info["group_id"] for info in other_info_list]
+        segment_index_list = [info["segment_idx"] for info in other_info_list]
+        batch_index_list = [info["batch_idx"] for info in other_info_list]
+        discarded_segment_list = [bool(info.get("discarded", False)) for info in other_info_list]
         group_ids = np.array(group_ids_list, dtype=object)
+        segment_index = np.array(segment_index_list, dtype=np.int32)
+        batch_index = np.array(batch_index_list, dtype=np.int32)
+
+
         batch_size = len(group_ids_list)
         unique_group_ids = []
         seen_group_ids = set()
@@ -747,23 +802,20 @@ class BaseAgent(ChainRollout, ABC):
             if group_id not in seen_group_ids:
                 unique_group_ids.append(group_id)
                 seen_group_ids.add(group_id)
-        # Do evaluation here
-        reward_values, other_values = self.rewards
-        # Truncate to len(repeated_nums) so expansion matches truncated batch (when world_size > 1)
-        n_segments = len(repeated_nums)
-        reward_values = [
-            reward_value
-            for i, reward_value in enumerate(reward_values[:n_segments])
-            for _ in range(repeated_nums[i])
-        ]
-        other_values = {
-            key: [
-                value
-                for i, value in enumerate(values[:n_segments])
-                for _ in range(repeated_nums[i])
-            ]
-            for key, values in other_values.items()
-        }
+
+        # For discarded trajectories, mask out all response tokens for every segment row.
+        if discarded_segment_list:
+            discarded_tensor = torch.tensor(
+                discarded_segment_list, dtype=torch.bool, device=inputs["attention_mask"].device
+            ).unsqueeze(dim=-1)
+            if "action_mask" in inputs:
+                inputs["action_mask"] = inputs["action_mask"] * (~discarded_tensor).to(
+                    dtype=inputs["action_mask"].dtype
+                )
+            if "reward_mask" in inputs:
+                inputs["reward_mask"] = inputs["reward_mask"] * (~discarded_tensor).to(
+                    dtype=inputs["reward_mask"].dtype
+                )
 
         inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(
             reward_values, dtype=torch.float32
@@ -792,14 +844,17 @@ class BaseAgent(ChainRollout, ABC):
                 else:
                     aligned_values = aligned_values[:batch_size]
             inputs[f"rm_{key}"] = np.array(aligned_values)
+        
         # We handle the group id in the agent side, to be compatible with GRPO
         inputs["uid"] = group_ids
-
+        inputs["segment_idx"] = segment_index
+        inputs["batch_idx"] = batch_index
+        
         if "mm_inputs" in inputs:
             mm_inputs = inputs.pop("mm_inputs")
             inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
         batch = DataProto.from_single_dict(
-            inputs, meta_info={"use_agent": True, "repeated_nums": repeated_nums}
+            inputs, meta_info={"use_agent": True, "repeat_times": repeat_times}
         )
 
         return batch

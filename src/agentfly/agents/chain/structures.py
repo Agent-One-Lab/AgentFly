@@ -78,6 +78,7 @@ class Chain:
     def __init__(self, info: Dict[str, Any]):
         self.root: Optional[Node] = None
         self.info: Dict[str, Any] = info
+        self.histories: List[List[Dict[str, Any]]] = []
 
     def add_node(
         self,
