@@ -23,9 +23,9 @@ async def test_context_resource():
 
     cmd = "echo 'print(\"hello, world!\")' > test_add_urls.py"
     result = await container.run_cmd(cmd)
+    print(result)
     cmd = "sed -i 's/addurls\\\\.extract(/addurls.extract(input_type=\\\\'list\\\\', /' test_add_urls.py"
     result = await container.run_cmd(cmd)
-
     print(result)
 
     result = await container.run_cmd("cat test_add_urls.py")

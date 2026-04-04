@@ -59,12 +59,12 @@ sleep 10
 
 model=Qwen/Qwen3-32B
 lr=4e-7
-max_model_len=32768
+max_model_len=40960
 max_new_tokens_per_turn=4096
 val_batch_size=512
-train_batch_size=32
+train_batch_size=16
 num_chains=8
-max_concurrent_chains=64
+max_concurrent_chains=48
 mini_batch_size=$((train_batch_size * num_chains))
 kl_coef=0.001
 train_dataset="./data/rlhf/os/r2e-gym-lite.json"
@@ -146,7 +146,9 @@ python -m agentfly.cli train \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=${worker_num} \
-    trainer.save_freq=25 \
+    trainer.save_freq=20 \
     trainer.test_freq=${total_training_steps} \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=False
+
+sleep 100h

@@ -4,12 +4,31 @@ Same pattern as file tools (context.metadata['image_id'], acquire_resource, run_
 """
 
 import asyncio
+import logging
+
+from enroot.errors import (
+    MemGuardError,
+    MemoryError as EnrootMemoryError,
+    TimeoutError as EnrootTimeoutError,
+)
+from ray.exceptions import RayTaskError
 
 from ....core import Context
 from ....resources import ResourceSpec
 from ...decorator import tool
 
 WORKSPACE_DIR = "/testbed"
+
+logger = logging.getLogger(__name__)
+
+
+def _log_enroot_memory(cmd: str, inner: BaseException) -> None:
+    logger.error(
+        "enroot memory error (%s): %s; command=%r",
+        type(inner).__name__,
+        inner,
+        cmd,
+    )
 
 
 def _ensure_str(output) -> str:
@@ -28,9 +47,8 @@ async def _run_shell(context: Context, cmd: str) -> str:
         cmd: The shell command to run.
         timeout: Timeout in seconds for the shell command inside the container.
     Returns:
-        The output of the shell command.
-    Raises:
-        asyncio.TimeoutError: If the command timed out.
+        The output of the shell command, or a short error string for timeout / enroot memory limits.
+    Other ``run_cmd`` failures propagate unchanged.
     """
     image_id = context.metadata.get("image_id")
     if not image_id:
@@ -70,10 +88,16 @@ async def _run_shell(context: Context, cmd: str) -> str:
             cmd,
             timeout=120,
             workdir=WORKSPACE_DIR,
-            mem_limit="1g"
+            mem_limit="4g",
+            mem_guard_limit="4g",
         )
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, EnrootTimeoutError):
         return "Error: Command timed out."
+    except (EnrootMemoryError, MemGuardError) as e:
+        _log_enroot_memory(cmd, e)
+        return "Error: Command exceeded memory limit."
+    except Exception as e:
+        raise e
     return _ensure_str(raw)
 
 
