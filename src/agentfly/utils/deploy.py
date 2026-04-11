@@ -6,7 +6,7 @@ from chat_bricks import get_template
 from .. import AGENT_DATA_DIR
 
 
-def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization):
+def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization, tool_call_parser):
     port = 8000
 
     if template is None:
@@ -26,7 +26,7 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization)
 --pipeline-parallel-size {pp} \
 --data-parallel-size {dp} --port {port} \
 --gpu-memory-utilization {gpu_memory_utilization} \
---enable-auto-tool-choice --tool-call-parser hermes"""
+--enable-auto-tool-choice --tool-call-parser {tool_call_parser}"""
 
     print(command)
     os.system(command)
@@ -39,8 +39,9 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization)
 @click.option("--pp", type=int, default=1)
 @click.option("--dp", type=int, default=1)
 @click.option("--gpu_memory_utilization", type=float, default=0.8)
-def main(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization):
-    vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization)
+@click.option("--tool_call_parser", type=str, default="hermes")
+def main(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization, tool_call_parser):
+    vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization, tool_call_parser)
 
 
 if __name__ == "__main__":

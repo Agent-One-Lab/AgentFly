@@ -13,23 +13,22 @@ Callers must run it in asyncio.to_thread() (or a process pool) to avoid blocking
 
 import json
 
-from swebench.harness.constants import (
-    KEY_INSTANCE_ID,
-    KEY_MODEL,
-    KEY_PREDICTION,
-    LOG_REPORT,
-    LOG_TEST_OUTPUT,
-    RUN_EVALUATION_LOG_DIR,
-)
-from swebench.harness.docker_build import close_logger
-from swesmith.constants import KEY_TIMED_OUT
-from swesmith.harness.grading import get_eval_report
-from swesmith.harness.utils import run_patch_in_container
-from swesmith.profiles import registry
-
 
 def _patch_run_evaluation():
+    from swebench.harness.constants import (
+        KEY_INSTANCE_ID,
+        KEY_MODEL,
+        KEY_PREDICTION,
+        LOG_REPORT,
+        LOG_TEST_OUTPUT,
+        RUN_EVALUATION_LOG_DIR,
+    )
+    from swebench.harness.docker_build import close_logger
+    from swesmith.constants import KEY_TIMED_OUT
     from swesmith.harness import eval as eval_mod
+    from swesmith.harness.grading import get_eval_report
+    from swesmith.harness.utils import run_patch_in_container
+    from swesmith.profiles import registry
 
     _original = eval_mod.run_evaluation
 

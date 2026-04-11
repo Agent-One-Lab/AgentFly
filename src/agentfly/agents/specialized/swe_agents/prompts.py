@@ -51,6 +51,10 @@ This workflows should be done step-by-step so that you can iterate on your chang
 3. Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
     However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
 
+<system_information>
+System: Linux
+Working Directory: /testbed/
+</system_information>
 
 ## Formatting your response
 

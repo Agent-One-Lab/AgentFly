@@ -4,10 +4,11 @@ import contextlib
 os.environ["ENROOT_IMAGES_PATH"] = "/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images/r2e-gym-lite"
 os.environ["ENROOT_ASYNC"] = "1"
 import enroot
-from agentfly.rewards.swe_rewards.r2e_gym.eval import reward_from_container, setup_container_for_reward
-
-
-
+from agentfly.rewards.swe_rewards.r2e_gym.eval import (
+    reward_from_container,
+    setup_container_for_reward,
+    _ensure_r2e_tests_in_testbed,
+)
 
 
 SAMPLE = {
@@ -106,3 +107,83 @@ def test_eval_r2e_gym():
     print("Reward:", reward)
 
     container.kill()
+
+
+def test_r2e_tests_symlink_is_not_recursive():
+    """
+    Regression test for r2e pytest collection blow-ups caused by recursive
+    nesting like r2e_tests/r2e_tests/.../test_*.py.
+    """
+    client = enroot.from_env()
+    container = client.containers.create(
+        image=SAMPLE["docker_image"]
+    )
+    container.start()
+    try:
+        def _check_paths(label: str) -> str:
+            res = container.exec_run(
+                cmd=[
+                    "/bin/sh",
+                    "-c",
+                    "set -eu; "
+                    f'echo "== {label} =="; '
+                    'echo "[/testbed] /testbed => $(ls -ld /testbed 2>/dev/null || true)"; '
+                    'echo "[/testbed] /testbed/r2e_tests => $(ls -ld /testbed/r2e_tests 2>/dev/null || true)"; '
+                    'echo "[/testbed] nested => $(test -e /testbed/r2e_tests/r2e_tests && echo YES || echo NO)"; '
+                    'echo "[/root] /root => $(ls -ld /root 2>/dev/null || true)"; '
+                    'echo "[/root] /root/r2e_tests => $(ls -ld /root/r2e_tests 2>/dev/null || true)"; '
+                    'echo "[/root] nested => $(test -e /root/r2e_tests/r2e_tests && echo YES || echo NO)"; '
+                    'echo "[/r2e_tests] /r2e_tests => $(ls -ld /r2e_tests 2>/dev/null || true)"; '
+                    'echo "[/r2e_tests] nested => $(test -e /r2e_tests/r2e_tests && echo YES || echo NO)"; '
+                ],
+                workdir="/",
+                stdout=True,
+                stderr=True,
+            )
+            return res.output.decode("utf-8", errors="replace") if getattr(res, "output", None) else ""
+
+        before = _check_paths("BEFORE setup")
+
+        # Apply setup more than once to catch idempotency issues / accumulation.
+        setup_container_for_reward(container, dataset="r2e")
+        after1 = _check_paths("AFTER setup x1")
+
+        setup_container_for_reward(container, dataset="r2e")
+        after2 = _check_paths("AFTER setup x2")
+
+        # The real reward flow also ensures /testbed/r2e_tests right before running
+        # the test command. Check that phase too.
+        _ensure_r2e_tests_in_testbed(container, timeout=60)
+        after_ensure = _check_paths("AFTER ensure")
+
+        # Regression assertions: we should not have nested r2e_tests under any of the
+        # potential roots. Recursive pytest collection typically indicates one of:
+        #   /testbed/r2e_tests/r2e_tests
+        #   /root/r2e_tests/r2e_tests
+        #   /r2e_tests/r2e_tests
+        assert "[/testbed] nested => NO" in after1, (
+            "Expected /testbed/r2e_tests/r2e_tests to NOT exist after setup.\n"
+            f"{before}\n{after1}\n{after2}"
+        )
+        assert "[/root] nested => NO" in after1, (
+            "Expected /root/r2e_tests/r2e_tests to NOT exist after setup.\n"
+            f"{before}\n{after1}\n{after2}"
+        )
+        assert "[/r2e_tests] nested => NO" in after1, (
+            "Expected /r2e_tests/r2e_tests to NOT exist after setup.\n"
+            f"{before}\n{after1}\n{after2}"
+        )
+        assert "[/testbed] nested => NO" in after_ensure, (
+            "Expected /testbed/r2e_tests/r2e_tests to NOT exist after ensure.\n"
+            f"{before}\n{after1}\n{after2}\n{after_ensure}"
+        )
+        assert "[/root] nested => NO" in after_ensure, (
+            "Expected /root/r2e_tests/r2e_tests to NOT exist after ensure.\n"
+            f"{before}\n{after1}\n{after2}\n{after_ensure}"
+        )
+        assert "[/r2e_tests] nested => NO" in after_ensure, (
+            "Expected /r2e_tests/r2e_tests to NOT exist after ensure.\n"
+            f"{before}\n{after1}\n{after2}\n{after_ensure}"
+        )
+    finally:
+        container.kill()

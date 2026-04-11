@@ -42,7 +42,12 @@ async def _run_shell(context: Context, cmd: str) -> str:
     )
     is_acquired = context.is_spec_acquired(spec)
 
-    container = await context.acquire_resource(id=rollout_id, spec=spec)
+    container = await context.acquire_resource(
+        id=rollout_id,
+        spec=spec,
+        backend=context.resource_backend,
+        timeout=1200,
+    )
 
     if not is_acquired:
         # Used for swe-smith, we need to checkout the specific commit first.
@@ -58,8 +63,15 @@ async def _run_shell(context: Context, cmd: str) -> str:
                 timeout=git_timeout,
                 workdir=WORKSPACE_DIR,
             )
+
+    # We limit the memory to 1g for the shell command to avoid the container being killed by the system.
     try:
-        raw = await container.run_cmd(cmd, timeout=300, workdir=WORKSPACE_DIR)
+        raw = await container.run_cmd(
+            cmd,
+            timeout=120,
+            workdir=WORKSPACE_DIR,
+            mem_limit="1g"
+        )
     except asyncio.TimeoutError:
         return "Error: Command timed out."
     return _ensure_str(raw)

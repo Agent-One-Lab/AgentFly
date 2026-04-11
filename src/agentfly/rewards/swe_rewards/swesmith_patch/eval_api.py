@@ -4,9 +4,6 @@ Evaluate a single sample (dataset instance) and return the result.
 Use this after importing swesmith_enroot so evaluation runs with Enroot.
 """
 from typing import Any
-from swebench.harness.constants import KEY_INSTANCE_ID, KEY_MODEL, KEY_PREDICTION
-from swesmith.constants import KEY_PATCH
-from swesmith.harness.eval import run_evaluation
 
 
 def evaluate_swesmith(
@@ -35,6 +32,9 @@ def evaluate_swesmith(
             - "status": "timeout" | "error" | "completed"
             - "resolved": bool (True iff the instance was resolved)
     """
+    from swebench.harness.constants import KEY_INSTANCE_ID, KEY_MODEL, KEY_PREDICTION
+    from swesmith.harness.eval import run_evaluation
+
     patch_to_use = patch
     # patch_to_use = sample.get(KEY_PATCH)
     instance_id = sample[KEY_INSTANCE_ID]

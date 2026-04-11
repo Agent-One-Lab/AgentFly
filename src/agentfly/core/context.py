@@ -6,9 +6,24 @@ for tools and rewards that need to run in containers or access shared resources.
 """
 
 from __future__ import annotations
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple
-from ..resources import ResourceEngine
+
+from typing import Any, Dict, List, Literal, Optional, Set
+
 from ..resources.types import BaseResource, ResourceSpec
+
+from .context_config import ContextConfig, resolve_resource_backend
+
+
+def _coerce_context_config(raw: Optional[Any]) -> ContextConfig:
+    """Normalize ``context_config`` to :class:`ContextConfig` using dict-like ``.get()``."""
+    if raw is None:
+        return ContextConfig()
+    if isinstance(raw, ContextConfig):
+        return raw
+    resource_backend = raw.get("resource_backend") or "local"
+    return ContextConfig(
+        resource_backend=str(resource_backend).strip() or "local",
+    )
 
 
 def _spec_key(spec: ResourceSpec) -> str:
@@ -19,13 +34,6 @@ def _spec_key(spec: ResourceSpec) -> str:
 class Context:
     """
     Execution context for tools and rewards in agentic RL rollouts.
-
-    Provides access to:
-    - Rollout metadata (rollout_id, group_id, metadata)
-    - Resource engine for acquiring containers and other resources
-
-    The Context is automatically injected into tools and rewards that request it via
-    type hints (e.g., `context: Context`).
     """
 
     def __init__(
@@ -33,59 +41,59 @@ class Context:
         rollout_id: str,
         group_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        context_config: Optional[ContextConfig | Any] = None,
     ):
         """
-        Initialize a Context instance. All data here is rollout tied context
-
         Args:
             rollout_id: Unique identifier for this rollout/chain execution
             group_id: Optional group identifier for grouping related rollouts
             metadata: Optional dictionary containing additional metadata (e.g., image_id)
+            context_config: :class:`ContextConfig`, or a mapping / object with the same fields
+                (e.g. Hydra ``agent.run_config.context_config``).
         """
         self.rollout_id = rollout_id
         self.group_id = group_id
         self.final_response: str = None
         self.trajectory: List[Dict[str, Any]] = []
         self.metadata = metadata or {}
-        self.resource_engine = ResourceEngine
+        self.context_config: ContextConfig = _coerce_context_config(context_config)
         self.rollout_resource_ids: List[str] = []
         self.global_resource_ids: Set[str] = set()
-        # Spec keys acquired this rollout (set by acquire_resource). Tools can use
-        # last_acquire_was_first to decide whether to reset (e.g. first acquisition of that spec).
         self._resource_acquired: Set[str] = set()
-        # Set by acquire_resource: True if this spec was not in _resource_acquired before.
         self.last_acquire_was_first: bool = False
+
+    @property
+    def resource_engine(self):
+        """Lazily import ResourceEngine so importing Context does not require enroot."""
+        from ..resources import ResourceEngine
+
+        return ResourceEngine
+
+    @property
+    def resource_backend(self) -> str:
+        """Backend name for ``ResourceEngine.acquire`` (``ContextConfig`` then metadata)."""
+        return resolve_resource_backend(self.metadata, self.context_config)
 
     def is_spec_acquired(self, spec: ResourceSpec) -> bool:
         """Return True if a resource for this spec has been acquired this rollout."""
         return _spec_key(spec) in self._resource_acquired
 
     async def monitor_resources(self) -> Dict[str, Dict[str, int]]:
-        """
-        Monitor the resources in the context.
-        """
+        """Monitor the resources in the context."""
         return await self.resource_engine.monitor()
 
     async def acquire_resource(
         self,
         id: Optional[str] = None,
-        spec: Optional["ResourceSpec"] = None,
+        spec: Optional[ResourceSpec] = None,
         scope: Literal["rollout", "global"] = "rollout",
-        backend: str = "local",
-    ) -> "BaseResource":
-        """
-        Acquire a resource (e.g., container).
+        backend: Optional[str] = None,
+        timeout: Optional[float] = 600.0,
+    ) -> BaseResource:
+        if backend is None:
+            backend = self.resource_backend
 
-        Args:
-            id: Resource id. For rollout and global scope defaults to rollout_id.
-            spec: ResourceSpec (constructed from metadata image_id if not provided).
-            scope: "rollout" = released when rollout ends; "global" = shared, reused.
-            backend: Backend name (default "local").
-
-        Returns:
-            BaseResource: The acquired resource instance.
-        """
-        # Construct spec if not provided
         if spec is None:
             image_id = self.metadata.get("image_id")
             if image_id is None:
@@ -110,8 +118,10 @@ class Context:
             id=resource_id,
             spec=spec,
             backend=backend,
+            timeout=timeout,
         )
         self._resource_acquired.add(spec_key)
+
         return resource
 
     async def reset_resource(
@@ -120,15 +130,6 @@ class Context:
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """
-        Reset state for all resources in the given scope.
-
-        Args:
-            scope: "rollout" = reset resources acquired for this rollout;
-                   "global" = reset resources in the shared global set.
-            *args: Passed to ResourceEngine.reset(id, *args, **kwargs).
-            **kwargs: Passed to ResourceEngine.reset(id, *args, **kwargs).
-        """
         if scope == "rollout":
             ids = list(self.rollout_resource_ids)
         elif scope == "global":
@@ -140,15 +141,12 @@ class Context:
             try:
                 await self.resource_engine.reset(resource_id, *args, **kwargs)
             except ValueError:
-                pass  # Resource not acquired (e.g. already released)
+                pass
 
     async def release_resource(
         self,
         scope: Literal["rollout", "global"] = "rollout",
     ) -> None:
-        """
-        Release resources back to the pool for the given scope.
-        """
         if scope == "rollout":
             ids = list(self.rollout_resource_ids)
             for resource_id in ids:
@@ -166,9 +164,6 @@ class Context:
         self,
         scope: Literal["rollout", "global"] = "rollout",
     ) -> None:
-        """
-        End/kill resources for the given scope (removed from engine, not returned to pool).
-        """
         if scope == "rollout":
             ids = list(self.rollout_resource_ids)
             for resource_id in ids:

@@ -2,20 +2,98 @@
 Runners (backends) for the resource engine.
 
 Each runner knows how to start, monitor, control, and end a resource
-on a specific infrastructure (local, Slurm, AWS, K8s).
+on a specific infrastructure (local, Ray, AWS, K8s).
 """
 
 from __future__ import annotations
 
 import abc
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional
 import asyncio
+import logging
 from enroot import from_env, random_name
-from .container_resource import ContainerResource
+from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
+from .containers import ContainerResource, create_ray_container_resource
 from .types import BaseResource, ResourceSpec, ResourceStatus
 
-if TYPE_CHECKING:
-    from .call_interface import CallInterface
+logger = logging.getLogger(__name__)
+
+
+async def _start_enroot_container(
+    client: Any,
+    spec: ResourceSpec,
+    resource_id: Optional[str],
+    timeout: Optional[float] = 1800.0,
+    *,
+    containers_registry: Dict[str, Any],
+    runner_label: str = "EnrootRunner",
+) -> BaseResource:
+    """Create + start an enroot container on the local enroot client (this machine)."""
+    name = resource_id or random_name(prefix="res")
+    image = spec.image or "ubuntu:22.04"
+    create_kwargs: Dict[str, Any] = {
+        "name": name,
+        "environment": spec.environment or {},
+        "mount": spec.mount or {},
+        "ports": spec.ports,
+        "timeout": timeout,
+    }
+
+    start_kwargs: Dict[str, Any] = {
+        "timeout": timeout,
+        "environment": spec.environment or {},
+        "mount": spec.mount or {},
+    }
+
+    logger.debug(f"[{runner_label}]: creating container image={image} kwargs: {create_kwargs}")
+    try:
+        if hasattr(client.containers, "create_async"):
+            container = await client.containers.create_async(image, **create_kwargs)
+        else:
+            container = await asyncio.to_thread(
+                client.containers.create,
+                image,
+                **create_kwargs,
+            )
+        logger.debug(f"[{runner_label}]: starting container name={name} kwargs: {start_kwargs}")
+        if hasattr(container, "start_async"):
+            await container.start_async(**start_kwargs)
+        else:
+            await asyncio.to_thread(container.start, **start_kwargs)
+    except (asyncio.TimeoutError, TimeoutError, EnrootTimeoutError) as e:
+        raise asyncio.TimeoutError(
+            f"Container create/start timed out for image={image!r}, name={name!r}, timeout={timeout!r}."
+        ) from e
+    except APIError as e:
+        raise RuntimeError(
+            f"Container create/start failed for image={image!r}, name={name!r}: {e}"
+        ) from e
+    except EnrootError as e:
+        raise RuntimeError(
+            f"Container create/start failed for image={image!r}, name={name!r}: {e}"
+        ) from e
+
+    containers_registry[container.name] = container
+
+    if spec.category == "python_env":
+        from ..envs.python_env import PythonSandboxEnv
+        resource = PythonSandboxEnv(container=container, resource_id=container.name, spec=spec)
+    elif spec.category == "scienceworld":
+        from ..envs.scienceworld_env import ScienceWorldEnv
+        resource = ScienceWorldEnv(container=container, resource_id=container.name, spec=spec)
+    elif spec.category == "alfworld":
+        from ..envs.alfworld_env import ALFWorldEnv
+        resource = ALFWorldEnv(container=container, resource_id=container.name, spec=spec)
+    elif spec.category == "webshop":
+        from ..envs.webshop_text_env import WebAgentTextEnv
+        resource = WebAgentTextEnv(container=container, resource_id=container.name, spec=spec)
+    elif spec.category == "container":
+        resource = ContainerResource(container=container, resource_id=container.name, spec=spec)
+    else:
+        raise ValueError(f"Unsupported container resource category: {spec.category}")
+
+    await resource.start()
+    return resource
 
 
 class BaseRunner(abc.ABC):
@@ -26,14 +104,22 @@ class BaseRunner(abc.ABC):
     @property
     @abc.abstractmethod
     def name(self) -> str:
-        """Runner identifier (e.g. 'local', 'slurm', 'aws', 'k8s')."""
+        """Runner identifier (e.g. 'local', 'ray', 'aws', 'k8s')."""
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def start_resource(self, spec: ResourceSpec) -> BaseResource:
+    async def start_resource(
+        self,
+        spec: ResourceSpec,
+        resource_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
         """
         Start a single resource according to spec.
         Called by ResourceEngine when scaling up or on first acquire.
+
+        ``resource_id`` is set on acquire paths when the engine has a stable id
+        (e.g. rollout id) for naming the resource.
         """
         raise NotImplementedError
 
@@ -46,13 +132,6 @@ class BaseRunner(abc.ABC):
     async def get_status(self, resource: BaseResource) -> ResourceStatus:
         """Return current execution/lifecycle status of the resource."""
         raise NotImplementedError
-
-    def get_call_interface(self, kind: str) -> Optional["CallInterface"]:
-        """
-        Return the call interface (MCP or input-text) for this runner and resource kind.
-        Override in subclasses to return MCPToolCall or InputTextCall implementation.
-        """
-        return None
 
 
 class LocalRunner(BaseRunner):
@@ -76,56 +155,40 @@ class LocalRunner(BaseRunner):
     def name(self) -> str:
         return "local"
 
-    async def start_resource(self, spec: ResourceSpec, resource_id: Optional[str] = None) -> BaseResource:
+    async def start_resource(
+        self,
+        spec: ResourceSpec,
+        resource_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
         if spec.category in self.container_resources_categories:
-            return await self._start_container(spec, resource_id)
+            return await self._start_container(spec, resource_id, timeout=timeout)
         if spec.category == "vllm":
-            return await self._start_vllm(spec, resource_id)
+            return await self._start_vllm(spec, resource_id, timeout=timeout)
         raise ValueError(f"LocalRunner does not support resource category: {spec.category}")
 
-    async def _start_container(self, spec: ResourceSpec, resource_id: Optional[str]) -> BaseResource:
-        """Start a container using the enroot client.
-        All container-based resource default to use enroot to start locally for now. So we directly
-        call their start method for local running.
-        """
-        name = resource_id or random_name(prefix="res")
-        image = spec.image or "ubuntu:22.04"
-        kwargs = {
-            "name": name,
-            "detach": True,
-            "remove": False,
-            "timeout": 180,
-            "environment": spec.environment or {},
-            "mount": spec.mount or {},
-        }
-        if spec.ports:
-            kwargs["ports"] = spec.ports
+    async def _start_container(
+        self,
+        spec: ResourceSpec,
+        resource_id: Optional[str],
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
+        """Start a container using the enroot client (local placement)."""
+        return await _start_enroot_container(
+            self.client,
+            spec,
+            resource_id,
+            timeout,
+            containers_registry=self._containers,
+            runner_label="LocalRunner",
+        )
 
-        print(f"[LocalRunner]: starting kwargs: {kwargs}")
-        container = await asyncio.to_thread(self.client.containers.run, image, **kwargs)
-        self._containers[container.name] = container
-
-        if spec.category == "python_env":
-            from ..envs.python_env import PythonSandboxEnv
-            resource = PythonSandboxEnv(container=container, resource_id=container.name, spec=spec)
-        elif spec.category == "scienceworld":
-            from ..envs.scienceworld_env import ScienceWorldEnv
-            resource = ScienceWorldEnv(container=container, resource_id=container.name, spec=spec)
-        elif spec.category == "alfworld":
-            from ..envs.alfworld_env import ALFWorldEnv
-            resource = ALFWorldEnv(container=container, resource_id=container.name, spec=spec)
-        elif spec.category == "webshop":
-            from ..envs.webshop_text_env import WebAgentTextEnv
-            resource = WebAgentTextEnv(container=container, resource_id=container.name, spec=spec)
-        elif spec.category == "container":
-            resource = ContainerResource(container=container, resource_id=container.name, spec=spec)
-        else:
-            raise ValueError(f"LocalRunner does not support resource category: {spec.category}")
-
-        await resource.start()
-        return resource
-
-    async def _start_vllm(self, spec: ResourceSpec, resource_id: Optional[str]) -> BaseResource:
+    async def _start_vllm(
+        self,
+        spec: ResourceSpec,
+        resource_id: Optional[str],
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
         # TODO: vLLM local process or subprocess; return VLLMResource
         raise NotImplementedError("LocalRunner VLLM not implemented.")
 
@@ -137,21 +200,50 @@ class LocalRunner(BaseRunner):
         return await resource.get_status()
 
 
-class SlurmRunner(BaseRunner):
-    """Run resources via Slurm (sbatch/srun). Containers in job; vLLM in job."""
+class RayRunner(BaseRunner):
+    """
+    Start containers as :class:`~agentfly.resources.containers.ray_container_resource.RayContainerResource`.
+
+    Requires ``ray.init(...)`` in this process (or ``RAY_ADDRESS`` + init). Pass
+    ``spec.extra['ray_actor_options']`` (e.g. ``scheduling_strategy``) to control
+    which Ray worker runs the enroot-backed actor.
+    """
+
+    def __init__(self) -> None:
+        self._resources: Dict[str, BaseResource] = {}
 
     @property
     def name(self) -> str:
-        return "slurm"
+        return "ray"
 
-    async def start_resource(self, spec: ResourceSpec, resource_id: Optional[str] = None) -> BaseResource:
-        raise NotImplementedError("SlurmRunner is a stub")
+    async def start_resource(
+        self,
+        spec: ResourceSpec,
+        resource_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
+        if spec.category != "container":
+            raise ValueError(f"RayRunner currently supports only container, got: {spec.category}")
+        rid = resource_id or random_name(prefix="ray_res")
+        extra = spec.extra or {}
+        ray_opts = extra.get("ray_actor_options")
+        opts: Optional[dict[str, Any]] = dict(ray_opts) if isinstance(ray_opts, dict) else None
+        start_timeout = timeout if timeout is not None else 1800.0
+        resource = await create_ray_container_resource(
+            spec,
+            rid,
+            start_timeout=start_timeout,
+            ray_actor_options=opts,
+        )
+        self._resources[resource.resource_id] = resource
+        return resource
 
     async def end_resource(self, resource: BaseResource) -> None:
-        raise NotImplementedError("SlurmRunner is a stub")
+        await resource.end()
+        self._resources.pop(resource.resource_id, None)
 
     async def get_status(self, resource: BaseResource) -> ResourceStatus:
-        raise NotImplementedError("SlurmRunner is a stub")
+        return await resource.get_status()
 
 
 class CloudRunner(BaseRunner):
@@ -161,7 +253,12 @@ class CloudRunner(BaseRunner):
     def name(self) -> str:
         return "cloud"
 
-    async def start_resource(self, spec: ResourceSpec, resource_id: Optional[str] = None) -> BaseResource:
+    async def start_resource(
+        self,
+        spec: ResourceSpec,
+        resource_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
         raise NotImplementedError("CloudRunner is a stub")
 
     async def end_resource(self, resource: BaseResource) -> None:
@@ -178,7 +275,12 @@ class K8sRunner(BaseRunner):
     def name(self) -> str:
         return "k8s"
 
-    async def start_resource(self, spec: ResourceSpec, resource_id: Optional[str] = None) -> BaseResource:
+    async def start_resource(
+        self,
+        spec: ResourceSpec,
+        resource_id: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
         raise NotImplementedError("K8sRunner is a stub")
 
     async def end_resource(self, resource: BaseResource) -> None:

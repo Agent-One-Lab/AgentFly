@@ -10,18 +10,14 @@ The Code Environment provides a secure Python sandbox execution environment usin
       show_inheritance: true
       show_source: true
 
-## Configuration Parameters
+## ResourceSpec configuration
 
-The PythonSandboxEnv supports the following configuration options:
+In AgentFly, `PythonSandboxEnv` is created and started by `ResourceEngine` runners using a `ResourceSpec`.
 
-* **image** (str): Docker image to use (default: ``reasonwang/python-http-env:latest``)
-* **runtime** (str): Container runtime (default: ``runc``)
-* **cpu** (int): CPU limit in cores (default: ``2``)
-* **mem** (str): Memory limit (default: ``2g``)
-* **start_timeout** (float): Timeout for container startup in seconds (default: ``60.0``)
-* **max_episodes** (int): Maximum number of episodes per container (default: ``100``)
-* **host_ip** (str): Host IP for binding (default: ``127.0.0.1``)
-* **container_port** (int): Container port for HTTP server (default: ``8000``)
+Most users should not instantiate `PythonSandboxEnv` directly. Instead, acquire it via:
+
+- `Context.acquire_resource(spec=PythonSandboxSpec, scope=..., backend=...)`
+- tools/rewards during rollouts (recommended)
 
 ## Security Features
 
@@ -37,40 +33,32 @@ The environment implements multiple security layers:
 
 ## Usage Examples
 
-### Basic usage with direct instantiation:
+### Usage via Context
 
 ```python
-from agentfly.envs.python_env import PythonSandboxEnv
+from agentfly.core import Context
+from agentfly.envs.python_env import PythonSandboxSpec
 
-# Create environment with custom settings
-env = PythonSandboxEnv(
-    cpu=1,
-    mem="1g",
-    start_timeout=30.0
+# Acquire the sandbox
+env = await context.acquire_resource(
+    spec=PythonSandboxSpec,
+    scope="rollout",
+    backend="local",
 )
 
-# Start the container
-await env.start()
+# env is already started when acquired from ResourceEngine
 
 # Execute code
 result = await env.step("import math; print(math.pi)")
 # Output: 3.141592653589793
 
-# Clean up
-await env.aclose()
+# Cleanup
+await context.end_resource(scope="rollout")
 ```
 
-### Using the factory method for pool management:
+### Pooling and reuse
 
-```python
-# Use factory method for environment pools
-env = await PythonSandboxEnv.acquire()
-
-# Environment is pre-started and reset
-result = await env.step("print('Ready to use!')")
-
-await env.aclose()
-```
+AgentFly handles pooling/reuse via `ResourceEngine`. Sandboxes are acquired via `Context.acquire_resource(spec=PythonSandboxSpec, ...)`, and the maximum number of concurrently existing sandboxes is controlled by `PythonSandboxSpec.max_global_num`.
 
 ## Error Handling and Recovery
 

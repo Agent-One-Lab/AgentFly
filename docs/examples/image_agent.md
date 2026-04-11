@@ -67,7 +67,6 @@ from agentfly.agents.llm_backends import AsyncVLLMConfig
 agent = ImageEditingAgent(
     model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
     template="qwen2.5-vl-system-tool",
-    backend="async_vllm",
     backend_config=AsyncVLLMConfig(
         pipeline_parallel_size=4,
         gpu_memory_utilization=0.5
@@ -92,7 +91,6 @@ from agentfly.agents.llm_backends import ClientConfig
 # Create an agent with client backend for local server
 agent = ImageEditingAgent(
     model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
-    backend="client",
     backend_config=ClientConfig(
         base_url="http://0.0.0.0:8000/v1",
     ),
@@ -109,7 +107,6 @@ from agentfly.agents.llm_backends import ClientConfig
 # Create an agent with OpenAI backend
 agent = ImageEditingAgent(
     model_name_or_path="gpt-5-mini",
-    backend="client",
     backend_config=ClientConfig(
         base_url="https://api.openai.com/v1",
         api_key="your-openai-api-key",
@@ -174,7 +171,6 @@ The ImageEditingAgent supports real-time streaming of responses and tool executi
 agent = ImageEditingAgent(
     model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
     template="qwen2.5-vl-system-tool",
-    backend="async_vllm",
     backend_config=AsyncVLLMConfig(
         pipeline_parallel_size=4,
         gpu_memory_utilization=0.5
@@ -350,7 +346,6 @@ async def main():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
         backend_config=AsyncVLLMConfig(
             pipeline_parallel_size=4,
             gpu_memory_utilization=0.5

@@ -6,26 +6,25 @@ Patch run_patch_in_container to accept an optional existing container so callers
 import traceback
 from pathlib import Path
 
-from swebench.harness.constants import (
-    DOCKER_PATCH,
-    DOCKER_USER,
-    DOCKER_WORKDIR,
-    KEY_INSTANCE_ID,
-    LOG_INSTANCE,
-    LOG_TEST_OUTPUT,
-    RUN_EVALUATION_LOG_DIR,
-    TESTS_TIMEOUT,
-    UTF8,
-)
-from swebench.harness.docker_build import setup_logger
-from swebench.harness.docker_utils import copy_to_container, exec_run_with_timeout
-from swesmith.constants import LOG_DIR_RUN_VALIDATION, TEST_OUTPUT_END, TEST_OUTPUT_START
-from swesmith.profiles import registry
-from unidiff import PatchSet
-
 
 def _patch_run_patch_in_container():
+    from swebench.harness.constants import (
+        DOCKER_PATCH,
+        DOCKER_USER,
+        DOCKER_WORKDIR,
+        KEY_INSTANCE_ID,
+        LOG_INSTANCE,
+        LOG_TEST_OUTPUT,
+        RUN_EVALUATION_LOG_DIR,
+        TESTS_TIMEOUT,
+        UTF8,
+    )
+    from swebench.harness.docker_build import setup_logger
+    from swebench.harness.docker_utils import copy_to_container, exec_run_with_timeout
+    from swesmith.constants import TEST_OUTPUT_END, TEST_OUTPUT_START
     from swesmith.harness import utils as utils_mod
+    from swesmith.profiles import registry
+    from unidiff import PatchSet
     from swesmith.profiles.base import _find_ssh_key
 
     _apply_patch = utils_mod._apply_patch

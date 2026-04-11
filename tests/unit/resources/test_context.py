@@ -21,7 +21,14 @@ async def test_context_resource():
         backend="local",
     )
 
-    result = await container.run_cmd("echo 'hello, world!'")
+    cmd = "echo 'print(\"hello, world!\")' > test_add_urls.py"
+    result = await container.run_cmd(cmd)
+    cmd = "sed -i 's/addurls\\\\.extract(/addurls.extract(input_type=\\\\'list\\\\', /' test_add_urls.py"
+    result = await container.run_cmd(cmd)
+
+    print(result)
+
+    result = await container.run_cmd("cat test_add_urls.py")
     print(result)
 
     await context.release_resource(scope="rollout")

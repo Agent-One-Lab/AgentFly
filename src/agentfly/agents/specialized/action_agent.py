@@ -1,8 +1,9 @@
 import json
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..agent_base import BaseAgent
+from ..chain.structures import Node
 
 # Matches both <action>...</action> and <summarize>...</summarize> blocks.
 TOOL_TAG_PATTERN = re.compile(
@@ -11,21 +12,68 @@ TOOL_TAG_PATTERN = re.compile(
 # First closing tag (any case): strip everything after it; keep the tag itself.
 CLOSE_TOOL_TAG_PATTERN = re.compile(r"</(action|summarize)>", re.IGNORECASE)
 
+_DEFAULT_CONTEXT_TRIGGER_MESSAGE = (
+    "You have reached the configured assistant-turn limit for this segment. "
+    "You must now summarize: respond using a single <summarize>...</summarize> block "
+    "with a concise summary of progress and key results so far (not <action>)."
+)
+
 
 class ActionAgent(BaseAgent):
-    """Agent that parses the action format: <think>...</think>, <action> action </action>"""
+    """Agent that parses the action format: <think>...</think>, <action> action </action>.
+
+    With ``context_trigger_turns`` set, when the history contains exactly that many assistant
+    turns, a user message is appended before the next generation to force a ``<summarize>`` response.
+    """
 
     def __init__(
         self,
         model_name_or_path: str,
         tool_parser_name: Optional[str] = None,
         tools: List = [],
+        context_trigger_turns: Optional[int] = 10,
+        context_trigger_message: Optional[str] = None,
         **kwargs,
     ):
         self.action_tool_name = tools[0].name
+        if context_trigger_turns is not None and context_trigger_turns < 1:
+            raise ValueError("context_trigger_turns must be >= 1 when set")
+        self.context_trigger_turns = context_trigger_turns
+        self.context_trigger_message = (
+            context_trigger_message
+            if context_trigger_message is not None
+            else _DEFAULT_CONTEXT_TRIGGER_MESSAGE
+        )
         super().__init__(
             model_name_or_path, tool_parser_name=tool_parser_name, tools=tools, **kwargs
         )
+
+    @staticmethod
+    def _count_assistant_turns(turns: List[Dict[str, Any]]) -> int:
+        return sum(1 for m in turns if m.get("role") == "assistant")
+
+    @staticmethod
+    def _turn_text(turn: Dict[str, Any]) -> str:
+        content = turn.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list) and content:
+            first = content[0]
+            if isinstance(first, dict) and first.get("type") == "text":
+                return str(first.get("text") or "")
+        return ""
+
+    def _maybe_append_context_trigger_user_message(self, current_node: Node) -> None:
+        """After ``context_trigger_turns`` assistant messages, append a user nudge to force summarize."""
+        if self.context_trigger_turns is None:
+            return
+        turns = current_node.messages.messages
+        if self._count_assistant_turns(turns) != self.context_trigger_turns:
+            return
+        if turns and turns[-1].get("role") == "user":
+            if self._turn_text(turns[-1]).strip() == self.context_trigger_message.strip():
+                return
+        current_node.messages.add("user", self.context_trigger_message)
 
     @staticmethod
     def _truncate_at_first_close_tag(response: str) -> str:
@@ -165,7 +213,7 @@ class ActionAgent(BaseAgent):
         Mark trajectories whose segments contain summarize-without-action shortcuts.
         We keep trajectory/segment shapes unchanged for downstream batch alignment.
         """
-        strategy = None
+        strategy = "truncate_no_assistant"
         if strategy is None:
             return trajectories
         elif strategy == "truncate":
@@ -187,6 +235,18 @@ class ActionAgent(BaseAgent):
                     for segment in segs
                 )
                 traj["discarded"] = has_invalid_summarize_segment
+                out.append(traj)
+            return out
+        elif strategy == "truncate_no_assistant":
+            out: List[Dict] = []
+            for traj in trajectories:
+                traj = dict(traj)
+                segs = traj.get("trajectory_segments") or []
+                if segs:
+                    last_seg = segs[-1] or []
+                    has_assistant = any(m.get("role") == "assistant" for m in last_seg)
+                    if not has_assistant:
+                        traj["trajectory_segments"] = segs[:-1]
                 out.append(traj)
             return out
         raise ValueError(f"Unknown postprocess strategy: {strategy}")

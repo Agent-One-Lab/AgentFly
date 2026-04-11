@@ -1,8 +1,8 @@
 """
 Resource engine: decoupled design for managing resources (containers, vLLM)
-across backends (local, Slurm, AWS, K8s).
+across backends (local, Ray, AWS, K8s).
 
-Tools and rewards use the engine to acquire, use (MCP or input-text), and release resources.
+Tools and rewards use the engine to acquire, use, and release resources.
 """
 
 from .types import (
@@ -10,33 +10,33 @@ from .types import (
     ResourceSpec,
     ResourceStatus,
 )
-from .call_interface import (
-    CallInterface,
-    MCPToolCall,
-    InputTextCall,
-)
 from .runner import (
     BaseRunner,
     LocalRunner,
-    SlurmRunner,
+    RayRunner,
     CloudRunner,
     K8sRunner,
 )
-from .container_resource import ContainerResource
+from .containers import (
+    ContainerResource,
+    RayContainerResource,
+    RayEnrootContainerActor,
+    create_ray_container_resource,
+)
 from .engine import ResourceEngine
 
 __all__ = [
     "BaseResource",
     "ResourceSpec",
     "ResourceStatus",
-    "CallInterface",
-    "MCPToolCall",
-    "InputTextCall",
     "BaseRunner",
     "LocalRunner",
-    "SlurmRunner",
+    "RayRunner",
     "CloudRunner",
     "K8sRunner",
     "ContainerResource",
     "ResourceEngine",
+    "RayContainerResource",
+    "RayEnrootContainerActor",
+    "create_ray_container_resource",
 ]

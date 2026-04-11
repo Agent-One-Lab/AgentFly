@@ -12,20 +12,27 @@ ALFWorld (Action Learning From World) is an interactive text-based environment t
 
 ## Quick Start
 
-For most use cases, you can use the ALFWorldEnv class directly:
+For most use cases, acquire `ALFWorldEnv` via `Context.acquire_resource(...)` (this is how tools/rewards obtain it during rollouts):
 
 ```python
-from agentfly.envs.alfworld_env import ALFWorldEnv
+from agentfly.core import Context
+from agentfly.envs.alfworld_env import ALFWorldSpec
 
-# Create and start the environment
-env = ALFWorldEnv()
-await env.start()
+context = Context(rollout_id="demo")
+env = await context.acquire_resource(
+    spec=ALFWorldSpec,
+    scope="rollout",
+    backend="local",
+)
 
 # Reset to start a new episode
 obs, info = await env.reset()
 
 # Take actions
 obs, reward, done, info = await env.step("go to kitchen")
+
+# Cleanup (kill the rollout-scoped resource)
+await context.end_resource(scope="rollout")
 ```
 
 For HTTP-based integration, see the [HTTP Server](http_server.md) documentation.

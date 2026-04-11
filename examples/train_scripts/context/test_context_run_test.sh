@@ -13,15 +13,14 @@ address_head=$head_node_ip:$port
 # export GLOO_SOCKET_IFNAME=ens10f0np0
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
-
-# export VERL_LOGGING_LEVEL=DEBUG
+export VERL_LOGGING_LEVEL=DEBUG
 
 # Remove existing Ray cluster
 ray stop
 rm -rf /tmp/ray/ray_current_cluster
 
 # Start Ray head node
-ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
+ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 1
 
 
 model=Qwen/Qwen3-4B-Instruct-2507
@@ -168,8 +167,8 @@ lr=4e-7
 max_model_len=16384
 max_new_tokens_per_turn=512
 val_batch_size=512
-batch_size=64
-num_chains=8
+batch_size=2
+num_chains=4
 # full on-policy
 mini_batch_size=$((batch_size * num_chains))
 kl_coef=0.001
@@ -189,14 +188,14 @@ reward_name="scienceworld_reward"
 
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=50
+max_turns=30
 lr_warmup_steps_ratio=0.08
 total_training_steps=300
 gamma=0.99
 lam=0.95
 
 project_name="Context"
-experiment_name="scienceworld_qwen3-4b-instruct_summarize_${adv_estimator}_contextrl_trigger10_50turns"
+experiment_name="scienceworld_qwen3-4b-instruct_summarize_${adv_estimator}_contextrl_trigger10_test"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -220,7 +219,7 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.path=${model} \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=$kl_coef \
     actor_rollout_ref.actor.kl_loss_type=$kl_loss_type \
@@ -228,17 +227,17 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.60 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.40 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     critic.enable=$use_critic \
     critic.model.path=$model \
     critic.optim.lr="1e-6" \
-    critic.ppo_mini_batch_size=32 \
-    critic.ppo_micro_batch_size_per_gpu=2 \
+    critic.ppo_mini_batch_size=${batch_size} \
+    critic.ppo_micro_batch_size_per_gpu=1 \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
     algorithm.gamma=$gamma \
     algorithm.lam=$lam \
@@ -246,9 +245,9 @@ python -m agentfly.cli train \
     trainer.logger=['console','wandb'] \
     trainer.project_name=$project_name \
     trainer.experiment_name=$experiment_name \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
-    trainer.save_freq=100 \
+    trainer.save_freq=50 \
     trainer.test_freq=300 \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=False

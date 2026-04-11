@@ -30,6 +30,12 @@ def gather_responses(trajectories: List[Dict]):
 @click.option("--api_key", type=str, default="EMPTY")
 @click.option("--max_turns", type=int, required=True)
 @click.option("--num_chains", type=int, default=1, required=True)
+@click.option(
+    "--max_concurrent_chains",
+    type=int,
+    default=None,
+    help="Concurrent chain cap; omit uses default (64). Use 0 for unlimited.",
+)
 @click.option("--data_file", type=str, required=True)
 @click.option("--output_dir", type=str, required=True)
 def main(
@@ -37,6 +43,7 @@ def main(
     api_key: str,
     max_turns: int,
     num_chains: int,
+    max_concurrent_chains: int,
     data_file: str,
     output_dir: str,
 ):
@@ -59,6 +66,7 @@ def main(
         await agent.run(
             messages=messages,
             num_chains=num_chains,
+            max_concurrent_chains=max_concurrent_chains,
             max_turns=max_turns,
         )
         responses = gather_responses(agent.trajectories)

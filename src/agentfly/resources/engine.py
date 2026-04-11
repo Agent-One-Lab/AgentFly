@@ -10,10 +10,11 @@ pool layer.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import uuid
 from .types import BaseResource, ResourceSpec, ResourceStatus
-from .runner import LocalRunner, SlurmRunner, CloudRunner, K8sRunner
+from .runner import LocalRunner, RayRunner, CloudRunner, K8sRunner
 if TYPE_CHECKING:
     from .runner import BaseRunner
 
@@ -21,7 +22,12 @@ if TYPE_CHECKING:
 def _pool_key(spec: ResourceSpec, backend: str) -> str:
     """Stable key for (spec, backend). Use '|' so backend can be parsed."""
     spec_key = f"{spec.category}:{spec.image or spec.model_name_or_path or 'default'}"
-    return f"{spec_key}|{backend}"
+    key = f"{spec_key}|{backend}"
+    if backend == "ray":
+        # Same image with different Ray placement options must not share a pool entry.
+        ropts = (spec.extra or {}).get("ray_actor_options")
+        key = f"{key}|{json.dumps(ropts, sort_keys=True, default=str) if ropts is not None else ''}"
+    return key
 
 
 class ResourceEngine:
@@ -36,7 +42,7 @@ class ResourceEngine:
     # Backend name -> runner
     _runners: Dict[str, "BaseRunner"] = {
         "local": LocalRunner(),
-        "slurm": SlurmRunner(),
+        "ray": RayRunner(),
         "aws": CloudRunner(),
         "k8s": K8sRunner(),
     }
@@ -127,10 +133,12 @@ class ResourceEngine:
                 cls._acquired[p_id] = (None, key)
                 pending_ids.append(p_id)
 
+        start_timeout = kwargs.get("timeout")
+
         # Create outside lock
         for p_id in pending_ids:
             try:
-                resource = await runner.start_resource(spec)
+                resource = await runner.start_resource(spec, timeout=start_timeout)
                 async with cond:
                     cls._acquired.pop(p_id, None)
                     cls._free.setdefault(key, []).append(resource)
@@ -147,7 +155,7 @@ class ResourceEngine:
         id: str,
         spec: ResourceSpec,
         backend: str = "local",
-        acquire_timeout: Optional[float] = 600.0,
+        timeout: Optional[float] = 600.0,
     ) -> BaseResource:
         """
         Acquire a resource for the given id. Same id returns the same resource.
@@ -155,31 +163,17 @@ class ResourceEngine:
         Semantics:
         - Prefer taking from the free queue for (spec, backend).
         - If none free and under max_global_num, create a new resource (slot reserved under lock).
-        - If at max_global_num and none free, wait until another thread releases one or timeout.
+        - If at max_global_num and none free, wait until another thread releases one.
 
         Args:
-            acquire_timeout: Max seconds to wait for a free resource or for same-id start.
-                Default 600. None means wait indefinitely.
+            timeout: Max seconds for backend start_resource() only.
+                Waiting for an existing/pending resource is unbounded.
         """
         key = _pool_key(spec, backend)
         runner = cls._runners.get(backend)
         if runner is None:
             raise ValueError(f"Unknown backend: {backend}")
         cond = cls._get_condition()
-        deadline = (asyncio.get_event_loop().time() + acquire_timeout) if acquire_timeout is not None else None
-
-        async def wait_with_timeout() -> bool:
-            if deadline is None:
-                await cond.wait()
-                return True
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                return False
-            try:
-                await asyncio.wait_for(cond.wait(), timeout=remaining)
-                return True
-            except asyncio.TimeoutError:
-                return False
 
         async with cond:
             while True:
@@ -189,10 +183,7 @@ class ResourceEngine:
                     if resource is not None:
                         return resource
                     # placeholder present; wait for the first caller to finish starting it
-                    if not await wait_with_timeout():
-                        raise asyncio.TimeoutError(
-                            f"Resource acquisition timed out (id={id!r}, pool={key}) after waiting for placeholder."
-                        )
+                    await cond.wait()
                     continue
 
                 # Take from the free queue if available.
@@ -206,22 +197,22 @@ class ResourceEngine:
                     # Reserve a slot using the actual id as placeholder
                     cls._acquired[id] = (None, key)
                     break
-                if not await wait_with_timeout():
-                    raise asyncio.TimeoutError(
-                        f"Resource acquisition timed out (id={id!r}, pool={key}); no free resource and at capacity."
-                    )
+                await cond.wait()
 
-        # Start the resource outside the lock (bound start time so a stuck create doesn't hang)
-        start_timeout = min(600.0, acquire_timeout) if acquire_timeout is not None else 600.0
+        # Start the resource outside the lock.
+        # Important: do NOT wrap runner.start_resource(...) with asyncio.wait_for here.
+        # start_resource uses asyncio.to_thread for backend calls; cancelling wait_for only
+        # cancels the coroutine, not the underlying thread/system call, which can leak
+        # orphaned container starts. Rely on backend/native timeouts instead.
         try:
-            resource = await asyncio.wait_for(runner.start_resource(spec), timeout=start_timeout)
-        except asyncio.TimeoutError:
+            resource = await runner.start_resource(spec, resource_id=id, timeout=timeout)
+        except (asyncio.TimeoutError, TimeoutError) as e:
             async with cond:
                 cls._acquired.pop(id, None)
                 cond.notify_all()
             raise asyncio.TimeoutError(
-                f"Resource start timed out (id={id!r}, pool={key}) after {start_timeout}s."
-            )
+                f"Resource start timed out (id={id!r}, pool={key}); backend start exceeded its timeout."
+            ) from e
         except Exception:
             # Clean up the placeholder if starting fails so others can try
             async with cond:

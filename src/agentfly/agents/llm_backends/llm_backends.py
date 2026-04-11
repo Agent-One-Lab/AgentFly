@@ -238,15 +238,12 @@ class AsyncVerlBackend(LLMBackend):
 
     def preprocess(self):
         """Preprocess the backend"""
-        self.llm_engine.wake_up()
-        if self.llm_engine.reward_model_manager:
-            self.llm_engine.reward_model_manager.wake_up()
+        # Don't do anything for now
+        pass
 
     def postprocess(self):
         """Postprocess the backend"""
-        self.llm_engine.sleep()
-        if self.llm_engine.reward_model_manager:
-            self.llm_engine.reward_model_manager.sleep()
+        pass
 
     def _process_inputs(
         self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]
@@ -317,11 +314,14 @@ class AsyncVerlBackend(LLMBackend):
             for messages in messages_list
         ]
         tools = kwargs.get("tools", None)
+        data_source = kwargs.get("data_source", None)
         tools_list = np.array([tools] * len(messages_list))
+        data_source_list = np.array([data_source] * len(messages_list))
         data = {
             "input_ids": tensors,
             "raw_prompt": np.array(messages_list),
             "tools": tools_list,
+            "data_source": data_source_list,
         }
 
         if "temperature" in kwargs:

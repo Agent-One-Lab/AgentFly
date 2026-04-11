@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from abc import ABC
+from math import lcm
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -18,8 +19,9 @@ from termcolor import colored
 
 from ..templates import *  # noqa: F403
 from ..tools.tool_base import BaseTool
+from ..core.context_config import ContextConfig
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
-from ..utils.verl import pad_tensor_to_rank_size
+from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
 from .chain.chain_base import ChainRollout
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
 from .llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
@@ -33,13 +35,31 @@ except ImportError:
     print("verl can not be imported.")
     pass
 
-# Try to import vLLM tool parser components
+from transformers import AutoTokenizer
+
+ChatCompletionRequest = None
+ToolParserManager = None
+VLLM_TOOL_PARSER_AVAILABLE = False
+
 try:
-    from transformers import AutoTokenizer
-    from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-    from vllm.entrypoints.openai.tool_parsers import ToolParserManager
+    # vLLM >= 0.19: ChatCompletionRequest lives under chat_completion.protocol;
+    # ToolParserManager is exposed from vllm.tool_parsers.
+    from vllm.entrypoints.openai.chat_completion.protocol import (
+        ChatCompletionRequest,
+    )
+    from vllm.tool_parsers import ToolParserManager
 
     VLLM_TOOL_PARSER_AVAILABLE = True
+except ImportError:
+    try:
+        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+        from vllm.entrypoints.openai.tool_parsers import ToolParserManager
+
+        VLLM_TOOL_PARSER_AVAILABLE = True
+    except ImportError:
+        pass
+
+if VLLM_TOOL_PARSER_AVAILABLE:
 
     def silence_tool_parsers():
         # vLLM has used both namespaces across versions
@@ -53,12 +73,6 @@ try:
             lg.propagate = False  # don't bubble to root handlers
 
     silence_tool_parsers()
-
-except ImportError:
-    VLLM_TOOL_PARSER_AVAILABLE = False
-    AutoTokenizer = None
-    ChatCompletionRequest = None
-    ToolParserManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +334,7 @@ class BaseAgent(ChainRollout, ABC):
         messages: Union[List[dict], np.ndarray, Dict],
         max_turns: int,
         generation_config: Optional[Dict[str, Any]] = {},
+        context_config: Optional[ContextConfig] = None,
         **kwargs,
     ):
         """
@@ -329,7 +344,8 @@ class BaseAgent(ChainRollout, ABC):
             messages: List of messages to generate responses for.
             max_turns: The maximum number of turns to generate.
             generation_config: The generation configuration.
-            **kwargs: Additional keyword arguments for generation.
+            context_config: Optional settings for :class:`~agentfly.core.context.Context` (resource backend).
+            **kwargs: Additional keyword arguments for generation (passed to ``run_async``).
 
         """
         processed_messages = self._preprocess_messages(messages)
@@ -339,6 +355,7 @@ class BaseAgent(ChainRollout, ABC):
             processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
+            context_config=context_config,
             **kwargs,
         )
 
@@ -708,6 +725,7 @@ class BaseAgent(ChainRollout, ABC):
         train_on_last_turn: bool = False,
         world_size: int = 1,
         reward_on_last_segment_only: bool = False,
+        pad_to_multiple_of: Optional[int] = None,
     ):
         trajectories = self.trajectories
         segments_list = []
@@ -769,12 +787,15 @@ class BaseAgent(ChainRollout, ABC):
         # Number of segments per trajectory (one integer per trajectory).
         repeat_times = [len(t["trajectory_segments"]) for t in trajectories]
 
-        if world_size > 1:
-            pad_size = (
-                world_size - inputs["input_ids"].shape[0] % world_size
-            ) % world_size
+        align = pad_to_multiple_of
+        if align > 1:
+            n = inputs["input_ids"].shape[0]
+            pad_size = (align - n % align) % align
             for k, v in inputs.items():
-                inputs[k] = pad_tensor_to_rank_size(v, world_size)
+                if k == "action_mask" and isinstance(v, torch.Tensor) and not v.is_nested:
+                    inputs[k] = pad_tensor_batch_dim_with_zeros(v, align)
+                else:
+                    inputs[k] = pad_tensor_to_rank_size(v, align)
             if pad_size > 0:
                 # Pad other_info_list with copies of the last element (matches last-row repeat in pad_tensor_to_rank_size)
                 other_info_list = other_info_list + [other_info_list[-1]] * pad_size

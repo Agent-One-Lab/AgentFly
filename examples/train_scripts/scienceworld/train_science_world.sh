@@ -13,7 +13,6 @@ address_head=$head_node_ip:$port
 # export GLOO_SOCKET_IFNAME=ens10f0np0
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
-
 # export VERL_LOGGING_LEVEL=DEBUG
 
 # Remove existing Ray cluster
@@ -21,10 +20,10 @@ ray stop
 rm -rf /tmp/ray/ray_current_cluster
 
 # Start Ray head node
-ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
+ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 1
 
 
-model=Qwen/Qwen3-4B-Instruct-2507
+model=Qwen/Qwen2.5-3B-Instruct
 
 system_prompt="You are a ScienceWorld agent operating in an interactive, text-based environment that simulates elementary-school science tasks (e.g., thermodynamics, simple circuits, chemistry, biology). Your goal is to complete the current task by interacting with the world through text commands, earning the highest possible task score, and finishing efficiently. The environment is partially observable; you must actively examine rooms, containers, and your inventory to gather needed information.
 You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
@@ -69,10 +68,10 @@ Remember that you must put your action inside <action> and </action> tags."
 template=action-agent
 lr=4e-7
 max_model_len=16384
-max_new_tokens_per_turn=512
+max_new_tokens_per_turn=256
 val_batch_size=512
-batch_size=64
-num_chains=8
+batch_size=2
+num_chains=2
 # full on-policy
 mini_batch_size=$((batch_size * num_chains))
 kl_coef=0.001
@@ -81,10 +80,8 @@ eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
-# adv_estimator=grpo
+adv_estimator=grpo
 # adv_estimator=gae
-adv_estimator=contextrl
-use_critic=True
 
 agent_type=action
 tools="[scienceworld_explorer]"
@@ -92,17 +89,12 @@ reward_name="scienceworld_reward"
 
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=30
+max_turns=20
 lr_warmup_steps_ratio=0.08
-
-critic_lr=1e-5
-gamma=0.99
-lam=0.95
-
 total_training_steps=300
-model_base_name=$(basename $model)
-project_name="Context"
-experiment_name="scienceworld_${model_base_name}_${adv_estimator}_gaecompare"
+
+project_name="Resource"
+experiment_name="scienceworld_qwen2.5-3b-instruct_resource"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -140,19 +132,15 @@ python -m agentfly.cli train \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.60 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
-    critic.enable=$use_critic \
     critic.model.path=$model \
-    critic.optim.lr=$critic_lr \
     critic.ppo_mini_batch_size=32 \
     critic.ppo_micro_batch_size_per_gpu=2 \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
-    algorithm.gamma=$gamma \
-    algorithm.lam=$lam \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name=$project_name \
     trainer.experiment_name=$experiment_name \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.save_freq=50 \
     trainer.test_freq=300 \

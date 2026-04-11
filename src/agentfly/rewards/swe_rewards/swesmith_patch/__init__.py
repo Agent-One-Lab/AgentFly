@@ -14,11 +14,6 @@ Usage:
     result = evaluate(sample)  # result["status"], result["resolved"]
 """
 
-import sys
-from pathlib import Path
-from .utils_patch import _patch_run_patch_in_container
-
-
 
 def _install():
 
@@ -37,13 +32,11 @@ def _install():
 
 
 # Apply patch BEFORE importing eval_api, so swebench/swesmith see patched docker when they import it.
-try:
-    _install()
-except ImportError as e:
-    raise ImportError(
-        "Enroot docker compatibility not found. Ensure enroot-py is installed and has "
-        "enroot.docker_compat (see test_swe/ENROOT_DOCKER_ALIGNMENT.md)."
-    ) from e
+# Do not run for now as it will replace docker with enroot, and we are not using swesmith now.
+# try:
+#     _install()
+# except ImportError as e:
+#     raise e
 
 from .eval_api import evaluate_swesmith
 

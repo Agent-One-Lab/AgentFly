@@ -13,7 +13,6 @@ address_head=$head_node_ip:$port
 # export GLOO_SOCKET_IFNAME=ens10f0np0
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
-
 # export VERL_LOGGING_LEVEL=DEBUG
 
 # Remove existing Ray cluster
@@ -24,8 +23,6 @@ rm -rf /tmp/ray/ray_current_cluster
 ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
 
 
-
-model=Qwen/Qwen2.5-7B-Instruct
 
 system_prompt="You are a ScienceWorld agent operating in an interactive, text-based environment that simulates elementary-school science tasks (e.g., thermodynamics, simple circuits, chemistry, biology). Your goal is to complete the current task by interacting with the world through text commands, earning the highest possible task score, and finishing efficiently. The environment is partially observable; you must actively examine rooms, containers, and your inventory to gather needed information.
 You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
@@ -67,10 +64,15 @@ Electricity (for simple circuits):
 
 Remember that you must put your action inside <action> and </action> tags."
 
+model=Qwen/Qwen3-4B-Instruct-2507
 template=action-agent
+
+# model=Qwen/Qwen3.5-4B
+# template=qwen3-think
+
 lr=4e-7
 max_model_len=16384
-max_new_tokens_per_turn=256
+max_new_tokens_per_turn=512
 val_batch_size=512
 batch_size=64
 num_chains=8
@@ -82,8 +84,10 @@ eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
-adv_estimator=grpo
+# adv_estimator=grpo
 # adv_estimator=gae
+adv_estimator=contextrl
+use_critic=True
 
 agent_type=action
 tools="[scienceworld_explorer]"
@@ -91,13 +95,17 @@ reward_name="scienceworld_reward"
 
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=24
+max_turns=30
 lr_warmup_steps_ratio=0.08
-agent_backend="async_verl"
-total_training_steps=300
 
-project_name="Algorithm"
-experiment_name="scienceworld_qwen2.5-7b-instruct_grpo"
+critic_lr=1e-5
+gamma=0.99
+lam=0.95
+
+total_training_steps=300
+model_base_name=$(basename $model)
+project_name="Context"
+experiment_name="scienceworld_${model_base_name}_${adv_estimator}_new"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -112,7 +120,6 @@ python -m agentfly.cli train \
     agent.init_config.tools=$tools \
     agent.init_config.template=$template \
     agent.init_config.model_name_or_path=$model \
-    agent.init_config.backend=${agent_backend} \
     agent.init_config.reward_name=$reward_name \
     agent.generation_config.max_tokens=$max_new_tokens_per_turn \
     agent.max_turns=${max_turns} \
@@ -122,7 +129,7 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.path=${model} \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=$kl_coef \
     actor_rollout_ref.actor.kl_loss_type=$kl_loss_type \
@@ -130,16 +137,20 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.60 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    critic.enable=$use_critic \
     critic.model.path=$model \
+    critic.optim.lr=$critic_lr \
     critic.ppo_mini_batch_size=32 \
     critic.ppo_micro_batch_size_per_gpu=2 \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
+    algorithm.gamma=$gamma \
+    algorithm.lam=$lam \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name=$project_name \
