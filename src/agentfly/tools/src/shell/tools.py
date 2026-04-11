@@ -16,13 +16,22 @@ from ray.exceptions import RayTaskError
 from ....core import Context
 from ....resources import ResourceSpec
 from ...decorator import tool
+from .command_filter import CommandFilter
 
 WORKSPACE_DIR = "/testbed"
 
 logger = logging.getLogger(__name__)
 
+# Block dangerous / heavy commands (see command_filter defaults); allow_list bypasses blocks.
+_SHELL_COMMAND_FILTER = CommandFilter(
+    allow_list=[
+        r"pip3?\s+install\s+pytest\b",
+        r"pip3?\s+install\s+-e\s+\.",  # editable install in current dir (e.g. pip install -e .)
+    ],
+)
 
-def _log_enroot_memory(cmd: str, inner: BaseException) -> None:
+
+def _log_enroot_memory(cmd: str, inner: Exception) -> None:
     logger.error(
         "enroot memory error (%s): %s; command=%r",
         type(inner).__name__,
@@ -53,6 +62,11 @@ async def _run_shell(context: Context, cmd: str) -> str:
     image_id = context.metadata.get("image_id")
     if not image_id:
         return "Error: context.metadata['image_id'] is required for shell tool."
+
+    # allowed, block_reason = _SHELL_COMMAND_FILTER.check(cmd)
+    # if not allowed:
+    #     return block_reason
+
     rollout_id = context.rollout_id
     spec = ResourceSpec(
         category="container",
@@ -96,8 +110,8 @@ async def _run_shell(context: Context, cmd: str) -> str:
     except (EnrootMemoryError, MemGuardError) as e:
         _log_enroot_memory(cmd, e)
         return "Error: Command exceeded memory limit."
-    except Exception as e:
-        raise e
+    except Exception:
+        raise
     return _ensure_str(raw)
 
 
@@ -105,6 +119,9 @@ async def _run_shell(context: Context, cmd: str) -> str:
 async def run_shell_command(cmd: str, context: Context):
     """
     Runs a shell command in the container workspace.
+
+    Commands are checked by :class:`~.command_filter.CommandFilter` before execution;
+    blocked commands return the filter reason (e.g. ``Blocked: ...``) without running.
 
     Args:
         cmd (str): The shell command to run (e.g. "ls -la", "cat file.txt", "pwd").

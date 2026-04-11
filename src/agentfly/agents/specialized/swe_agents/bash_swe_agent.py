@@ -25,6 +25,8 @@ class BashSWEAgent(BaseAgent):
     Agent for SWE-bench-like tasks using only bash commands.
     Parses responses for a single ```mswea_bash_command ... ``` or ```bash ... ``` block
     and invokes run_shell_command with the extracted command.
+    Content after the first such fenced block is discarded before parsing and in the
+    stored assistant message.
     """
 
     def __init__(
@@ -53,6 +55,16 @@ class BashSWEAgent(BaseAgent):
             return None
         return m.group(1).strip() or None
 
+    @staticmethod
+    def _truncate_after_first_bash_block(response: str) -> str:
+        """If a fenced bash block exists, drop everything after its closing ```."""
+        if not response or not isinstance(response, str):
+            return response
+        m = BASH_BLOCK_PATTERN.search(response)
+        if not m:
+            return response
+        return response[: m.end()]
+
     def _parse_single_response(self, response: str) -> Dict:
         """
         Parse a single model response: find one bash block and format as a
@@ -67,6 +79,7 @@ class BashSWEAgent(BaseAgent):
                 "status": "terminal",
             }
 
+        response = self._truncate_after_first_bash_block(response)
         command = self._extract_bash_command(response)
         formatted_tool_calls = []
 

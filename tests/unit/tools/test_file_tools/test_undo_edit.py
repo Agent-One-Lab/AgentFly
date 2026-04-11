@@ -20,7 +20,7 @@ def _strip_line_numbers(content: str) -> str:
     return "\n".join(lines)
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_undo_edit_reverts_last_edit():
     context = Context(
         rollout_id="test_undo_edit",
@@ -37,7 +37,7 @@ async def test_undo_edit_reverts_last_edit():
         lines = [ln for ln in content_before.split("\n") if ln.strip()]
         if not lines:
             pytest.skip("No non-empty lines to edit")
-        search_block = lines[0]
+        search_block = lines[7]
         replace_block = search_block + "  # undo_test"
 
         edit_result = (await edit_file(
@@ -54,16 +54,18 @@ async def test_undo_edit_reverts_last_edit():
 
         undo_result = (await undo_edit(path=path, context=context))['observation']
         print(f"undo_result: {undo_result}")
-        assert "undone" in undo_result.lower() or "Error" in undo_result
+        ur = undo_result.lower()
+        assert "undo successful" in ur or "error" in ur
 
         after_undo = (await read_file(path=path, context=context))['observation']
+        print(f"after_undo: {after_undo}")
         assert search_block in _strip_line_numbers(after_undo)
         assert replace_block not in _strip_line_numbers(after_undo)
     finally:
-        await context.release_resource(scope="rollout")
+        await context.end_resource(scope="rollout")
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_undo_edit_no_backup_returns_error():
     context = Context(
         rollout_id="test_undo_edit_no_backup",
@@ -76,8 +78,9 @@ async def test_undo_edit_no_backup_returns_error():
         assert len(paths) > 0
         path = paths[0]
         result = (await undo_edit(path=path, context=context))['observation']
-        # No prior edit: either "No backup" or success (if implementation allows)
+        # No prior edit: file_manager returns "No edit history for this file."
         print(f"observation: {result}")
-        assert "No backup" in result or "undone" in result.lower()
+        rl = result.lower()
+        assert "no edit history" in rl or "error" in rl
     finally:
-        await context.release_resource(scope="rollout")
+        await context.end_resource(scope="rollout")

@@ -55,6 +55,19 @@ for ((i = 1; i < worker_num; i++)); do
 done
 sleep 10
 
+# Start memory monitoring on ALL nodes (head + workers)
+for ((i = 0; i < worker_num; i++)); do
+    node_i=${nodes[$i]}
+    srun --nodes=1 --ntasks=1 -w "$node_i" --overlap bash -c '
+        logfile="memory/mem_monitor_$(hostname).log"
+        echo "timestamp hostname total used free shared buff/cache available" > "$logfile"
+        while true; do
+            echo "$(date +%Y-%m-%d_%H:%M:%S) $(hostname) $(free -g | grep Mem | awk "{print \$2, \$3, \$4, \$5, \$6, \$7}")" >> "$logfile"
+            sleep 10
+        done
+    ' &
+done
+
 # export VERL_LOGGING_LEVEL=DEBUG
 
 model=Qwen/Qwen3-32B
@@ -72,7 +85,7 @@ eval_dataset="./data/rlhf/os/r2e-gym-lite.json"
 tools="[run_shell_command]"
 reward_name="r2e_gym_reward"
 train_on_last_turn=False
-experiment_name="test_swe_train_r2e_gym_64chains"
+experiment_name="test_swe_train_r2e_gym_postprocess"
 
 # Long-context: use_remove_padding=True + ulysses_sequence_parallel_size=4 splits the sequence across
 # 4 GPUs so activation memory per GPU is ~4x lower while keeping full max_model_len (e.g. 32768).

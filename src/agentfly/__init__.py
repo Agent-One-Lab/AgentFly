@@ -39,7 +39,7 @@ else:
 # Tool execution: if True (default), exceptions inside a tool's user function are turned
 # into observation strings for the LLM. If False, those exceptions propagate (fail-fast).
 # Env TOOL_ERROR_AS_OBSERVATION: unset defaults to True; must be "0" or "1" when set.
-if os.getenv("TOOL_ERROR_AS_OBSERVATION", "0") == "1":
+if os.getenv("TOOL_ERROR_AS_OBSERVATION", "1") == "1":
     TOOL_ERROR_AS_OBSERVATION = True
 else:
     TOOL_ERROR_AS_OBSERVATION = False

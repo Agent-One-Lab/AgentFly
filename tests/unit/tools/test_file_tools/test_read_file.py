@@ -21,9 +21,9 @@ async def test_read_file_existing():
         assert len(paths) > 0, "workspace should have at least one file"
         first_path = paths[0]
         result = await read_file(path=first_path, context=context)
-        print(result)
+        print(result['observation'])
     finally:
-        await context.release_resource(scope="rollout")
+        await context.end_resource(scope="rollout")
 
 
 @pytest.mark.asyncio
@@ -34,7 +34,7 @@ async def test_read_file_nonexistent_returns_error():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        result = await read_file(path="README.rst", context=context)
-        print(result)
+        result = await read_file(path="README.rst", start_line=1, end_line=10, context=context)
+        print(result['observation'])
     finally:
-        await context.release_resource(scope="rollout")
+        await context.end_resource(scope="rollout")
