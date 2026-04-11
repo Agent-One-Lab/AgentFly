@@ -59,3 +59,15 @@ register_template(
         stop_words=["<|im_end|>"],
     )
 )
+
+register_template(
+    Template(
+        name="qwen3-miniswe",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
+        generation_prompt="<|im_start|>assistant\n<think>\n",
+        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        stop_words=["<|im_end|>"],
+    )
+)

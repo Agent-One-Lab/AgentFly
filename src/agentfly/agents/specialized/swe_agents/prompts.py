@@ -131,6 +131,11 @@ Qwen3CoderSystemPrompt = """You are a helpful assistant that can interact with a
 
 Your response must contain exactly with ONE command (or commands connected with && or ||)."""
 
+Qwen3CoderToolPrompt = """You are a helpful assistant that can interact with a computer.
+
+You must use tools to resolve the issues.
+"""
+
 InstructionPrompt = """<pr_description>
 <<<PR_DESCRIPTION>>>
 </pr_description>

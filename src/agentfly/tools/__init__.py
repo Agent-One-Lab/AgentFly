@@ -21,6 +21,15 @@ from .tool_base import BaseTool
 from .src.file.tools import grep_search, list_files
 from .src.context.tools import summarize
 
+from .src.file.tools import (
+    create_file,
+    grep_search,
+    list_files,
+    read_file,
+    edit_file,
+    run_python,
+    undo_edit,
+)
 @tool()
 def hallucination_tool(tool_name):
     return f"Hallucinated tool: {tool_name} does not exist."
@@ -59,4 +68,11 @@ __all__ = [
     "chess_move",
     "chess_get_state",
     "chess_get_legal_moves",
+    "create_file",
+    "grep_search",
+    "list_files",
+    "read_file",
+    "edit_file",
+    "run_python",
+    "undo_edit",
 ]

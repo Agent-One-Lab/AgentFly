@@ -18,11 +18,12 @@ import asyncio
 import base64
 import os
 import shlex
+import time
 from typing import Any, Optional, TYPE_CHECKING
 
 import ray
 from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
-from ray.exceptions import GetTimeoutError as RayGetTimeoutError
+from ray.exceptions import ActorDiedError, GetTimeoutError as RayGetTimeoutError
 
 from ..types import BaseResource, ResourceSpec, ResourceStatus
 
@@ -37,6 +38,8 @@ _RAY_GET_KILL_SEC = 600.0
 _RAY_GET_RESOURCE_ID_SEC = 300.0
 # Wait for actor __init__ (container create/start): enroot timeout + scheduling slack.
 _RAY_GET_PING_SLACK_SEC = 300.0
+_RAY_GET_ACTOR_DIED_MAX_ATTEMPTS = 3
+_RAY_GET_ACTOR_DIED_BACKOFF_BASE_SEC = 8.0
 
 
 def _default_ray_get_unbounded_cmd_sec() -> float:
@@ -50,15 +53,23 @@ def _ray_get_blocking(ref: Any, timeout_sec: Optional[float]) -> Any:
     """
     ``ray.get`` with optional timeout; maps :class:`ray.exceptions.GetTimeoutError` to
     :class:`asyncio.TimeoutError`. If ``timeout_sec`` is ``None``, ``ray.get`` is unbounded.
+    Retries :class:`~ray.exceptions.ActorDiedError` up to :data:`_RAY_GET_ACTOR_DIED_MAX_ATTEMPTS`
+    with exponential backoff from :data:`_RAY_GET_ACTOR_DIED_BACKOFF_BASE_SEC`, then re-raises
+    that error if all attempts fail.
     """
-    if timeout_sec is None:
-        return ray.get(ref)
-    try:
-        return ray.get(ref, timeout=timeout_sec)
-    except RayGetTimeoutError as e:
-        raise asyncio.TimeoutError(
-            f"ray.get timed out after {timeout_sec} seconds"
-        ) from e
+    for attempt in range(_RAY_GET_ACTOR_DIED_MAX_ATTEMPTS):
+        try:
+            if timeout_sec is None:
+                return ray.get(ref)
+            return ray.get(ref, timeout=timeout_sec)
+        except RayGetTimeoutError as e:
+            raise asyncio.TimeoutError(
+                f"ray.get timed out after {timeout_sec} seconds"
+            ) from e
+        except ActorDiedError:
+            if attempt + 1 >= _RAY_GET_ACTOR_DIED_MAX_ATTEMPTS:
+                raise
+            time.sleep(_RAY_GET_ACTOR_DIED_BACKOFF_BASE_SEC * (2**attempt))
 
 
 def _require_ray_initialized() -> None:
