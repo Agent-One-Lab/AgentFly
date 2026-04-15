@@ -11,29 +11,6 @@ from ....__init__ import AGENT_CONFIG_DIR
 from ....envs.redis_env import RedisEnv
 from ...decorator import tool
 
-# LOGGER = get_logger("agents/tools/data/search", "google_search", level="INFO")
-# HIT_MISS = {"hit": 0, "miss": 0}
-
-# class RedisClient:
-#     def __init__(self, host="localhost", port=6379, db=0):
-#         self.redis_client = redis.Redis(host=host, port=port, db=db)
-
-#     def get(self, key):
-#         return self.redis_client.get(key).decode("utf-8")
-
-#     def set(self, key, value):
-#         self.redis_client.set(key, value)
-
-#     def exists(self, key):
-#         return self.redis_client.exists(key)
-
-#     def close(self):
-#         self.redis_client.close()
-
-# REDIS_CLIENT = RedisClient()
-
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# config_path = os.path.join(current_dir, "..", "..", "..", "..", "agents", "tools", "configs", "search.yaml")
 config_path = os.path.join(AGENT_CONFIG_DIR, "search.yaml")
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)

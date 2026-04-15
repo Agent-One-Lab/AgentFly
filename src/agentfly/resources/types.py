@@ -16,8 +16,36 @@ from typing import Any, Dict, Optional
 @dataclass
 class ResourceSpec:
     """
-    Specification for creating or scaling a resource.
-    Used by ResourceEngine.start() and acquire().
+    Specification for creating or scaling a managed resource.
+
+    `ResourceSpec` is the declarative config passed to the resource engine when
+    starting/acquiring resources. A subset of fields is used depending on the
+    resource category and backend.
+
+    Args:
+        category: Resource kind, for example `"container"`, `"vllm"`, or
+            `"python_env"`. Backends/runners use this to choose how to create
+            and operate the resource.
+        image: Container image reference (for container-like resources).
+        cpu_count: Requested CPU amount for the resource (backend-dependent).
+        mem_limit: Memory limit for the resource. Can be backend-native string
+            (for example `"8g"`) or integer bytes depending on runtime.
+        gpus: GPU request/count (for example `1`) or backend-specific selector
+            string (for example `"0,1"`).
+        ports: Port mapping/configuration used when exposing service ports.
+            Structure is backend/runtime dependent.
+        environment: Environment variables injected into the runtime.
+        mount: Host-to-runtime mount mapping used by container-like resources.
+        model_name_or_path: Model identifier/path for model-serving resources
+            such as vLLM.
+        tensor_parallel_size: Tensor-parallel degree for distributed model
+            serving backends.
+        port: Primary service port for model/runtime endpoints.
+        extra: Free-form backend-specific options not covered by standard
+            fields (for example Ray actor options).
+        max_global_num: Maximum number of resources allowed for this spec
+            (counting both free and acquired instances). For rollout scope this
+            bounds concurrent instances; for global scope this caps total pool size.
     """
     category: str  # Resource kind: "container", "vllm", or "python_env"
     # Container-specific

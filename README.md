@@ -39,6 +39,8 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 ## News
 
+**3/2026 Resource System**: Added a resource system for better environment and container management, and integrated SWE like tasks training.
+
 **12/2025 Method-Based Tool**: Support using `@tool` for a class method
 
 **12/2025 Verl Update**: Updated verl to 0.6.x version.
@@ -49,6 +51,7 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 **08/2025 Chat Template System**: A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. [Learn more →](docs/chat_template/)
 
+
 ## Installation
 **Option 1**: One-line Installation:
 ```
@@ -58,26 +61,41 @@ bash install.sh # Assume conda with python3.12.x
 
 Please refer to [installation.md](docs/start/installation.md) for custmoized installation.
 
+## Tasks
+
+| Task | Model | Report | Status |
+|------|-------|--------|--------|
+| SearchR1 | Qwen2.5 | [report](https://api.wandb.ai/links/AgentRL/vym5u49g) | ✅ |
+| WebShop | Qwen2.5 | TBD | ✅ |
+| ScienceWorld | Qwen3-4B-Instruct | [report](https://api.wandb.ai/links/AgentRL/f99omj98) | ✅ |
+| SWE | Qwen3-32B | [report](https://wandb.ai/AgentRL/Resource/reports/SWE-OS---VmlldzoxNjUzNjk0Mw?accessToken=x4co1e22ddhkm1qjo791a9blmvt4uqz9jmgytybkq4xtgfwt0u8jjx28wpqcsqex) | ✅ (on going) |
+
 ## Quick Start
 ```python
 # Really small example to build an agent and run
+import asyncio
+
 from agentfly.agents import HFAgent
 from agentfly.tools import calculator
-messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]
-agent = HFAgent(
-    model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
-    tools=[calculator],
-    template="qwen2.5",
-    backend="async_vllm",
-)
-await agent.run(
-    messages=messages,
-    max_turns=3,
-    num_chains=1
-)
 
-trajectories = agent.trajectories
-print(trajectories)
+async def main():
+    messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]
+    agent = HFAgent(
+        model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
+        tools=[calculator],
+        template="qwen2.5",
+        backend_config={"backend": "async_vllm"},
+    )
+    await agent.run(
+        messages=messages,
+        max_turns=3,
+        num_chains=1,
+    )
+
+    trajectories = agent.trajectories
+    print(trajectories)
+
+asyncio.run(main())
 ```
 
 ## Features
@@ -92,32 +110,29 @@ Define tools and rewards, which can be used directly by agents.
 def customized_tool(...):
     ...
 
-def custmozed_reward(...):
+@reward(name=...)
+def customized_reward(...):
     ...
 
-agent = ReactAgent(
-    model_name,
+agent = HFAgent(
+    model_name_or_path=model_name,
     tools=[customized_tool],
-    reward=customized_reward
+    reward=customized_reward,
+    backend_config={"backend": "async_vllm"},
 )
 ```
 
 ### 3. Easy Development
 Decoupled agent and training module. Simply customize your own agent, which can directly be applied to training.
 
-## Training Curves
-Reward curves on Qwen2.5-Instruct 3B and 7B models.
-![Curves](assets/images/training_curves.png)
-
 
 ## Training
 ### Run Example Training
-Suppose you are in a compute node (with 8 gpus). We have prepared some training scripts for different tasks and tools in `verl/examples/run_agents/`. The script will try to download our prepared datasets and run training.
+Suppose you are in a compute node (with 8 GPUs). We have prepared training scripts for different tasks and tools in `examples/train_scripts/`. The scripts can download prepared datasets and run training.
 
 Run RL training of code_interpreter:
 ```python
-cd verl
-bash run_agents/run_code_agent.sh
+bash examples/train_scripts/train_example.sh
 ```
 ### Customized Training
 To customize your own training, you need to prepare: 1. Datasets. 2. Define or use existing tools. 3. Define or use existing rewards. 3. Define your own agents or use an existing type of agent.
@@ -165,7 +180,7 @@ def customized_reward(prediction, trajectory, optional_field1, optional_field2):
 For stateful tools and rewards that hold environment instances, please refer to [documentation](https://agentfly.readthedocs.io/).
 
 #### 3. Agents
-You can use existing code agent, react agent, or customize an agent. To customize an agent, the agent class must inherit `BaseAgent`, which handles tool calling, chain rollout. You can custom the `generate` and `parse` function. Refer to [documentation](https://agentfly.readthedocs.io/) for more details.
+You can use existing agents, or customize an agent. To customize an agent, the agent class must inherit `BaseAgent`, which handles tool calling, chain rollout. You can custom the `generate` and `parse` function. Refer to [documentation](https://agentfly.readthedocs.io/) for more details.
 
 ```python
 class CustomizedAgent(BaseAgent):

@@ -319,12 +319,27 @@ class RaySyncExecRunProxy:
 
 class RayContainerResource(BaseResource):
     """
-    Async wrapper around the Ray actor matching :class:`ContainerResource`.
+    Ray-backed implementation of :class:`BaseResource` for container workloads.
 
-    The ``container`` property returns the Ray ``ActorHandle`` (not an enroot object).
+    This wrapper proxies lifecycle and command execution to a remote actor that
+    owns an enroot container on a Ray worker node. Its public behavior mirrors
+    :class:`ContainerResource` so tool/reward code can use the same interface
+    across local and Ray backends.
+
+    Note:
+        The `container` property returns a Ray `ActorHandle`, not a direct
+        enroot container object.
     """
 
     def __init__(self, actor: "ActorHandle", resource_id: str, spec: ResourceSpec):
+        """
+        Initialize a Ray-backed container resource.
+
+        Args:
+            actor: Ray actor handle owning the underlying container lifecycle.
+            resource_id: Stable id used by the resource engine for tracking/reuse.
+            spec: Resource specification that produced this resource.
+        """
         self._actor = actor
         self._resource_id = resource_id
         self._spec = spec
@@ -347,9 +362,11 @@ class RayContainerResource(BaseResource):
         return RaySyncExecRunProxy(self._actor)
 
     async def _ray_get(self, ref: Any, *, timeout_sec: Optional[float]) -> Any:
+        """Resolve a Ray object ref in a worker thread with timeout/error mapping."""
         return await asyncio.to_thread(_ray_get_blocking, ref, timeout_sec)
 
     async def start(self) -> None:
+        """Verify actor/container availability by reloading container state remotely."""
         await self._ray_get(self._actor.reload.remote(), timeout_sec=_RAY_GET_RELOAD_SEC)
 
     async def get_ray_node_id(self) -> str:
@@ -360,6 +377,7 @@ class RayContainerResource(BaseResource):
         )
 
     async def get_status(self) -> ResourceStatus:
+        """Return lifecycle status mapped from the remote container status string."""
         s = await self._ray_get(
             self._actor.get_status_str.remote(),
             timeout_sec=_RAY_GET_NODE_OR_STATUS_SEC,
@@ -371,15 +389,19 @@ class RayContainerResource(BaseResource):
         return ResourceStatus.PENDING
 
     async def control(self, **kwargs: Any) -> None:
+        """Update runtime limits if supported (currently a no-op for Ray container actor)."""
         pass
 
     async def close(self) -> None:
+        """Alias for :meth:`end`."""
         await self.end()
 
     async def reset(self) -> None:
+        """Reset is not supported for this resource type."""
         raise NotImplementedError("RayContainerResource does not support reset.")
 
     async def end(self) -> None:
+        """Kill the remote container, then terminate the backing Ray actor."""
         try:
             await self._ray_get(
                 self._actor.kill_container.remote(),

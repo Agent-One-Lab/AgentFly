@@ -62,7 +62,7 @@ async def r2e_gym_reward(context: Context) -> dict:
             reward_from_container_async(
                 _sync_docker_like_container(container),
                 context.metadata,
-                dataset="r2e",
+                dataset=context.metadata.get("data_source", "r2e"),
                 timeout=eval_timeout,
                 get_test_output=True,
             ),

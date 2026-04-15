@@ -103,7 +103,7 @@ nav:
     - features/agent_rollout.md
     - features/tool_system.md
     - features/reward_system.md
-    - features/environments.md
+    - features/resources.md
   - API Reference:
     - api_references/index.md
     - Agents:
@@ -119,10 +119,11 @@ nav:
       - api_references/rewards/index.md
       - api_references/rewards/reward.md
       - api_references/rewards/predefined_rewards.md
-    - Environments:
-      - api_references/environments/index.md
-      - api_references/environments/environment.md
-      - api_references/environments/predefined_envs.md
+    - Resources:
+      - api_references/resources/index.md
+      - api_references/resources/resources.md
+      - api_references/resources/resource_engine.md
+      - api_references/resources/predefined_envs.md
     - Training:
       - api_references/training/index.md
       - api_references/training/training.md

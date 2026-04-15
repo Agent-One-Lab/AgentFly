@@ -32,17 +32,36 @@ ScienceWorldSpec = ResourceSpec(
         "start_timeout": 10.0,
         "host_ip": "127.0.0.1",
     },
-    max_global_num=64,
+    max_global_num=96,
 )
 
 
 class ScienceWorldEnv(ContainerResource):
     """
-    ContainerResource for ScienceWorld. Runner starts the container; start() connects and waits for /health.
-    Use via Context.acquire_resource(spec=ScienceWorldSpec, scope="rollout", backend="local").
+    Container-backed ScienceWorld environment resource.
+
+    This class extends :class:`ContainerResource` and provides an HTTP-based
+    interaction layer to a ScienceWorld server running inside the container.
+    The resource lifecycle is:
+
+    1. Container is started by the resource runner.
+    2. :meth:`start` resolves mapped host port and waits for `/health`.
+    3. :meth:`reset` loads a task variation and resets episode state.
+    4. :meth:`step` executes environment actions and tracks max score.
+
+    Use this resource through context acquisition (not direct construction):
+    `await context.acquire_resource(spec=ScienceWorldSpec, scope="rollout", backend="local")`.
     """
 
     def __init__(self, container: Any, resource_id: str, spec: ResourceSpec):
+        """
+        Initialize a ScienceWorld resource wrapper around a running container.
+
+        Args:
+            container: Backend container handle created by the resource runner.
+            resource_id: Unique id used by the resource engine.
+            spec: Resource configuration containing image/port/start options.
+        """
         super().__init__(container=container, resource_id=resource_id, spec=spec)
         extra = spec.extra or {}
         self._container_port = int(extra.get("container_port", 2700))
@@ -53,9 +72,11 @@ class ScienceWorldEnv(ContainerResource):
 
     @property
     def category(self) -> str:
+        """Resource category identifier used by the resource engine."""
         return "scienceworld"
 
     async def _connect(self) -> None:
+        """Resolve mapped host port and create an async HTTP client."""
         deadline = time.time() + self._start_timeout
         host_port = None
         while time.time() < deadline:
@@ -77,6 +98,7 @@ class ScienceWorldEnv(ContainerResource):
         self._client = httpx.AsyncClient(base_url=base_url, timeout=40.0)
 
     async def _wait_ready(self) -> None:
+        """Poll `/health` until the ScienceWorld service is ready."""
         deadline = time.time() + self._start_timeout
         while time.time() < deadline:
             try:
@@ -88,6 +110,7 @@ class ScienceWorldEnv(ContainerResource):
         raise RuntimeError("ScienceWorld did not become ready within timeout.")
 
     async def start(self) -> None:
+        """Start base container resource, connect client, and warm-load a default task."""
         await super().start()
         await self._connect()
         await self._wait_ready()
@@ -101,6 +124,15 @@ class ScienceWorldEnv(ContainerResource):
                 await asyncio.sleep(1.0 * (2**attempt))
 
     async def reset(self, env_args: Any = None) -> str:
+        """
+        Load a task variation and reset environment state.
+
+        Args:
+            env_args: Optional dict with `task_name` and `variation_idx`.
+
+        Returns:
+            The initial observation string after loading/resetting the task.
+        """
         env_args = env_args or {}
         task_name = env_args.get("task_name", "boil")
         variation_idx = env_args.get("variation_idx", 0)
@@ -111,6 +143,17 @@ class ScienceWorldEnv(ContainerResource):
         return data.get("observation", "")
 
     async def step(self, action: str) -> Union[str, dict]:
+        """
+        Execute an action in ScienceWorld or return terminal reward info.
+
+        Args:
+            action: ScienceWorld action string, or `"get_reward"` to query
+                the tracked max score-based reward.
+
+        Returns:
+            Observation string for normal actions, or a dict containing
+            `observation` and `reward` for `"get_reward"`.
+        """
         if action == "get_reward":
             return {
                 "observation": "Task completed" if self.score >= 1 else "Task not completed",
@@ -123,6 +166,7 @@ class ScienceWorldEnv(ContainerResource):
         return data.get("observation", "")
 
     async def end(self) -> None:
+        """Close HTTP client and terminate the underlying container resource."""
         if self._client:
             await self._client.aclose()
             self._client = None

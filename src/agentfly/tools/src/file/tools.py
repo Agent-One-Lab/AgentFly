@@ -126,7 +126,7 @@ async def create_file(path: str, content: str = "", context: Context = None):
     )
 
 
-@tool(name="python", max_length=10000)
+@tool(name="run_python", max_length=10000)
 async def run_python(path: str, timeout: int = 60, context: Context = None):
     """
     Run Python only: executes a script file under the workspace (python3 path; cwd is workspace root).

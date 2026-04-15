@@ -178,10 +178,10 @@ eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
-# adv_estimator=grpo
+adv_estimator=grpo
 # adv_estimator=gae
-adv_estimator=contextrl
-use_critic=True
+# adv_estimator=contextrl
+use_critic=False
 
 agent_type=action
 tools="[scienceworld_explorer,summarize]"
@@ -189,14 +189,14 @@ reward_name="scienceworld_reward"
 
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=50
+max_turns=30
 lr_warmup_steps_ratio=0.08
 total_training_steps=300
 gamma=0.99
 lam=0.95
 
 project_name="Context"
-experiment_name="scienceworld_qwen3-4b-instruct_summarize_${adv_estimator}_contextrl_trigger10_50turns"
+experiment_name="scienceworld_qwen3-4b-instruct_summarize_${adv_estimator}_trigger10"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -212,9 +212,9 @@ python -m agentfly.cli train \
     agent.init_config.template=$template \
     agent.init_config.model_name_or_path=$model \
     agent.init_config.reward_name=$reward_name \
-    agent.generation_config.max_tokens=$max_new_tokens_per_turn \
-    agent.max_turns=${max_turns} \
-    agent.num_chains=$num_chains \
+    agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=$num_chains \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.model.path=${model} \

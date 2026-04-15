@@ -76,6 +76,7 @@ reward_name="math_reward_string_equal"
 entropy_coeff=0.001
 kl_loss_type=mse
 max_turns=3
+max_new_tokens_per_turn=256
 agent_backend="async_verl"
 project_name="AgentRL"
 total_training_steps=200
@@ -87,15 +88,17 @@ python3 -m verl.trainer.main_ppo \
     data.train_files=$train_dataset \
     data.val_files=$val_dataset \
     data.train_batch_size=$batch_size \
-    agent.agent_type=$agent_type \
-    agent.tools=$tools \
-    agent.template=$template \
-    agent.model_name_or_path=$model \
-    agent.max_turns=${max_turns} \
-    agent.backend=${agent_backend} \
-    agent.reward_name=$reward_name \
-    agent.num_chains=$num_chains \
     agent.use_agent=True \
+    agent.init_config.agent_type=$agent_type \
+    agent.init_config.tools=$tools \
+    agent.init_config.template=$template \
+    agent.init_config.model_name_or_path=$model \
+    agent.init_config.reward_name=$reward_name \
+    agent.init_config.backend_config.backend=$agent_backend \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=$num_chains \
+    agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
+    agent.run_config.context_config.resource_backend=local \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.model.path=${model} \
@@ -150,5 +153,5 @@ Key parameters to consider:
 - ``batch_size``: Training batch size
 - ``lr``: Learning rate
 - ``num_chains``: Number of interaction chains per sample
-- ``max_turns``: Maximum turns per interaction chain
+- ``max_turns``: Maximum turns per interaction chain (set via ``agent.run_config.max_turns``)
 - ``total_training_steps``: Total number of training steps

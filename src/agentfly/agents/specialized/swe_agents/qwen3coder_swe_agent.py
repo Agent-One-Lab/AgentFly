@@ -13,7 +13,7 @@ from typing import List, Optional
 
 from ...agent_base import BaseAgent
 from ....tools.src.shell.tools import run_shell_command
-from .prompts import Qwen3CoderSystemPrompt
+from .prompts import Qwen3CoderSystemPrompt, Qwen3CoderToolPrompt
 
 class Qwen3CoderSWEAgent(BaseAgent):
     """
@@ -31,7 +31,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
         **kwargs,
     ):
         _tools = tools if tools is not None else [run_shell_command]
-        system_prompt = system_prompt if system_prompt is not None else Qwen3CoderSystemPrompt
+        system_prompt = system_prompt if system_prompt is not None else Qwen3CoderToolPrompt
         super().__init__(
             model_name_or_path,
             tools=_tools,

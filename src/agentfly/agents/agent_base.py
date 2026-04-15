@@ -755,7 +755,7 @@ class BaseAgent(ChainRollout, ABC):
         # Expand to segment level:
         # - Default: trajectory i has n_i segments -> repeat reward i for all n_i segments.
         # - If reward_on_last_segment_only=True: use 0.0 for first n_i-1 segments, reward i only on the last.
-        reward_on_last_segment_only = True
+        reward_on_last_segment_only = False
         reward_values_segment: List[float] = []
         for trajectory in trajectories:
             n = len(trajectory["trajectory_segments"])

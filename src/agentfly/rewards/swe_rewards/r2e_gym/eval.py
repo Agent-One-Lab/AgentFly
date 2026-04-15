@@ -24,6 +24,7 @@ import json
 import re
 import concurrent.futures
 import asyncio
+from types import SimpleNamespace
 
 # Match R2E-Gym Docker runtime PATH for /run_tests.sh
 DOCKER_PATH = "/root/.venv/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -232,6 +233,88 @@ def _run_tests_in_container(
             executor.shutdown(wait=True)
 
 
+def _instance_fail_pass_lists(instance: dict) -> tuple[list, list]:
+    """Parse FAIL_TO_PASS / PASS_TO_PASS like swebench make_test_spec (list or JSON string)."""
+
+    def _from_json_or_obj(key: str):
+        if key not in instance:
+            return []
+        v = instance[key]
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
+    return _from_json_or_obj("FAIL_TO_PASS"), _from_json_or_obj("PASS_TO_PASS")
+
+
+def _resolve_swebench_log_parser(name: str):
+    """
+    ``install_config['log_parser']`` is often a function name (e.g. parse_log_pytest).
+    Older swebench builds only register those under MAP_REPO_TO_PARSER on newer releases;
+    fall back to attributes on ``swebench.harness.log_parsers.python``.
+    """
+    from swebench.harness.log_parsers import MAP_REPO_TO_PARSER
+    from swebench.harness.log_parsers import python as swebench_log_parsers_python
+
+    if name in MAP_REPO_TO_PARSER:
+        return MAP_REPO_TO_PARSER[name]
+    parser = getattr(swebench_log_parsers_python, name, None)
+    if parser is not None:
+        return parser
+    raise KeyError(
+        f"Unknown SWE-bench log parser {name!r}: not in MAP_REPO_TO_PARSER and "
+        "not found on swebench.harness.log_parsers.python"
+    )
+
+
+def _swebench_logs_eval_string(test_spec, content: str) -> tuple[dict, bool]:
+    """
+    Build a test status map from raw log text (same idea as swebench grading.get_logs_eval,
+    but accepts a string instead of a file path).
+
+    Supports ``test_spec.install_config`` (SWE-rebench / inline specs). R2E-Gym's
+    ``get_logs_eval`` does not, and always indexes ``MAP_REPO_VERSION_TO_SPECS[repo]``.
+    """
+    from swebench.harness.constants import (
+        APPLY_PATCH_FAIL,
+        END_TEST_OUTPUT,
+        MAP_REPO_VERSION_TO_SPECS,
+        RESET_FAILED,
+        START_TEST_OUTPUT,
+        TESTS_ERROR,
+        TESTS_TIMEOUT,
+    )
+    from swebench.harness.log_parsers import MAP_REPO_TO_PARSER
+
+    repo = test_spec.repo
+    version = test_spec.version
+    if getattr(test_spec, "install_config", None) is not None:
+        log_parser = _resolve_swebench_log_parser(test_spec.install_config["log_parser"])
+        test_cmd = test_spec.install_config["test_cmd"]
+    else:
+        log_parser = MAP_REPO_TO_PARSER[repo]
+        test_cmd = MAP_REPO_VERSION_TO_SPECS[repo][version]["test_cmd"]
+    if isinstance(test_cmd, list):
+        test_cmd = test_cmd[-1]
+
+    bad_codes = list(
+        filter(
+            lambda x: x in content,
+            [APPLY_PATCH_FAIL, RESET_FAILED, TESTS_ERROR, TESTS_TIMEOUT],
+        )
+    )
+    if bad_codes:
+        return {}, False
+
+    if START_TEST_OUTPUT in content and END_TEST_OUTPUT in content:
+        content = content.split(START_TEST_OUTPUT)[1].split(END_TEST_OUTPUT)[0]
+    elif test_cmd and test_cmd in content:
+        # Raw pytest / agent container logs (no harness markers): match r2e_gym split behavior.
+        content = content.split(test_cmd)[-1]
+
+    return log_parser(content, test_spec), True
+
+
 def _reward_swebench(ds: dict, out: str, get_test_output: bool):
     """SWE-Bench / SWE-Bench Verified: grade via FAIL_TO_PASS and PASS_TO_PASS."""
     from r2egym.agenthub.trajectory.swebench_utils import get_logs_eval, make_test_spec
@@ -244,8 +327,23 @@ def _reward_swebench(ds: dict, out: str, get_test_output: bool):
     from swebench.harness.grading import get_eval_tests_report, get_resolution_status
     from swebench.harness.log_parsers import get_eval_type
 
-    test_spec = make_test_spec(ds)
-    eval_status_map, found = get_logs_eval(test_spec, out)
+    # R2E-Gym's make_test_spec ignores install_config and always uses MAP_REPO_VERSION_TO_SPECS.
+    # PyPI swebench often has no install_config on TestSpec either; use a minimal namespace so
+    # SWE-rebench rows work without upgrading swebench.
+    if ds.get("install_config") is not None:
+        f2p, p2p = _instance_fail_pass_lists(ds)
+        test_spec = SimpleNamespace(
+            repo=ds["repo"],
+            version=ds.get("version"),
+            instance_id=ds[KEY_INSTANCE_ID],
+            FAIL_TO_PASS=f2p,
+            PASS_TO_PASS=p2p,
+            install_config=ds["install_config"],
+        )
+        eval_status_map, found = _swebench_logs_eval_string(test_spec, out)
+    else:
+        test_spec = make_test_spec(ds)
+        eval_status_map, found = get_logs_eval(test_spec, out)
     if not found:
         reward = 0.0
     else:

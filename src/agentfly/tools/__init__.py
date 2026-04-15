@@ -18,7 +18,6 @@ from .src.search.dense_retriever import dense_retrieve
 from .src.ui.tools import pyautogui_code_generator
 from .src.webshop.tools import webshop_browser
 from .tool_base import BaseTool
-from .src.file.tools import grep_search, list_files
 from .src.context.tools import summarize
 
 from .src.file.tools import (
@@ -30,6 +29,10 @@ from .src.file.tools import (
     run_python,
     undo_edit,
 )
+
+from .src.shell.tools import run_shell_command
+
+
 @tool()
 def hallucination_tool(tool_name):
     return f"Hallucinated tool: {tool_name} does not exist."
@@ -75,4 +78,5 @@ __all__ = [
     "edit_file",
     "run_python",
     "undo_edit",
+    "run_shell_command",
 ]

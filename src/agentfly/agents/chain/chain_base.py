@@ -10,6 +10,7 @@ from collections import defaultdict
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
+from chat_bricks import Chat
 from tqdm.asyncio import tqdm_asyncio
 
 from ...core import Context, ContextConfig
@@ -540,6 +541,44 @@ class ChainRollout:
         except Exception:
             return 0
 
+    def _estimate_chat_prompt_tokens(
+        self, current_node: Node, tools: Optional[List] = None
+    ) -> int:
+        """Prompt token count via chat_bricks ``Chat`` + ``tokenize`` (same path as training)."""
+        tokenizer = getattr(self, "tokenizer", None)
+        if tokenizer is None:
+            raise ValueError(
+                "Tokenizer is required when using max_model_len to set max_tokens."
+            )
+        template = getattr(self, "template", None)
+        if not template:
+            raise ValueError(
+                "template is required for the first prompt length estimate."
+            )
+        messages = current_node.messages.messages
+        processor = getattr(self, "processor", None)
+        chat = Chat(
+            template,
+            messages,
+            tokenizer=tokenizer,
+            ignore_tool_calls=False,
+        )
+        inputs = chat.tokenize(
+            tokenizer,
+            add_generation_prompt=True,
+            tools=tools,
+            processor=processor,
+        )
+        am = inputs["attention_mask"]
+        if isinstance(am, list):
+            n = sum(am)
+        else:
+            n = int(am.sum().item())
+        max_model_len = getattr(self, "max_model_len", None)
+        if max_model_len is not None:
+            n = min(n, max_model_len)
+        return n
+
     def _maybe_append_context_trigger_user_message(self, current_node: Node) -> None:
         """Hook for subclasses to append a user turn before the next LLM call. No-op by default."""
         return
@@ -548,13 +587,43 @@ class ChainRollout:
         self,
         generation_config: Optional[Dict[str, Any]],
         current_node: Node,
+        tools: Optional[List] = None,
     ) -> Dict[str, Any]:
-        """Set max_tokens to max_model_len - total_token_length when not specified."""
+        """Merge max_tokens / max_new_tokens; if ``max_model_len`` is set, cap completion budget.
+
+        Only the first generation in a chain (``total_token_length == 0`` on the node) uses
+        chat_bricks ``Chat.tokenize``; later turns use
+        ``max_model_len - total_token_length``.
+        """
         config = dict(generation_config) if generation_config else {}
         max_model_len = getattr(self, "max_model_len", None)
-        if max_model_len is not None and "max_tokens" not in config:
-            remaining = max_model_len - current_node.total_token_length
-            config["max_tokens"] = max(1, remaining)
+
+        if config.get("max_tokens") is not None:
+            config.pop("max_new_tokens", None)
+        else:
+            max_new = config.pop("max_new_tokens", None)
+            if max_new is not None:
+                config["max_tokens"] = max_new
+
+        if max_model_len is not None:
+            if current_node.total_token_length == 0:
+                prompt_tok = self._estimate_chat_prompt_tokens(
+                    current_node, tools=tools
+                )
+            else:
+                prompt_tok = current_node.total_token_length
+            budget = max_model_len - prompt_tok
+            budget = max(1, budget)
+            explicit = config.get("max_tokens")
+            if explicit is None:
+                config["max_tokens"] = budget
+            else:
+                try:
+                    explicit_int = int(explicit)
+                except (TypeError, ValueError):
+                    explicit_int = budget
+                config["max_tokens"] = max(1, min(explicit_int, budget))
+
         return config
 
     async def _generate_response(
@@ -562,7 +631,7 @@ class ChainRollout:
     ) -> Tuple[Any, Optional[int]]:
         """Generate response with optional streaming support. Returns (message, total_token_length)."""
         effective_config = self._prepare_generation_config(
-            generation_config, current_node
+            generation_config, current_node, tools=tools
         )
         if enable_streaming:
             return await self._generate_response_streaming(
