@@ -19,6 +19,7 @@ class Indexer:
             import faiss
         except ImportError:
             raise ImportError("faiss is not installed, please install it using `conda install pytorch::faiss-gpu`")
+        self.faiss = faiss
 
         self.similarity = similarity
         self.use_gpu = use_gpu
@@ -26,12 +27,12 @@ class Indexer:
 
         # 1. Load or Create the Base Index (CPU)
         if embeddings is not None:
-            self.index = faiss.IndexFlatIP(vector_size)
+            self.index = self.faiss.IndexFlatIP(vector_size)
             if similarity == "cosine":
                 embeddings /= np.linalg.norm(embeddings, axis=1)[:, None]
             self.index.add(embeddings)
         elif index_file is not None:
-            self.index = faiss.read_index(index_file)
+            self.index = self.faiss.read_index(index_file)
             print(
                 f"Loaded FAISS index: {self.index.ntotal} vectors, {self.index.d} dimensions"
             )
@@ -50,7 +51,7 @@ class Indexer:
         """Get number of available GPUs. faiss.get_num_gpus() can return 0 on some
         conda builds (e.g. conda-forge faiss-gpu 1.8+); fall back to torch if available.
         """
-        res_count = faiss.get_num_gpus()
+        res_count = self.faiss.get_num_gpus()
         if res_count > 0:
             return res_count
         try:
@@ -75,23 +76,25 @@ class Indexer:
         # Multiple versions compatibility
         try:
             # Use GpuMultipleClonerOptions for multi-GPU sharding
-            co = faiss.GpuMultipleClonerOptions()
+            co = self.faiss.GpuMultipleClonerOptions()
             co.shard = True  # Enable sharding (splits data)
             co.useFloat16 = True  # Critical for 21M vectors to fit VRAM
 
-            gpu_index = faiss.index_cpu_to_all_gpus(cpu_index, co=co, ngpu=actual_gpus)
+            gpu_index = self.faiss.index_cpu_to_all_gpus(
+                cpu_index, co=co, ngpu=actual_gpus
+            )
             return gpu_index
         except Exception as e:
             # Fallback: try single-GPU with StandardGpuResources if available
             # (some conda faiss-gpu builds don't expose StandardGpuResources)
             if (
                 actual_gpus >= 1
-                and hasattr(faiss, "StandardGpuResources")
-                and hasattr(faiss, "index_cpu_to_gpu")
+                and hasattr(self.faiss, "StandardGpuResources")
+                and hasattr(self.faiss, "index_cpu_to_gpu")
             ):
                 try:
-                    res = faiss.StandardGpuResources()
-                    gpu_index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
+                    res = self.faiss.StandardGpuResources()
+                    gpu_index = self.faiss.index_cpu_to_gpu(res, 0, cpu_index)
                     print(f"Using single GPU (multi-GPU failed: {e})")
                     return gpu_index
                 except Exception as e2:

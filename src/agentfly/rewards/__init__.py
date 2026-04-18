@@ -25,6 +25,7 @@ from .reward_base import (
 from .scienceworld_reward import scienceworld_reward
 from .webshop_reward import webshop_reward
 from .swe_rewards.swe_rewards import swe_reward, r2e_gym_reward
+from .vlm_as_judge.simuscene_reward import vlm_as_judge_pass_reward, vlm_as_judge_pass_reward_multi_model
 
 __all__ = [
     "BaseReward",
@@ -47,4 +48,6 @@ __all__ = [
     "scienceworld_reward",
     "gui_reward",
     "code_reward_test",
+    "vlm_as_judge_pass_reward",
+    "vlm_as_judge_pass_reward_multi_model",
 ]

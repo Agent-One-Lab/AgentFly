@@ -14,14 +14,22 @@ import logging
 from enroot import from_env, random_name
 from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
 from .containers import ContainerResource, create_ray_container_resource
-from .types import BaseResource, ResourceSpec, ResourceStatus
+from .models import APIModelResource, VLLMModelResource
+from .types import (
+    APIModelResourceSpec,
+    BaseResource,
+    ContainerResourceSpec,
+    ResourceStatus,
+    BaseResourceSpec,
+    VLLMModelResourceSpec,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def _start_enroot_container(
     client: Any,
-    spec: ResourceSpec,
+    spec: ContainerResourceSpec,
     resource_id: Optional[str],
     timeout: Optional[float] = 1800.0,
     *,
@@ -31,35 +39,32 @@ async def _start_enroot_container(
     """Create + start an enroot container on the local enroot client (this machine)."""
     name = resource_id or random_name(prefix="res")
     image = spec.image or "ubuntu:22.04"
+    timeout_sec = 1800.0 if timeout is None else timeout
     create_kwargs: Dict[str, Any] = {
         "name": name,
         "environment": spec.environment or {},
         "mount": spec.mount or {},
         "ports": spec.ports,
-        "timeout": timeout,
+        "timeout": timeout_sec,
     }
 
     start_kwargs: Dict[str, Any] = {
-        "timeout": timeout,
+        "timeout": timeout_sec,
         "environment": spec.environment or {},
         "mount": spec.mount or {},
     }
 
     logger.debug(f"[{runner_label}]: creating container image={image} kwargs: {create_kwargs}")
     try:
-        if hasattr(client.containers, "create_async"):
-            container = await client.containers.create_async(image, **create_kwargs)
-        else:
-            container = await asyncio.to_thread(
-                client.containers.create,
-                image,
-                **create_kwargs,
-            )
+        container = await client.containers.create_async(
+            image,
+            **create_kwargs,
+        )
+
         logger.debug(f"[{runner_label}]: starting container name={name} kwargs: {start_kwargs}")
-        if hasattr(container, "start_async"):
-            await container.start_async(**start_kwargs)
-        else:
-            await asyncio.to_thread(container.start, **start_kwargs)
+
+        await container.start_async(**start_kwargs)
+        
     except (asyncio.TimeoutError, TimeoutError, EnrootTimeoutError) as e:
         raise asyncio.TimeoutError(
             f"Container create/start timed out for image={image!r}, name={name!r}, timeout={timeout!r}."
@@ -110,7 +115,7 @@ class BaseRunner(abc.ABC):
     @abc.abstractmethod
     async def start_resource(
         self,
-        spec: ResourceSpec,
+        spec: BaseResourceSpec,
         resource_id: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> BaseResource:
@@ -157,7 +162,7 @@ class LocalRunner(BaseRunner):
 
     async def start_resource(
         self,
-        spec: ResourceSpec,
+        spec: BaseResourceSpec,
         resource_id: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> BaseResource:
@@ -165,11 +170,13 @@ class LocalRunner(BaseRunner):
             return await self._start_container(spec, resource_id, timeout=timeout)
         if spec.category == "vllm":
             return await self._start_vllm(spec, resource_id, timeout=timeout)
+        if spec.category == "api_model":
+            return await self._start_api_model(spec, resource_id, timeout=timeout)
         raise ValueError(f"LocalRunner does not support resource category: {spec.category}")
 
     async def _start_container(
         self,
-        spec: ResourceSpec,
+        spec: ContainerResourceSpec,
         resource_id: Optional[str],
         timeout: Optional[float] = None,
     ) -> BaseResource:
@@ -185,12 +192,33 @@ class LocalRunner(BaseRunner):
 
     async def _start_vllm(
         self,
-        spec: ResourceSpec,
+        spec: VLLMModelResourceSpec,
         resource_id: Optional[str],
         timeout: Optional[float] = None,
     ) -> BaseResource:
-        # TODO: vLLM local process or subprocess; return VLLMResource
-        raise NotImplementedError("LocalRunner VLLM not implemented.")
+        startup_timeout = timeout if timeout is not None else 300.0
+        resource = VLLMModelResource(
+            spec=spec,
+            resource_id=resource_id,
+            startup_timeout=startup_timeout,
+        )
+        await resource.start()
+        return resource
+
+    async def _start_api_model(
+        self,
+        spec: APIModelResourceSpec,
+        resource_id: Optional[str],
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
+        startup_timeout = timeout if timeout is not None else 60.0
+        resource = APIModelResource(
+            spec=spec,
+            resource_id=resource_id,
+            startup_timeout=startup_timeout,
+        )
+        await resource.start()
+        return resource
 
     async def end_resource(self, resource: BaseResource) -> None:
         await resource.end()
@@ -205,7 +233,7 @@ class RayRunner(BaseRunner):
     Start containers as :class:`~agentfly.resources.containers.ray_container_resource.RayContainerResource`.
 
     Requires ``ray.init(...)`` in this process (or ``RAY_ADDRESS`` + init). Pass
-    ``spec.extra['ray_actor_options']`` (e.g. ``scheduling_strategy``) to control
+    ``spec.ray_actor_options`` (e.g. ``scheduling_strategy``) to control
     which Ray worker runs the enroot-backed actor.
     """
 
@@ -218,15 +246,14 @@ class RayRunner(BaseRunner):
 
     async def start_resource(
         self,
-        spec: ResourceSpec,
+        spec: ContainerResourceSpec,
         resource_id: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> BaseResource:
         if spec.category != "container":
             raise ValueError(f"RayRunner currently supports only container, got: {spec.category}")
         rid = resource_id or random_name(prefix="ray_res")
-        extra = spec.extra or {}
-        ray_opts = extra.get("ray_actor_options")
+        ray_opts = spec.ray_actor_options
         opts: Optional[dict[str, Any]] = dict(ray_opts) if isinstance(ray_opts, dict) else None
         start_timeout = timeout if timeout is not None else 1800.0
         resource = await create_ray_container_resource(
@@ -255,7 +282,7 @@ class CloudRunner(BaseRunner):
 
     async def start_resource(
         self,
-        spec: ResourceSpec,
+        spec: BaseResourceSpec,
         resource_id: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> BaseResource:
@@ -277,7 +304,7 @@ class K8sRunner(BaseRunner):
 
     async def start_resource(
         self,
-        spec: ResourceSpec,
+        spec: BaseResourceSpec,
         resource_id: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> BaseResource:

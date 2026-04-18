@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+from ...core.context import Context
 from ..agent_base import BaseAgent
 from ..chain.structures import Node
 
@@ -31,7 +32,7 @@ class ActionAgent(BaseAgent):
         model_name_or_path: str,
         tool_parser_name: Optional[str] = None,
         tools: List = [],
-        context_trigger_turns: Optional[int] = 10,
+        context_trigger_turns: Optional[int] = None,
         context_trigger_message: Optional[str] = None,
         **kwargs,
     ):
@@ -177,8 +178,22 @@ class ActionAgent(BaseAgent):
             else "continue",
         }
 
-    def parse(self, responses: List[str], current_segments: List[List[Dict]]) -> List[Dict]:
-        return [self._parse_single_response(response, current_segments[i]) for i, response in enumerate(responses)]
+    def parse(
+        self,
+        responses: List[str],
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> List[Dict]:
+        trajectory_segments = []
+        if context is not None:
+            trajectory_segments = context.metadata.get("trajectory_segments", [])
+        return [
+            self._parse_single_response(
+                response,
+                trajectory_segments[i] if i < len(trajectory_segments) else [],
+            )
+            for i, response in enumerate(responses)
+        ]
 
     def _segment_is_terminal_summarize_without_prior_action(self, segment: List[Dict]) -> bool:
         """

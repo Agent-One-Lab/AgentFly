@@ -1,9 +1,9 @@
-from agentfly.resources import ResourceEngine, ResourceSpec
+from agentfly.resources import ContainerResourceSpec, ResourceEngine
 import pytest
 
 @pytest.mark.asyncio
 async def test_engine_run():
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image="ubuntu:22.04",
     )

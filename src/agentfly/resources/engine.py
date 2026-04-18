@@ -13,19 +13,21 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import uuid
-from .types import BaseResource, ResourceSpec, ResourceStatus
+from .types import BaseResource, ResourceStatus, BaseResourceSpec
 from .runner import LocalRunner, RayRunner, CloudRunner, K8sRunner
 if TYPE_CHECKING:
     from .runner import BaseRunner
 
 
-def _pool_key(spec: ResourceSpec, backend: str) -> str:
+def _pool_key(spec: BaseResourceSpec, backend: str) -> str:
     """Stable key for (spec, backend). Use '|' so backend can be parsed."""
-    spec_key = f"{spec.category}:{spec.image or spec.model_name_or_path or 'default'}"
+    image = getattr(spec, "image", None)
+    model_name_or_path = getattr(spec, "model_name_or_path", None)
+    spec_key = f"{spec.category}:{image or model_name_or_path or 'default'}"
     key = f"{spec_key}|{backend}"
     if backend == "ray":
         # Same image with different Ray placement options must not share a pool entry.
-        ropts = (spec.extra or {}).get("ray_actor_options")
+        ropts = getattr(spec, "ray_actor_options", None)
         key = f"{key}|{json.dumps(ropts, sort_keys=True, default=str) if ropts is not None else ''}"
     return key
 
@@ -93,7 +95,7 @@ class ResourceEngine:
     @classmethod
     async def start(
         cls,
-        spec: ResourceSpec,
+        spec: BaseResourceSpec,
         size: int = 1,
         backend: str = "local",
         **kwargs: Any,
@@ -153,7 +155,7 @@ class ResourceEngine:
     async def acquire(
         cls,
         id: str,
-        spec: ResourceSpec,
+        spec: BaseResourceSpec,
         backend: str = "local",
         timeout: Optional[float] = 600.0,
     ) -> BaseResource:

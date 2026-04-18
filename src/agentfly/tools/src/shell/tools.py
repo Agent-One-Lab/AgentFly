@@ -14,7 +14,7 @@ from enroot.errors import (
 from ray.exceptions import RayTaskError
 
 from ....core import Context
-from ....resources import ResourceSpec
+from ....resources import ContainerResourceSpec
 from ...decorator import tool
 from .command_filter import CommandFilter
 
@@ -68,7 +68,7 @@ async def _run_shell(context: Context, cmd: str) -> str:
     #     return block_reason
 
     rollout_id = context.rollout_id
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image=image_id,
     )

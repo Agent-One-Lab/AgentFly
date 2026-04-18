@@ -4,7 +4,7 @@ import os
 os.environ["ENROOT_IMAGES_PATH"] = "/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images"
 os.environ["ENROOT_ASYNC"] = "1"
 from agentfly.core import Context
-from agentfly.resources import ResourceSpec
+from agentfly.resources import ContainerResourceSpec
 from agentfly.rewards.swe_rewards.utils import get_patch_from_runtime
 
 
@@ -21,7 +21,7 @@ async def test_get_patch_from_runtime_swe_smith():
     )
     try:
         container = await context.acquire_resource(
-            spec=ResourceSpec(category="container", image=IMAGE_ID),
+            spec=ContainerResourceSpec(category="container", image=IMAGE_ID),
             id=context.rollout_id,
             scope="rollout",
             backend="local",
@@ -52,7 +52,7 @@ async def test_get_patch_from_runtime_with_instance_base_commit():
     )
     try:
         container = await context.acquire_resource(
-            spec=ResourceSpec(category="container", image=IMAGE_ID),
+            spec=ContainerResourceSpec(category="container", image=IMAGE_ID),
             id=context.rollout_id,
             scope="rollout",
             backend="local",

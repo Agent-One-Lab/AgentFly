@@ -1,9 +1,9 @@
-from agentfly.resources import ResourceSpec
+from agentfly.resources import ContainerResourceSpec
 import pytest
 
 @pytest.mark.asyncio
 async def test_file_env_mount(local_runner):
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image="ubuntu:22.04",
         mount={"src/agentfly/tools/src/file": "/root:ro,rbind"}

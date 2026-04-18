@@ -25,7 +25,7 @@ import ray
 from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
 from ray.exceptions import ActorDiedError, GetTimeoutError as RayGetTimeoutError
 
-from ..types import BaseResource, ResourceSpec, ResourceStatus
+from ..types import BaseResource, ContainerResourceSpec, ResourceStatus
 
 if TYPE_CHECKING:
     from ray.actor import ActorHandle
@@ -130,7 +130,7 @@ class _RayEnrootContainerActorBase:
     def __init__(
         self,
         resource_id: str,
-        spec: ResourceSpec,
+        spec: ContainerResourceSpec,
         start_timeout: Optional[float] = 1800.0,
     ):
         from enroot import from_env, random_name
@@ -331,7 +331,7 @@ class RayContainerResource(BaseResource):
         enroot container object.
     """
 
-    def __init__(self, actor: "ActorHandle", resource_id: str, spec: ResourceSpec):
+    def __init__(self, actor: "ActorHandle", resource_id: str, spec: ContainerResourceSpec):
         """
         Initialize a Ray-backed container resource.
 
@@ -447,7 +447,7 @@ class RayContainerResource(BaseResource):
 
 
 async def create_ray_container_resource(
-    spec: ResourceSpec,
+    spec: ContainerResourceSpec,
     resource_id: str,
     *,
     start_timeout: Optional[float] = 1800.0,

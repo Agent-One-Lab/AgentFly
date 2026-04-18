@@ -8,7 +8,7 @@ for tools and rewards that need to run in containers or access shared resources.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Set
-from ..resources.types import BaseResource, ResourceSpec
+from ..resources.types import BaseResource, ContainerResourceSpec, BaseResourceSpec
 from .context_config import ContextConfig, resolve_resource_backend
 
 
@@ -24,9 +24,11 @@ def _coerce_context_config(raw: Optional[Any]) -> ContextConfig:
     )
 
 
-def _spec_key(spec: ResourceSpec) -> str:
+def _spec_key(spec: BaseResourceSpec) -> str:
     """Stable hashable key for a spec (category + image or model)."""
-    return f"{spec.category}:{spec.image or spec.model_name_or_path or 'default'}"
+    image = getattr(spec, "image", None)
+    model_name_or_path = getattr(spec, "model_name_or_path", None)
+    return f"{spec.category}:{image or model_name_or_path or 'default'}"
 
 
 class Context:
@@ -46,7 +48,9 @@ class Context:
         Args:
             rollout_id: Unique identifier for this rollout/chain execution
             group_id: Optional group identifier for grouping related rollouts
-            metadata: Optional dictionary containing additional metadata (e.g., image_id)
+            metadata: Optional dictionary containing additional metadata (e.g., image_id).
+                Stored as a shallow copy so mutating ``context.metadata`` (replace the
+                whole dict) does not affect the caller's original mapping.
             context_config: :class:`ContextConfig`, or a mapping / object with the same fields
                 (e.g. Hydra ``agent.run_config.context_config``).
         """
@@ -54,7 +58,8 @@ class Context:
         self.group_id = group_id
         self.final_response: str = None
         self.trajectory: List[Dict[str, Any]] = []
-        self.metadata = metadata or {}
+        self.trajectory_format: str = "flat"
+        self.metadata = dict(metadata) if metadata else {}
         self.context_config: ContextConfig = _coerce_context_config(context_config)
         self.rollout_resource_ids: List[str] = []
         self.global_resource_ids: Set[str] = set()
@@ -73,7 +78,7 @@ class Context:
         """Backend name for ``ResourceEngine.acquire`` (``ContextConfig`` then metadata)."""
         return resolve_resource_backend(self.metadata, self.context_config)
 
-    def is_spec_acquired(self, spec: ResourceSpec) -> bool:
+    def is_spec_acquired(self, spec: BaseResourceSpec) -> bool:
         """Return True if a resource for this spec has been acquired this rollout."""
         return _spec_key(spec) in self._resource_acquired
 
@@ -84,7 +89,7 @@ class Context:
     async def acquire_resource(
         self,
         id: Optional[str] = None,
-        spec: Optional[ResourceSpec] = None,
+        spec: Optional[BaseResourceSpec] = None,
         scope: Literal["rollout", "global"] = "rollout",
         backend: Optional[str] = None,
         timeout: Optional[float] = 600.0,
@@ -98,7 +103,7 @@ class Context:
                 raise ValueError(
                     "Either id+spec or image_id in metadata must be provided"
                 )
-            spec = ResourceSpec(
+            spec = ContainerResourceSpec(
                 category="container",
                 image=image_id,
             )

@@ -3,8 +3,9 @@
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from ...core.context import Context
 from ...utils.ui_action_parser import IMAGE_FACTOR, parse_action_to_structure_output
 from ..agent_base import BaseAgent
 
@@ -84,17 +85,22 @@ class GUIAgent(BaseAgent):
     #     # Otherwise use parent's initialization
     #     return super()._init_llm_engine(model_name_or_path, backend)
 
-    def parse(self, responses: List[str], tools: List[Any]) -> List[Dict[str, Any]]:
+    def parse(
+        self,
+        responses: List[str],
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
         """
         Parse model responses into structured messages.
 
         Args:
             responses: List of model response strings
-            tools: List of available tools
 
         Returns:
             List of structured messages with tool calls
         """
+
         logger.debug(f"[GUIAgent.parse] Number of responses: {len(responses)}")
         logger.debug(f"[GUIAgent.parse] Raw responses type: {type(responses)}")
 

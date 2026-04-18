@@ -5,6 +5,17 @@ from typing import Callable, List, Optional
 REWARD_REGISTRY = {}
 
 
+async def calculate_reward(reward_fn: Callable | None, **kwargs):
+    """Execute a reward function and await async results when needed."""
+    if reward_fn is None:
+        return None
+
+    reward = reward_fn(**kwargs)
+    if inspect.isawaitable(reward):
+        reward = await reward
+    return reward
+
+
 class BaseReward:
     """
     Base class for reward functions.

@@ -3,6 +3,7 @@ import logging
 import re
 from typing import Dict, List, Optional
 
+from ...core.context import Context
 from ...tools import BaseTool
 from ..agent_base import BaseAgent
 from ..parsers import extract_tool_calls
@@ -110,7 +111,12 @@ class ReactAgent(BaseAgent):
             **kwargs,
         )
 
-    def parse(self, responses: List[str]) -> List[Dict]:
+    def parse(
+        self,
+        responses: List[str],
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> List[Dict]:
         """
         Generates an assistant message compatible with tool-calling.
         Returns:

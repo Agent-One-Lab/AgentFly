@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import json
 import logging
 import random
@@ -14,6 +13,7 @@ from chat_bricks import Chat
 from tqdm.asyncio import tqdm_asyncio
 
 from ...core import Context, ContextConfig
+from ...rewards.reward_base import calculate_reward
 from ...tools.tool_base import submit_tool_call
 from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
 from ...utils.timing import Timer
@@ -335,6 +335,7 @@ class ChainRollout:
             chain_id=chain_id,
             generation_config=generation_config,
             enable_streaming=enable_streaming,
+            context=context,
         )
 
         newest_messages.append(new_msg)
@@ -429,6 +430,7 @@ class ChainRollout:
                     tool_call_id=tool_call["id"],
                     tool_result_name=result["name"],
                     new_content=new_content,
+                    context=context,
                 )
 
                 action_input_node.messages = updated_messages
@@ -454,6 +456,7 @@ class ChainRollout:
         tool_call_id: str,
         tool_result_name: str,
         new_content: List[Dict[str, Any]],
+        context: Context,
     ) -> Messages:
         """
         Apply context folding based on the tool that was just executed.
@@ -489,7 +492,7 @@ class ChainRollout:
             folded_turns = fold_messages_with_summarize(
                 messages.messages, observation, keep_previous_summary=False
             )
-            # folded_turns.append(tool_turn)
+            context.trajectory_format = "segmented"
             meta = messages.meta
             return Messages.from_turns(folded_turns, **meta)
 
@@ -627,7 +630,15 @@ class ChainRollout:
         return config
 
     async def _generate_response(
-        self, chain, current_node, tools, depth, chain_id, generation_config, enable_streaming
+        self,
+        chain,
+        current_node,
+        tools,
+        depth,
+        chain_id,
+        generation_config,
+        enable_streaming,
+        context: Context,
     ) -> Tuple[Any, Optional[int]]:
         """Generate response with optional streaming support. Returns (message, total_token_length)."""
         effective_config = self._prepare_generation_config(
@@ -635,14 +646,26 @@ class ChainRollout:
         )
         if enable_streaming:
             return await self._generate_response_streaming(
-                chain=chain, current_node=current_node, tools=tools, depth=depth, chain_id=chain_id, generation_config=effective_config
+                chain=chain,
+                current_node=current_node,
+                tools=tools,
+                depth=depth,
+                chain_id=chain_id,
+                generation_config=effective_config,
+                context=context,
             )
         return await self._generate_response_non_streaming(
-            chain=chain, current_node=current_node, tools=tools, depth=depth, chain_id=chain_id, generation_config=effective_config
+            chain=chain,
+            current_node=current_node,
+            tools=tools,
+            depth=depth,
+            chain_id=chain_id,
+            generation_config=effective_config,
+            context=context,
         )
 
     async def _generate_response_streaming(
-        self, chain, current_node, tools, depth, chain_id, generation_config
+        self, chain, current_node, tools, depth, chain_id, generation_config, context
     ):
         """Generate response with streaming: emit events and optionally stream from LLM."""
         await self.streaming_manager.emit_event(
@@ -690,7 +713,11 @@ class ChainRollout:
                 f"[ChainRollout._generate_response] full_response: {full_response}"
             )
             await self._emit_generation_end(chain_id, depth, full_response)
-            new_msg = self.parse([full_response], [current_node.messages.messages])
+            context.metadata = {
+                **context.metadata,
+                "trajectory_segments": [current_node.messages.messages],
+            }
+            new_msg = self.parse([full_response], context=context)
             return (new_msg[0], None)
 
         # Fallback to non-streaming when streaming not available
@@ -704,7 +731,11 @@ class ChainRollout:
         response_texts = responses.get("response_texts") or responses.get(
             "reponse_texts"
         )
-        new_msg = self.parse(response_texts, [current_node.messages.messages])
+        context.metadata = {
+            **context.metadata,
+            "trajectory_segments": [current_node.messages.messages],
+        }
+        new_msg = self.parse(response_texts, context=context)
         full_response = self._normalize_full_response_content(
             new_msg[0].get("content", "")
         )
@@ -738,7 +769,7 @@ class ChainRollout:
         )
 
     async def _generate_response_non_streaming(
-        self, chain, current_node, tools, depth, chain_id, generation_config
+        self, chain, current_node, tools, depth, chain_id, generation_config, context
     ) -> Tuple[Any, Optional[int]]:
         """Generate response without streaming (no events). Returns (message, total_token_length)."""
         raw = await self.generate_async(
@@ -749,7 +780,11 @@ class ChainRollout:
         )
         responses = self._normalize_generate_response(raw)
         response_texts = responses.get("response_texts")
-        new_msg = self.parse(response_texts, [current_node.messages.messages])
+        context.metadata = {
+            **context.metadata,
+            "trajectory_segments": [current_node.messages.messages],
+        }
+        new_msg = self.parse(response_texts, context=context)
         total_length = self._extract_total_length(responses)
         return (new_msg[0], total_length)
 
@@ -783,13 +818,14 @@ class ChainRollout:
                 for k in ("task_name", "variation_idx")
                 if k in context.metadata
             }
-            if env_args:
-                await context.reset_resource(scope="rollout", env_args=env_args)
-                await context.reset_resource(scope="global", env_args=env_args)
-            else:
-                await context.reset_resource(scope="rollout")
-                await context.reset_resource(scope="global")
-            have_set_resources = True
+            # We have moved reset to the tool call
+            # if env_args:
+            #     await context.reset_resource(scope="rollout", env_args=env_args)
+            #     await context.reset_resource(scope="global", env_args=env_args)
+            # else:
+            #     await context.reset_resource(scope="rollout")
+            #     await context.reset_resource(scope="global")
+            # have_set_resources = True
 
         # Execute tool call
         result = await submit_tool_call(
@@ -834,7 +870,11 @@ class ChainRollout:
                 full_trajectory.extend(segment)
             final_response = self.extract_final_response(full_trajectory)
 
-            context.trajectory = full_trajectory
+            if context.trajectory_format == "flat":
+                context.trajectory = chain.histories[0]
+            else:
+                context.trajectory = chain.histories
+            
             context.final_response = final_response
             
             other_args = {
@@ -843,17 +883,14 @@ class ChainRollout:
                 if k not in ["final_response", "trajectory", "id"]
             }
 
-            # TODO: move the reward calculation to reward module
-            reward = self._reward_fn(
+            reward = await calculate_reward(
+                self._reward_fn,
                 final_response=final_response,
                 **other_args,
-                trajectory=chain.histories,
+                trajectory=context.trajectory,
                 id=chain_id,
                 context=context,
             )
-            if inspect.iscoroutine(reward):
-                reward = await reward
-
             chain.info["reward"] = reward
         else:
             chain.info["reward"] = None
@@ -882,9 +919,9 @@ class ChainRollout:
             )
 
             for name, value in (
-                ("Agent/rollout/time/min", min_t),
-                ("Agent/rollout/time/max", max_t),
-                ("Agent/rollout/time/avg", avg_t),
+                ("agent/rollout/time/min", min_t),
+                ("agent/rollout/time/max", max_t),
+                ("agent/rollout/time/avg", avg_t),
             ):
                 emit(
                     MetricEvent(
@@ -892,7 +929,7 @@ class ChainRollout:
                         name=name,
                         value=value,
                         x=self.global_step,
-                        x_name="Agent/rollout/step",
+                        x_name="agent/rollout/step",
                     )
                 )
         avg_turns = 0

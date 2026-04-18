@@ -13,10 +13,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from ..resources import ContainerResource, ResourceSpec
+from ..resources import ContainerResource, ContainerResourceSpec
 
 
-ALFWorldSpec = ResourceSpec(
+ALFWorldSpec = ContainerResourceSpec(
     category="alfworld",
     image="bitalov/alfworld-http-env-3:latest",
     ports={"8000/tcp": None},
@@ -25,12 +25,10 @@ ALFWorldSpec = ResourceSpec(
         "TRAIN_EVAL": "train",
         "BATCH_SIZE": "1",
     },
-    extra={
-        "container_port": 8000,
-        "start_timeout": 120.0,
-        "host_ip": "127.0.0.1",
-    },
-    max_global_num=32,
+    container_port=8000,
+    start_timeout=120.0,
+    host_ip="127.0.0.1",
+    max_global_num=8,
 )
 
 
@@ -40,12 +38,11 @@ class ALFWorldEnv(ContainerResource):
     Use via Context.acquire_resource(spec=ALFWorldSpec, scope="rollout", backend="local").
     """
 
-    def __init__(self, container: Any, resource_id: str, spec: ResourceSpec):
+    def __init__(self, container: Any, resource_id: str, spec: ContainerResourceSpec):
         super().__init__(container=container, resource_id=resource_id, spec=spec)
-        extra = spec.extra or {}
-        self._container_port = int(extra.get("container_port", 8000))
-        self._start_timeout = float(extra.get("start_timeout", 120.0))
-        self._host_ip = extra.get("host_ip", "127.0.0.1")
+        self._container_port = int(spec.container_port or 8000)
+        self._start_timeout = float(spec.start_timeout or 120.0)
+        self._host_ip = spec.host_ip or "127.0.0.1"
         self._client: httpx.AsyncClient | None = None
         self._current_info: Optional[Dict[str, Any]] = None
         self._current_obs: Optional[str] = None

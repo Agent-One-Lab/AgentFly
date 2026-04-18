@@ -9,7 +9,7 @@ import os
 from typing import Optional
 
 from ....core import Context
-from ....resources import ResourceSpec
+from ....resources import ContainerResourceSpec
 from ...decorator import tool
 
 # Path inside the container where the file module is mounted
@@ -31,7 +31,7 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
     if not image_id:
         return "Error: context.metadata['image_id'] is required for file tools."
     rollout_id = context.rollout_id
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image=image_id,
         mount={FILE_MODULE_DIR: f"{INSTALL_PATH}:ro,rbind"},

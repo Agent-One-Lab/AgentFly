@@ -30,6 +30,10 @@ def main():
         target_module = import_module(".utils.deploy", package="agentfly")
         sys.argv = [target_module.__file__] + sys.argv[2:]
         target_module.main()
+    elif command == "search":
+        target_module = import_module(".tools.src.search.retriever_server", package="agentfly")
+        sys.argv = [target_module.__file__] + sys.argv[2:]
+        target_module.main()
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         sys.exit(1)

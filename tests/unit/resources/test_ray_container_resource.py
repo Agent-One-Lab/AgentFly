@@ -58,7 +58,7 @@ async def test_ray_containers_run_on_distinct_nodes_when_ray_cluster_has_multipl
     import ray
     from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
-    from agentfly.resources import ResourceSpec, create_ray_container_resource
+    from agentfly.resources import ContainerResourceSpec, create_ray_container_resource
 
     _ensure_ray_driver_connected()
 
@@ -73,7 +73,7 @@ async def test_ray_containers_run_on_distinct_nodes_when_ray_cluster_has_multipl
             f"Need at least 2 Ray nodes with distinct NodeIDs for this test; found {len(node_ids)}"
         )
 
-    spec = ResourceSpec(category="container", image="ubuntu:22.04")
+    spec = ContainerResourceSpec(category="container", image="ubuntu:22.04")
     r1 = None
     r2 = None
     try:

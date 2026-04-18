@@ -12,18 +12,15 @@ import asyncio
 import time
 from typing import Any
 import httpx
-from ..resources import ContainerResource, ResourceSpec
+from ..resources import ContainerResource, ContainerResourceSpec
 
-PythonSandboxSpec = ResourceSpec(
+PythonSandboxSpec = ContainerResourceSpec(
     category="python_env",
     image="reasonwang/python-http-env:latest",
     ports={"8000/tcp": None},
-    extra={
-        "python_http_env": True,
-        "container_port": 8000,
-        "start_timeout": 60,
-        "host_ip": "127.0.0.1",
-    },
+    container_port=8000,
+    start_timeout=60,
+    host_ip="127.0.0.1",
     max_global_num=16,
 )
 
@@ -35,12 +32,11 @@ class PythonSandboxEnv(ContainerResource):
     connects the httpx client and waits for /health.
     """
 
-    def __init__(self, container: Any, resource_id: str, spec: ResourceSpec):
+    def __init__(self, container: Any, resource_id: str, spec: ContainerResourceSpec):
         super().__init__(container=container, resource_id=resource_id, spec=spec)
-        extra = spec.extra or {}
-        self._container_port = int(extra.get("container_port", 8000))
-        self._start_timeout = float(extra.get("start_timeout", 60.0))
-        self._host_ip = extra.get("host_ip", "127.0.0.1")
+        self._container_port = int(spec.container_port or 8000)
+        self._start_timeout = float(spec.start_timeout or 60.0)
+        self._host_ip = spec.host_ip or "127.0.0.1"
         self._client: httpx.AsyncClient | None = None
         self._episodes = 0
 

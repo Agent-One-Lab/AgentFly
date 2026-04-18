@@ -6,9 +6,13 @@ Tools and rewards use the engine to acquire, use, and release resources.
 """
 
 from .types import (
+    APIModelResourceSpec,
     BaseResource,
-    ResourceSpec,
+    BaseResourceSpec,
+    ContainerCategory,
+    ContainerResourceSpec,
     ResourceStatus,
+    VLLMModelResourceSpec,
 )
 from .runner import (
     BaseRunner,
@@ -23,18 +27,25 @@ from .containers import (
     RayEnrootContainerActor,
     create_ray_container_resource,
 )
+from .models import APIModelResource, VLLMModelResource
 from .engine import ResourceEngine
 
 __all__ = [
     "BaseResource",
-    "ResourceSpec",
     "ResourceStatus",
+    "BaseResourceSpec",
+    "ContainerCategory",
+    "ContainerResourceSpec",
+    "VLLMModelResourceSpec",
+    "APIModelResourceSpec",
     "BaseRunner",
     "LocalRunner",
     "RayRunner",
     "CloudRunner",
     "K8sRunner",
     "ContainerResource",
+    "VLLMModelResource",
+    "APIModelResource",
     "ResourceEngine",
     "RayContainerResource",
     "RayEnrootContainerActor",

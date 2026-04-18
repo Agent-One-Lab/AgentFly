@@ -3,14 +3,12 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from ..rewards.reward_base import get_reward_from_name
 from ..tools import get_tools_from_names
 from .agent_base import BaseAgent
-from .react.react_agent import ReactAgent
+from .specialized.react_agent import ReactAgent
 from .specialized.action_agent import ActionAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
 from .specialized.swe_agents import BashSWEAgent, FunctionCallSWEAgent, Qwen3CoderSWEAgent
 from .specialized.hf_agent import HFAgent, SearchR1Agent
-from .specialized.openai_agent import OpenAIAgent
-from .specialized.think_agent import ThinkAgent
 from omegaconf import OmegaConf, DictConfig
 
 
@@ -185,8 +183,6 @@ class AutoAgent:
 # Auto-register built-in agent types
 AutoAgent.register_agent("react", ReactAgent)
 AutoAgent.register_agent("code", CodeAgent)
-AutoAgent.register_agent("openai", OpenAIAgent)
-AutoAgent.register_agent("think", ThinkAgent)
 AutoAgent.register_agent("gui", GUIAgent)
 AutoAgent.register_agent("hf", HFAgent)
 AutoAgent.register_agent("searchr1", SearchR1Agent)

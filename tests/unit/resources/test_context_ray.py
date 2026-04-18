@@ -5,7 +5,7 @@ import os
 import pytest
 
 from agentfly.core import Context
-from agentfly.resources import RayContainerResource, ResourceSpec
+from agentfly.resources import ContainerResourceSpec, RayContainerResource
 
 
 def _ensure_ray_driver_connected() -> None:
@@ -38,7 +38,7 @@ async def test_context_resource_ray_backend():
         metadata=None,
     )
 
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image="ubuntu:22.04",
     )
@@ -77,7 +77,7 @@ async def test_context_resource_ray_backend_via_context_config():
         context_config={"resource_backend": "ray"},
     )
 
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image="ubuntu:22.04",
     )

@@ -6,7 +6,22 @@ from ...decorator import tool
 
 
 async def _get_alfworld_env(context: Context):
-    return await context.acquire_resource(spec=ALFWorldSpec, scope="global", backend="local")
+    need_reset = not context.is_spec_acquired(ALFWorldSpec)
+    env = await context.acquire_resource(
+        spec=ALFWorldSpec,
+        scope="global",
+        backend="local",
+    )
+    if need_reset:
+        meta = context.metadata or {}
+        if "task_id" in meta:
+            await env.reset(
+                env_args={"task_id": meta["task_id"]},
+                split=meta.get("split", "train"),
+            )
+        else:
+            await env.reset(split=meta.get("split", "train"))
+    return env
 
 
 @tool(
@@ -46,7 +61,14 @@ async def alfworld_step(action: str, context: Context):
 async def alfworld_reset(context: Context):
     try:
         env = await _get_alfworld_env(context)
-        obs, info = await env.reset()
+        meta = context.metadata or {}
+        if "task_id" in meta:
+            obs, _info = await env.reset(
+                env_args={"task_id": meta["task_id"]},
+                split=meta.get("split", "train"),
+            )
+        else:
+            obs, _info = await env.reset(split=meta.get("split", "train"))
         return obs
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"

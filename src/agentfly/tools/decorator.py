@@ -73,7 +73,7 @@ def tool(
         max_length (int): The maximum length of the tool's output/observation.
         auto_register (bool): Whether to automatically register the tool. This is used to get tool by name.
         stateful (bool): Whether the tool is stateful (manages resources via ResourceEngine).
-        resource_spec: ResourceSpec for the tool (used when stateful).
+        resource_spec: Structured resource spec for the tool (used when stateful).
         backend (str): Backend name for the resource engine (e.g. "local").
         pool_size (int): The size of the resource pool.
     """

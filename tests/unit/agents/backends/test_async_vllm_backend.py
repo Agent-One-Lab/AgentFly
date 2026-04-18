@@ -1,5 +1,5 @@
 import pytest
-from agentfly.agents.llm_backends.llm_backends import AsyncVLLMBackend
+from agentfly.utils.llm_backends.llm_backends import AsyncVLLMBackend
 
 
 def test_async_vllm_backend_initialization_defaults():

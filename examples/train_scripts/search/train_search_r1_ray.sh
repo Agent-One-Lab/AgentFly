@@ -27,8 +27,8 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 
 # model=Qwen/Qwen2.5-3B-Instruct
 # template="qwen3-instruct-no-tool"
 
-model="Qwen/Qwen3-8B"
-template="qwen3-think-no-tool"
+model="Qwen/Qwen2.5-3B-Instruct"
+template="action-agent"
 lr=5e-7
 max_model_len=16384
 max_new_tokens_per_turn=378
@@ -59,9 +59,11 @@ kl_loss_type=low_var_kl
 agent_type=searchr1
 max_turns=4
 tool_parser_name="hermes"
-total_training_steps=200
+test_freq=50
+save_freq=100
+total_training_steps=210
 lr_warmup_steps_ratio=0.03
-project_name="ToolCall"
+project_name="SearchR1"
 
 base_name=$(basename $model)
 experiment_name=${base_name}_${template}_${reward_name}_${adv_estimator}
@@ -82,9 +84,9 @@ python3 -m agentfly.cli train \
     agent.init_config.tool_parser_name=$tool_parser_name \
     agent.init_config.tools=${tools} \
     agent.init_config.reward_name=${reward_name} \
-    agent.generation_config.max_tokens=$max_new_tokens_per_turn \
-    agent.max_turns=${max_turns} \
-    agent.num_chains=$num_chains \
+    agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=$num_chains \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
@@ -114,7 +116,7 @@ python3 -m agentfly.cli train \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
-    trainer.test_freq=200 \
+    trainer.save_freq=$save_freq \
+    trainer.test_freq=$test_freq \
     trainer.total_training_steps=$total_training_steps \
-    trainer.val_before_train=False
+    trainer.val_before_train=True

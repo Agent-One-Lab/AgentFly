@@ -10,14 +10,14 @@ from __future__ import annotations
 import pytest
 
 from agentfly.resources.runner import LocalRunner
-from agentfly.resources.types import ResourceSpec, ResourceStatus
+from agentfly.resources.types import ContainerResourceSpec, ResourceStatus
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_local_runner_start_execute_close():
     """Start an Ubuntu container, execute a command in it, then close it."""
     runner = LocalRunner()
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image="ubuntu:22.04",
     )

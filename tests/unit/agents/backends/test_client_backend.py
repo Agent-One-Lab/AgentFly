@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from unittest.mock import Mock, patch
-from agentfly.agents.llm_backends.llm_backends import ClientBackend
+from agentfly.utils.llm_backends.llm_backends import ClientBackend
 
 
 def test_client_backend_initialization_defaults():
@@ -377,7 +377,7 @@ async def test_generate_with_vision_inputs():
 
     # Mock the image_to_data_uri function to avoid actual image processing
     with patch(
-        "agentfly.agents.llm_backends.llm_backends.image_to_data_uri"
+        "agentfly.utils.llm_backends.llm_backends.image_to_data_uri"
     ) as mock_image_uri:
         mock_image_uri.return_value = "data:image/jpeg;base64,test_data"
 
@@ -467,7 +467,7 @@ def test_convert_to_openai_chat_with_image_content():
     backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
 
     with patch(
-        "agentfly.agents.llm_backends.llm_backends.image_to_data_uri"
+        "agentfly.utils.llm_backends.llm_backends.image_to_data_uri"
     ) as mock_image_uri:
         mock_image_uri.return_value = "data:image/jpeg;base64,test_data"
 

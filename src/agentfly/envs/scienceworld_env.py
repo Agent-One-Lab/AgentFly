@@ -13,7 +13,7 @@ from typing import Any, Union
 
 import httpx
 
-from ..resources import ContainerResource, ResourceSpec
+from ..resources import ContainerResource, ContainerResourceSpec
 # Transport errors that may be transient (server disconnect, read timeout, etc.)
 TRANSIENT_ERRORS = (
     httpx.RemoteProtocolError,
@@ -23,15 +23,13 @@ TRANSIENT_ERRORS = (
 )
 
 
-ScienceWorldSpec = ResourceSpec(
+ScienceWorldSpec = ContainerResourceSpec(
     category="scienceworld",
     image="rifoag/scienceworld-env:latest",
     ports={"2700/tcp": None},
-    extra={
-        "container_port": 2700,
-        "start_timeout": 10.0,
-        "host_ip": "127.0.0.1",
-    },
+    container_port=2700,
+    start_timeout=10.0,
+    host_ip="127.0.0.1",
     max_global_num=96,
 )
 
@@ -53,7 +51,7 @@ class ScienceWorldEnv(ContainerResource):
     `await context.acquire_resource(spec=ScienceWorldSpec, scope="rollout", backend="local")`.
     """
 
-    def __init__(self, container: Any, resource_id: str, spec: ResourceSpec):
+    def __init__(self, container: Any, resource_id: str, spec: ContainerResourceSpec):
         """
         Initialize a ScienceWorld resource wrapper around a running container.
 
@@ -63,10 +61,9 @@ class ScienceWorldEnv(ContainerResource):
             spec: Resource configuration containing image/port/start options.
         """
         super().__init__(container=container, resource_id=resource_id, spec=spec)
-        extra = spec.extra or {}
-        self._container_port = int(extra.get("container_port", 2700))
-        self._start_timeout = float(extra.get("start_timeout", 10.0))
-        self._host_ip = extra.get("host_ip", "127.0.0.1")
+        self._container_port = int(spec.container_port or 2700)
+        self._start_timeout = float(spec.start_timeout or 10.0)
+        self._host_ip = spec.host_ip or "127.0.0.1"
         self._client: httpx.AsyncClient | None = None
         self.score = 0
 

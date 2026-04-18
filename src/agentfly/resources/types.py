@@ -1,8 +1,7 @@
 """
 Resource types and specs for the resource engine.
 
-Defines resource kinds (container, vllm), resource specs (config for creating
-a resource), and the base resource protocol that all managed resources implement.
+Defines resource kinds, structured per-kind specs, and :class:`BaseResource`.
 """
 
 from __future__ import annotations
@@ -10,62 +9,73 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
+
+
+# --- Structured specs ---
+
+ContainerCategory = Literal[
+    "container",
+    "python_env",
+    "scienceworld",
+    "alfworld",
+    "webshop",
+]
+
+
+@dataclass(kw_only=True)
+class BaseResourceSpec:
+    """Shared fields for structured resource specs."""
+
+    max_global_num: Optional[int] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class ResourceSpec:
-    """
-    Specification for creating or scaling a managed resource.
+class ContainerResourceSpec(BaseResourceSpec):
+    """Enroot-backed container resources (including env images)."""
 
-    `ResourceSpec` is the declarative config passed to the resource engine when
-    starting/acquiring resources. A subset of fields is used depending on the
-    resource category and backend.
-
-    Args:
-        category: Resource kind, for example `"container"`, `"vllm"`, or
-            `"python_env"`. Backends/runners use this to choose how to create
-            and operate the resource.
-        image: Container image reference (for container-like resources).
-        cpu_count: Requested CPU amount for the resource (backend-dependent).
-        mem_limit: Memory limit for the resource. Can be backend-native string
-            (for example `"8g"`) or integer bytes depending on runtime.
-        gpus: GPU request/count (for example `1`) or backend-specific selector
-            string (for example `"0,1"`).
-        ports: Port mapping/configuration used when exposing service ports.
-            Structure is backend/runtime dependent.
-        environment: Environment variables injected into the runtime.
-        mount: Host-to-runtime mount mapping used by container-like resources.
-        model_name_or_path: Model identifier/path for model-serving resources
-            such as vLLM.
-        tensor_parallel_size: Tensor-parallel degree for distributed model
-            serving backends.
-        port: Primary service port for model/runtime endpoints.
-        extra: Free-form backend-specific options not covered by standard
-            fields (for example Ray actor options).
-        max_global_num: Maximum number of resources allowed for this spec
-            (counting both free and acquired instances). For rollout scope this
-            bounds concurrent instances; for global scope this caps total pool size.
-    """
-    category: str  # Resource kind: "container", "vllm", or "python_env"
-    # Container-specific
+    category: ContainerCategory
     image: Optional[str] = None
     cpu_count: Optional[float] = None
     mem_limit: Optional[str | int] = None
-    gpus: Optional[int | str] = None  # e.g. 1 or "0,1"
+    gpus: Optional[int | str] = None
     ports: Optional[Dict[str, Any]] = None
     environment: Optional[Dict[str, str]] = None
     mount: Optional[Dict[str, str]] = None
-    # VLLM-specific
-    model_name_or_path: Optional[str] = None
+    host_ip: Optional[str] = None
+    container_port: Optional[int] = None
+    start_timeout: Optional[float] = None
+    ray_actor_options: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class VLLMModelResourceSpec(BaseResourceSpec):
+    """Locally launched vLLM model service."""
+
+    category: Literal["vllm"] = "vllm"
+    model_name_or_path: str = ""
     tensor_parallel_size: Optional[int] = None
     port: Optional[int] = None
-    # Common
-    extra: Dict[str, Any] = field(default_factory=dict)
-    # Max concurrent resources for this spec (free + acquired). When set:
-    # - Rollout-scoped: at most this many can exist; only after one is ended can another start.
-    # - Global-scoped: at most this many total; no new resources can be added when at cap.
-    max_global_num: Optional[int] = None
+    pipeline_parallel_size: int = 1
+    data_parallel_size: int = 1
+    template: Optional[str] = None
+    gpu_memory_utilization: float = 0.8
+    tool_call_parser: str = "hermes"
+
+
+@dataclass
+class APIModelResourceSpec(BaseResourceSpec):
+    """Existing OpenAI-compatible HTTP API (no local process)."""
+
+    category: Literal["api_model"] = "api_model"
+    model_name_or_path: str = ""
+    port: Optional[int] = None
+    base_url: Optional[str] = None
+    host: Optional[str] = None
+    api_key: Optional[str] = None
+    request_timeout: Optional[float] = None
+
 
 
 class ResourceStatus(str, Enum):

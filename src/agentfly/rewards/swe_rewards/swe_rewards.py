@@ -2,7 +2,7 @@ import asyncio
 from typing import Any
 
 from ...core import Context
-from ...resources import ResourceSpec
+from ...resources import ContainerResourceSpec
 from ...resources.containers.ray_container_resource import RayContainerResource
 from ...rewards.reward_base import reward
 from .r2e_gym.eval import reward_from_container_async, setup_container_for_reward_async
@@ -29,7 +29,7 @@ async def r2e_gym_reward(context: Context) -> dict:
     if not image_id:
         return "Error: context.metadata['image_id'] is required for shell tool."
     rollout_id = context.rollout_id
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image=image_id,
     )
@@ -81,7 +81,7 @@ async def swe_reward(context: Context) -> dict:
     if not image_id:
         return "Error: context.metadata['image_id'] is required for shell tool."
     rollout_id = context.rollout_id
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image=image_id,
     )

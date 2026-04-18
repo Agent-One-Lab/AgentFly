@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from enroot.errors import TimeoutError as EnrootTimeoutError
 
-from ..types import BaseResource, ResourceSpec, ResourceStatus
+from ..types import BaseResource, ContainerResourceSpec, ResourceStatus
 
 
 class ContainerResource(BaseResource):
@@ -28,7 +28,7 @@ class ContainerResource(BaseResource):
     is typically accessed via `Context.acquire_resource(...)` or `ResourceEngine.acquire(...)`.
     """
 
-    def __init__(self, container: Any, resource_id: str, spec: ResourceSpec):
+    def __init__(self, container: Any, resource_id: str, spec: ContainerResourceSpec):
         """
         Initialize a container resource wrapper.
 

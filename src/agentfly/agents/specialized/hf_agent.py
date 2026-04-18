@@ -3,6 +3,7 @@ import logging
 import re
 from typing import Dict, List, Optional
 
+from ...core.context import Context
 from ..agent_base import BaseAgent
 
 logger = logging.getLogger(__file__)
@@ -55,7 +56,7 @@ class SearchR1Agent(BaseAgent):
             cut = candidate if cut is None else min(cut, candidate)
         return response[:cut] if cut is not None else response
 
-    def _parse_single_response(self, response: str) -> Dict:
+    def _parse_single_response(self, response: str, **kwargs) -> Dict:
         """
         Parse a single model response using the search-R1 format:
         - <think>...</think> (reasoning)
@@ -104,5 +105,14 @@ class SearchR1Agent(BaseAgent):
             "status": "continue" if len(formatted_tool_calls) > 0 else "terminal",
         }
 
-    def parse(self, responses: List[str]) -> List[Dict]:
-        return [self._parse_single_response(response) for response in responses]
+    def parse(
+        self,
+        responses: List[str],
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> List[Dict]:
+        """Parse model responses into assistant messages/tool calls.
+
+        ``context`` is accepted for compatibility with the base chain interface.
+        """
+        return [self._parse_single_response(response, **kwargs) for response in responses]

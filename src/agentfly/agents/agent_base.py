@@ -19,13 +19,14 @@ from termcolor import colored
 
 from ..templates import *  # noqa: F403
 from ..tools.tool_base import BaseTool
+from ..core.context import Context
 from ..core.context_config import ContextConfig
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
 from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
 from .chain.chain_base import ChainRollout
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
-from .llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
-from .llm_backends.backend_configs import BACKEND_CONFIGS
+from ..utils.llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
+from ..utils.llm_backends.backend_configs import BACKEND_CONFIGS
 from .utils.messages import MessagesList
 from .utils.tokenizer import create_processor, create_tokenizer
 
@@ -488,13 +489,19 @@ class BaseAgent(ChainRollout, ABC):
             "No assistant or tool message found in trajectory when extracting final response."
         )
 
-    def parse(self, responses: List[str], current_segments: List[List[Dict]]) -> List[Dict]:
+    def parse(
+        self,
+        responses: List[str],
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> List[Dict]:
         """
         This method is used to define the interaction logic of the agent. It can be used to parse the tool call from the response.
         If tool_parser is provided, it will use the vLLM tool parser by default. Otherwise, subclasses should override this method.
 
         Args:
             responses: List of responses to parse.
+            context: Optional rollout context carrying trajectory and metadata.
             **args: Additional arguments for parsing.
 
         Returns:
@@ -526,6 +533,17 @@ class BaseAgent(ChainRollout, ABC):
         """
         # If tool_parser is available, use it
         if self.tool_parser is not None:
+            if self.tools is None or len(self.tools) == 0:
+                return [
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": response}],
+                        "tool_calls": [],
+                        "loss": True,
+                        "status": "terminal",
+                    }
+                    for response in responses
+                ]
             return self._parse_with_tool_parser(responses)
         else:
             # If no tool_parser, raise NotImplementedError to force subclasses to implement
@@ -788,7 +806,7 @@ class BaseAgent(ChainRollout, ABC):
         repeat_times = [len(t["trajectory_segments"]) for t in trajectories]
 
         align = pad_to_multiple_of
-        if align > 1:
+        if align and align > 1:
             n = inputs["input_ids"].shape[0]
             pad_size = (align - n % align) % align
             for k, v in inputs.items():

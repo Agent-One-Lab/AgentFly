@@ -23,11 +23,14 @@ async def webshop_browser(action: str, value: str, context: Context):
         str: The observation from the environment after performing the action, or an error message if the action is invalid or an exception occurs.
     """
     try:
+        need_reset = not context.is_spec_acquired(WebShopSpec)
         env = await context.acquire_resource(
             spec=WebShopSpec,
             scope="global",
             backend="local",
         )
+        if need_reset:
+            await env.reset(env_args=context.metadata)
         if action == "search":
             observation = await env.step(f"search[{value}]")
         elif action == "click":
@@ -61,11 +64,14 @@ async def webshop_browser_action(action: str, context: Context):
     if action.startswith("choose"):
         action = "click" + action[6:]
     try:
+        need_reset = not context.is_spec_acquired(WebShopSpec)
         env = await context.acquire_resource(
             spec=WebShopSpec,
             scope="global",
             backend="local",
         )
+        if need_reset:
+            await env.reset(env_args=context.metadata)
         observation = await env.step(action)
         return observation
     except Exception as e:

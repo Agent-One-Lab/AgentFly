@@ -7,7 +7,7 @@ The sample must match the image (instance_id / repo) so the profile can be resol
 import pytest
 
 from agentfly.core import Context
-from agentfly.resources import ResourceSpec
+from agentfly.resources import ContainerResourceSpec
 
 # Ensure Enroot patch is applied before any swesmith/swebench code
 pytest.importorskip("swesmith")
@@ -49,7 +49,7 @@ async def test_evaluate_swesmith_returns_status_and_resolved():
     )
     try:
         container_res = await context.acquire_resource(
-            spec=ResourceSpec(category="container", image=IMAGE_ID),
+            spec=ContainerResourceSpec(category="container", image=IMAGE_ID),
             id=context.rollout_id,
             scope="rollout",
             backend="local",

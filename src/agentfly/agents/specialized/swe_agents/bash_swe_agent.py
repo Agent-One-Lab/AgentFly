@@ -8,8 +8,9 @@ from .prompts import (
 
 import json
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
+from ....core.context import Context
 from ...agent_base import BaseAgent
 from ....tools.src.shell.tools import run_shell_command
 
@@ -111,5 +112,12 @@ class BashSWEAgent(BaseAgent):
             "status": status,
         }
 
-    def parse(self, responses: List[str]) -> List[Dict]:
+    def parse(
+        self,
+        responses: List[str],
+        *,
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> List[Dict]:
+        _ = context, kwargs
         return [self._parse_single_response(r) for r in responses]

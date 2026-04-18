@@ -1,5 +1,6 @@
 model=Qwen/Qwen2.5-3B-Instruct
 
+
 system_prompt="You are an autonomous shopping agent operating in the WebShop web environment. Your goal is to purchase exactly one product that best matches the user's natural-language instruction.
 You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
 
@@ -51,12 +52,12 @@ reward_name="webshop_reward"
 entropy_coeff=0.001
 kl_loss_type=mse
 max_turns=15
-lr_warmup_steps_ratio=0.04
-agent_backend="async_verl"
+lr_warmup_steps_ratio=0.01
 total_training_steps=200
 
-project_name="Algorithm"
-experiment_name="webshop_qwen2.5-3b-instruct_grpo"
+model_base_name=$(basename $model)
+project_name="Open"
+experiment_name="webshop_${model_base_name}_${adv_estimator}"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -71,11 +72,10 @@ python -m agentfly.cli train \
     agent.init_config.tools=$tools \
     agent.init_config.template=$template \
     agent.init_config.model_name_or_path=$model \
-    agent.init_config.backend=${agent_backend} \
     agent.init_config.reward_name=$reward_name \
-    agent.generation_config.max_tokens=$max_new_tokens_per_turn \
-    agent.max_turns=${max_turns} \
-    agent.num_chains=$num_chains \
+    agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=$num_chains \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.model.path=${model} \
@@ -105,7 +105,7 @@ python -m agentfly.cli train \
     trainer.experiment_name=$experiment_name \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
+    trainer.save_freq=100 \
     trainer.test_freq=300 \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=False

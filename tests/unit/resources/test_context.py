@@ -1,5 +1,5 @@
 from agentfly.core import Context
-from agentfly.resources import ResourceSpec
+from agentfly.resources import ContainerResourceSpec
 import pytest
 
 @pytest.mark.asyncio
@@ -10,7 +10,7 @@ async def test_context_resource():
         metadata=None
     )
 
-    spec = ResourceSpec(
+    spec = ContainerResourceSpec(
         category="container",
         image="ubuntu:22.04",
     )

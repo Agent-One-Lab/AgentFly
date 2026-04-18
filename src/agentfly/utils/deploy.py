@@ -6,8 +6,17 @@ from chat_bricks import get_template
 from .. import AGENT_DATA_DIR
 
 
-def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization, tool_call_parser):
-    port = 8000
+def vllm_serve(
+    model_name_or_path,
+    template,
+    tp,
+    pp,
+    dp,
+    gpu_memory_utilization,
+    tool_call_parser,
+    port,
+    allowed_local_media_path,
+):
 
     if template is None:
         template_option = ""
@@ -18,6 +27,11 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization,
         with open(f"{AGENT_DATA_DIR}/cache/jinja_template.jinja", "w") as f:
             f.write(jinja_template)
         template_option = f"--chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja"
+
+    if allowed_local_media_path:
+        allowed_local_media_path_option = f"--allowed-local-media-path {allowed_local_media_path}"
+    else:
+        allowed_local_media_path_option = ""
     # command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
     command = f"""vllm serve {model_name_or_path} \
 {template_option} \
@@ -26,22 +40,45 @@ def vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization,
 --pipeline-parallel-size {pp} \
 --data-parallel-size {dp} --port {port} \
 --gpu-memory-utilization {gpu_memory_utilization} \
---enable-auto-tool-choice --tool-call-parser {tool_call_parser}"""
+--enable-auto-tool-choice --tool-call-parser {tool_call_parser} \
+{allowed_local_media_path_option}"""
 
     print(command)
     os.system(command)
 
 
 @click.command()
-@click.option("--model_name_or_path")
+@click.option("--model-name-or-path")
 @click.option("--template", default=None)
 @click.option("--tp", type=int, default=1)
 @click.option("--pp", type=int, default=1)
 @click.option("--dp", type=int, default=1)
-@click.option("--gpu_memory_utilization", type=float, default=0.8)
-@click.option("--tool_call_parser", type=str, default="hermes")
-def main(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization, tool_call_parser):
-    vllm_serve(model_name_or_path, template, tp, pp, dp, gpu_memory_utilization, tool_call_parser)
+@click.option("--gpu-memory-utilization", type=float, default=0.8)
+@click.option("--tool-call-parser", type=str, default="hermes")
+@click.option("--port", type=int, default=8000)
+@click.option("--allowed-local-media-path", type=str, default=None)
+def main(
+    model_name_or_path,
+    template,
+    tp,
+    pp,
+    dp,
+    gpu_memory_utilization,
+    tool_call_parser,
+    port,
+    allowed_local_media_path,
+):
+    vllm_serve(
+        model_name_or_path,
+        template,
+        tp,
+        pp,
+        dp,
+        gpu_memory_utilization,
+        tool_call_parser,
+        port,
+        allowed_local_media_path,
+    )
 
 
 if __name__ == "__main__":
