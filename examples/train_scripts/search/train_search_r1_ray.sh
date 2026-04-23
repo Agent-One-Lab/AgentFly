@@ -27,7 +27,7 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 
 # model=Qwen/Qwen2.5-3B-Instruct
 # template="qwen3-instruct-no-tool"
 
-model="Qwen/Qwen2.5-3B-Instruct"
+model="Qwen/Qwen2.5-7B-Instruct"
 template="action-agent"
 lr=5e-7
 max_model_len=16384
@@ -52,8 +52,8 @@ train_on_last_turn=False
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
-adv_estimator=grpo
-# adv_estimator=gae
+# adv_estimator=grpo
+adv_estimator=gae
 entropy_coeff=0.001
 kl_loss_type=low_var_kl
 agent_type=searchr1

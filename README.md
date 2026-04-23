@@ -65,11 +65,12 @@ Please refer to [installation.md](docs/start/installation.md) for custmoized ins
 
 | Task | Model | Report | Status |
 |------|-------|--------|--------|
-| SearchR1 | Qwen2.5 | [report](https://api.wandb.ai/links/AgentRL/vym5u49g) | ✅ |
-| WebShop | Qwen2.5 | TBD | ✅ |
+| SearchR1 | Qwen2.5 | [report](https://wandb.ai/AgentRL/Open/reports/SearchR1--VmlldzoxNjYzNzQ0Ng) | ✅ |
+| WebShop | Qwen2.5 | [report](https://api.wandb.ai/links/AgentRL/kpmsvggh) | ✅ |
 | ScienceWorld | Qwen3-4B-Instruct | [report](https://api.wandb.ai/links/AgentRL/f99omj98) | ✅ |
 | SWE | Qwen3-32B | [report](https://wandb.ai/AgentRL/Resource/reports/SWE-OS---VmlldzoxNjUzNjk0Mw?accessToken=x4co1e22ddhkm1qjo791a9blmvt4uqz9jmgytybkq4xtgfwt0u8jjx28wpqcsqex) | ✅ (on going) |
-
+| SimuScene | SFT DeepSeek-R1-Distill-Qwen |[report](https://wandb.ai/AgentRL/SimuScene/reports/SimuScene--VmlldzoxNjYzNzYzMg?accessToken=qe00f9dy59hiu2uyndyn22xl141s37sybnxlp5e5ybryqqahao5mvyra0sbmlf9v) | ✅ |
+ 
 ## Quick Start
 ```python
 # Really small example to build an agent and run

@@ -523,7 +523,7 @@ async def setup_container_for_reward_async(
             timeout = setup_timeout
         inner_cmd = ["/bin/sh", "-c", cmd] if isinstance(cmd, str) else cmd
         full_cmd = ["timeout", str(timeout), *inner_cmd]
-        await _exec_run_any(
+        return await _exec_run_any(
             container,
             cmd=full_cmd,
             workdir=workdir,
@@ -563,7 +563,26 @@ async def setup_container_for_reward_async(
         return
 
     if dataset in ("swebench", "swebench_verified"):
-        await exec_run("test -f /run_tests.sh && chmod +x /run_tests.sh")
+        # First, try existing script
+        check = await exec_run("test -f /run_tests.sh && echo YES || echo NO")
+        if "YES" in check:
+            await exec_run("chmod +x /run_tests.sh")
+            return
+
+        # Build from instance spec (SWE-Bench harness)
+        if ds is None:
+            raise ValueError("swebench_verified setup needs ds to build /run_tests.sh")
+
+        import base64
+        from swebench.harness.test_spec.test_spec import make_test_spec
+
+        test_spec = make_test_spec(ds)
+        content = test_spec.eval_script  # full bash script with FAIL_TO_PASS etc.
+        b64 = base64.b64encode(content.encode()).decode()
+        await exec_run(
+            f"echo '{b64}' | base64 -d > /run_tests.sh && chmod +x /run_tests.sh",
+            workdir="/",
+        )
         return
 
     if dataset == "swesmith":

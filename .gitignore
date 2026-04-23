@@ -136,6 +136,7 @@ data/
 *.parquet
 agentfly/agents/data/*
 test_cache/
+results/
 
 # local logs
 logs

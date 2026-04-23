@@ -1,7 +1,7 @@
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional
-
 from ...core.context import Context
 from ..agent_base import BaseAgent
 from ..chain.structures import Node
@@ -13,11 +13,35 @@ TOOL_TAG_PATTERN = re.compile(
 # First closing tag (any case): strip everything after it; keep the tag itself.
 CLOSE_TOOL_TAG_PATTERN = re.compile(r"</(action|summarize)>", re.IGNORECASE)
 
-_DEFAULT_CONTEXT_TRIGGER_MESSAGE = (
-    "You have reached the configured assistant-turn limit for this segment. "
-    "You must now summarize: respond using a single <summarize>...</summarize> block "
-    "with a concise summary of progress and key results so far (not <action>)."
-)
+CONTEXT_TRIGGER_MESSAGE_DICT = {
+    "base": "You have reached the configured assistant-turn limit for this segment. You must now summarize: respond using a single <summarize>...</summarize> block with a concise summary of progress and key results so far (not <action>).",
+    "detail": """You are about to hand off your current work to a fresh session of yourself. The new session will receive the original system prompt, the original user instruction, and the summary you produce below — but NOT the conversation history, tool calls, or observations you have seen so far. Everything the next session knows about what has happened must come from your summary.
+
+A fold is being triggered because {context_length_exceeded | turn_budget_reached | approaching_limit}. This is not a failure — it is a planned handoff. Your job is to make the next session as effective as possible, not to defend or narrate your past actions.
+
+Write the summary using exactly the four sections below. Be concrete and specific. Preserve exact identifiers (file paths, function names, URLs, error strings, variable values, IDs) verbatim — do not paraphrase them. Omit pleasantries, chain-of-thought exploration, and verbose tool output that has already been consumed.
+
+## 1. Task State
+State what the task is, what has been completed, what is in progress, and what remains. Be explicit about progress — the next session should immediately know where to resume. If subgoals exist, list their status (done / in progress / not started / blocked). If the task has a definition of done, restate it.
+
+## 2. Key Facts Discovered
+List concrete facts learned from the environment that the next session would otherwise have to rediscover. Include exact values: file paths, API responses, schema details, configuration values, command outputs, search results that mattered, constraints observed. Do not include facts that were assumed but not verified — mark those as hypotheses in section 4 instead. If a fact has a source (e.g., "from running `ls src/`"), note it briefly.
+
+## 3. Failed Attempts and Dead Ends
+List approaches that were tried and did not work, with enough detail that the next session will not repeat them. For each, include: what was attempted, what went wrong (exact error or observation if available), and — if you can infer it — why it failed. Also note dead ends worth avoiding even if not formally attempted (e.g., "file X looked promising but is auto-generated, do not edit directly"). This section prevents loops and is often the highest-value part of the summary.
+
+## 4. Current Hypothesis, Plan, and Immediate Next Step
+State your current best understanding of how to complete the task, the plan you intend to follow, and — most importantly — the specific next action the new session should take. Distinguish verified facts (section 2) from hypotheses here. If you are uncertain about something that matters, say so explicitly and note how it could be verified. End this section with a single concrete next step phrased as an instruction to the next session.
+
+## Constraints
+- Do not include information you are not confident about without flagging it as a hypothesis.
+- Do not invent details to fill out a section. If a section is genuinely empty (e.g., no failed attempts yet), write "None yet" and move on.
+- Do not summarize your own reasoning process — summarize the state of the work.
+- The next session cannot ask you clarifying questions. Anything ambiguous will be resolved by them guessing. Reduce guesswork.
+
+Produce only the summary. Do not add preamble or closing remarks."""
+
+}
 
 
 class ActionAgent(BaseAgent):
@@ -39,6 +63,11 @@ class ActionAgent(BaseAgent):
         self.action_tool_name = tools[0].name
         if context_trigger_turns is not None and context_trigger_turns < 1:
             raise ValueError("context_trigger_turns must be >= 1 when set")
+        
+        # Temporarily use environment variable to set context_trigger_turns
+        if context_trigger_turns is None:
+            context_trigger_turns = os.getenv("CONTEXT_TRIGGER_TURNS", None)
+
         self.context_trigger_turns = context_trigger_turns
         self.context_trigger_message = (
             context_trigger_message

@@ -155,8 +155,15 @@ class AsyncVLLMBackend(LLMBackend):
             sampling_params["temperature"] = kwargs["temperature"]
         if "n" in kwargs:
             sampling_params["n"] = kwargs["n"]
-        if "max_tokens" in kwargs:
-            sampling_params["max_tokens"] = kwargs.get("max_tokens")
+        if "max_tokens" in kwargs or "max_new_tokens" in kwargs:
+            if "max_tokens" in kwargs and "max_new_tokens" in kwargs:
+                raise ValueError("max_tokens and max_new_tokens cannot be used together")
+            
+            if "max_tokens" in kwargs:
+                sampling_params["max_tokens"] = kwargs.get("max_tokens")
+            else:
+                sampling_params["max_tokens"] = kwargs.get("max_new_tokens")
+        
         sampling_params = SamplingParams(**sampling_params)
         n = kwargs.get("n", 1)
 
@@ -372,7 +379,7 @@ class ClientBackend(LLMBackend):
         model_name_or_path: str,
         base_url: str = "http://localhost:8000/v1",
         max_requests_per_minute: int = 100,
-        timeout: int = 600,
+        timeout: int = 3600,
         api_key: str = "EMPTY",
         max_tokens: int = 1024,
         temperature: float = 1.0,

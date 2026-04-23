@@ -121,7 +121,7 @@ class ClientConfig:
 
     base_url: str = "http://localhost:8000/v1"
     max_requests_per_minute: int = 100
-    timeout: int = 600
+    timeout: int = 3600
     api_key: str = "EMPTY"
     max_new_tokens: int = 1024
     temperature: float = 1.0

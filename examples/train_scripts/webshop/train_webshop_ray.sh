@@ -26,7 +26,7 @@ rm -rf /tmp/ray/ray_current_cluster
 ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
 
 
-model=Qwen/Qwen2.5-3B-Instruct
+model=Qwen/Qwen2.5-7B-Instruct
 
 
 system_prompt="You are an autonomous shopping agent operating in the WebShop web environment. Your goal is to purchase exactly one product that best matches the user's natural-language instruction.

@@ -225,10 +225,7 @@ class BaseAgent(ChainRollout, ABC):
             assert template is None, (
                 "For client backend, we do not support chat template. Set the template when deploying the model."
             )
-        if backend == "async_vllm":
-            assert template is not None, (
-                "For async vllm backend, chat template is required."
-            )
+            
         if tool_parser is not None and tool_parser_name is not None:
             raise ValueError(
                 "Cannot specify both tool_parser and tool_parser_name. Use only one."
