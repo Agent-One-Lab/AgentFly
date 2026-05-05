@@ -1,7 +1,8 @@
 import pytest
 import os
 import contextlib
-os.environ["ENROOT_IMAGES_PATH"] = "/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images/r2e-gym-lite"
+# Set ENROOT_IMAGES_PATH in your shell before running this test; see docs/examples/swe.md.
+os.environ.setdefault("ENROOT_IMAGES_PATH", "/path/to/enroot/images/r2e-gym-lite")
 os.environ["ENROOT_ASYNC"] = "1"
 import enroot
 from agentfly.rewards.swe_rewards.r2e_gym.eval import (

@@ -5,7 +5,6 @@
 #SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --account=iq
 #SBATCH --cpus-per-task=96
 #SBATCH --output=stdout/%x_%j.out
 #SBATCH --error=stdout/%x_%j.err
@@ -28,6 +27,11 @@ export worker_num=$SLURM_NNODES
 export TRITON_HOME=/tmp/triton_cache
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
+
+# VLM judge ensemble: comma-separated lists, position-aligned (model[i] is served at ip[i]).
+# Replace the placeholder IPs with the hosts running each VLM endpoint.
+export VLM_MODELS="Qwen/Qwen3-VL-235B-A22B-Instruct,OpenGVLab/InternVL3_5-241B-A28B,zai-org/GLM-4.6V"
+export VLM_SERVER_IPS="<vlm-server-1>,<vlm-server-2>,<vlm-server-3>"
 
 
 # =================== Ray start ===================

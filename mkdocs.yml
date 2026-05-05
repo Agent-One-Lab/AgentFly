@@ -140,6 +140,8 @@ nav:
   - Examples:
     - examples/predefined_training_examples.md
     - examples/image_agent.md
+    - examples/swe.md
+    - examples/simuscene.md
 
 extra:
   social:

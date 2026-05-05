@@ -148,10 +148,15 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
 
 logger = logging.getLogger(__name__)
 
-# Manual multi-model VLM endpoint config: model at index i uses server at index i.
-# Set these lists directly for local/manual runs.
-VLM_MODELS: List[str] = ["Qwen/Qwen3-VL-235B-A22B-Instruct", "OpenGVLab/InternVL3_5-241B-A28B", "zai-org/GLM-4.6V"]
-VLM_SERVER_IPS: List[str] = ["10.24.1.86", "10.24.2.34", "10.24.1.227"]
+# Multi-model VLM endpoint config: model at index i uses server at index i.
+# Configure via the VLM_MODELS / VLM_SERVER_IPS environment variables, each a
+# comma-separated list. The two must have the same length; see
+# examples/train_scripts/simuscene/test_vlm_as_judge_train.sh for an example.
+def _parse_csv_env(name: str) -> List[str]:
+    return [item.strip() for item in os.getenv(name, "").split(",") if item.strip()]
+
+VLM_MODELS: List[str] = _parse_csv_env("VLM_MODELS")
+VLM_SERVER_IPS: List[str] = _parse_csv_env("VLM_SERVER_IPS")
 VLM_ENSEMBLE_PROMPT_TEMPLATE = """You are given a video and several visual verification questions. Your task is to judge each question as true or false based only on what can be seen or reasonably inferred from the video. If the visual evidence is insufficient to confirm the statement, or if the statement directly contradicts the video, answer 'false'.
  
 ⸻

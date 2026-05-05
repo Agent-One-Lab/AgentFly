@@ -1,7 +1,8 @@
 """Tests for get_patch_from_runtime with real container."""
 import pytest
 import os
-os.environ["ENROOT_IMAGES_PATH"] = "/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images"
+# Set ENROOT_IMAGES_PATH in your shell before running this test; see docs/examples/swe.md.
+os.environ.setdefault("ENROOT_IMAGES_PATH", "/path/to/enroot/images")
 os.environ["ENROOT_ASYNC"] = "1"
 from agentfly.core import Context
 from agentfly.resources import ContainerResourceSpec

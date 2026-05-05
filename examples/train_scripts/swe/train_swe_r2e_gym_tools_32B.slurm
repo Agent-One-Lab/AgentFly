@@ -3,7 +3,6 @@
 #SBATCH --time=200:00:00
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
-#SBATCH --account=iq
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -27,7 +26,8 @@ export worker_num=$SLURM_NNODES
 export TRITON_HOME=/tmp/triton_cache
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
-export ENROOT_IMAGES_PATH=/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images/r2e-gym-lite
+# Directory holding the r2e-gym-lite enroot images. See docs/examples/swe.md.
+export ENROOT_IMAGES_PATH=${ENROOT_IMAGES_PATH:-/path/to/enroot/images/r2e-gym-lite}
 
 
 # =================== Ray start ===================

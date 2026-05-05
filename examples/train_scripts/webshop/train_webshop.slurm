@@ -5,7 +5,6 @@
 #SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
-#SBATCH --account=iq
 #SBATCH --cpus-per-task=96
 #SBATCH --output=stdout/%x_%j.out
 #SBATCH --error=stdout/%x_%j.err

@@ -1,16 +1,11 @@
-export ENROOT_IMAGES_PATH="/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images/swe-bench-verified"
+# Directory holding the swe-bench-verified enroot images.
+# See docs/examples/swe.md for how to fetch the images and set this var.
+export ENROOT_IMAGES_PATH="${ENROOT_IMAGES_PATH:-/path/to/enroot/images/swe-bench-verified}"
 
 # model_name_or_path="Qwen/Qwen3.5-4B"
-# model_name_or_path="/mnt/weka/home/renxi.wang/Research/AgentFly/checkpoints/Resource/swe_r2e_gym_tools_Qwen3.5-9B"
-
 # model_name_or_path="Qwen/Qwen3.5-9B"
 
 model_name_or_path="Qwen/Qwen3-32B"
-
-# model_name_or_path="/mnt/weka/home/renxi.wang/Research/AgentFly/checkpoints/Resource/swe_r2e_gym_tools_Qwen3-32B_system"
-
-
-# model_name_or_path="/mnt/weka/home/renxi.wang/Agent-One-Lab/workspace/AgentFly/checkpoints/Resource/test_swe_train_r2e_gym_postprocess"
 
 base_name=$(basename $model_name_or_path)
 
