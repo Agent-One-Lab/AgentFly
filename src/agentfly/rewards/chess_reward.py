@@ -5,16 +5,19 @@ Chess puzzle reward functions for AgentFly.
 Provides two reward functions:
 - chess_puzzle_reward: Dense reward based on Stockfish evaluation (move quality)
 - chess_puzzle_reward_simple: Binary reward (solved/not solved)
+
+Both rewards acquire the puzzle environment via the rollout context, sharing
+the same resource the chess tools use.
 """
 
 from typing import Any, Dict
-
-from ..envs.chess_env import ChessPuzzleEnv
+from ..core import Context
+from ..envs.chess_env import ChessPuzzleEnv, ChessPuzzleSpec
 from .reward_base import reward
 
 
-@reward(name="chess_puzzle_reward", env_cls=ChessPuzzleEnv, pool_size=8)
-async def chess_puzzle_reward(final_response: str, env: ChessPuzzleEnv) -> Dict[str, Any]:
+@reward(name="chess_puzzle_reward")
+async def chess_puzzle_reward(final_response: str, context: Context) -> Dict[str, Any]:
     """
     Calculate reward for chess puzzle solving based on Stockfish evaluation.
 
@@ -23,14 +26,9 @@ async def chess_puzzle_reward(final_response: str, env: ChessPuzzleEnv) -> Dict[
     2. Bonus for solving the puzzle correctly
     3. Penalty for making suboptimal moves
 
-    The reward is structured to encourage:
-    - Finding the best moves (matching Stockfish recommendations)
-    - Solving puzzles completely
-    - Making progress even with imperfect moves
-
     Args:
         final_response (str): The agent's final response/output (not used directly).
-        env (ChessPuzzleEnv): The chess puzzle environment instance.
+        context (Context): Injected rollout context; used to acquire the chess puzzle resource.
 
     Returns:
         dict: A dictionary containing:
@@ -41,39 +39,34 @@ async def chess_puzzle_reward(final_response: str, env: ChessPuzzleEnv) -> Dict[
             - centipawn_score (float): Average centipawn quality of moves (0-100 scale)
             - output (str): Human-readable summary
     """
-    # Get puzzle state
+    env: ChessPuzzleEnv = await context.acquire_resource(
+        spec=ChessPuzzleSpec, scope="global", backend="local"
+    )
+
     is_solved = env.is_solved
     moves_made = env.moves_made
     num_moves = len(moves_made)
 
-    # Calculate solve bonus
     if is_solved:
         solve_reward = 1.0
     else:
-        # Partial credit for progress through the solution
         solution_len = len(env._solution_moves)
         if solution_len > 1:
-            # Adjust for the setup move
             progress = max(0, env._current_solution_idx - 1) / (solution_len - 1)
-            solve_reward = progress * 0.5  # Up to 0.5 for partial progress
+            solve_reward = progress * 0.5
         elif solution_len == 1:
-            # Single move puzzle
             solve_reward = 0.0
         else:
             solve_reward = 0.0
 
-    # Calculate move quality reward using Stockfish
     centipawn_total = 0.0
     best_move_matches = 0
 
     if num_moves > 0 and env._engine is not None:
-        # Evaluate each move made
-        # We need to replay from the starting position
         import chess
 
         temp_board = chess.Board(env._puzzle_fen)
 
-        # Apply setup move if it was made
         if len(env._solution_moves) > 1 and env._current_solution_idx >= 1:
             try:
                 setup_move = chess.Move.from_uci(env._solution_moves[0])
@@ -82,41 +75,31 @@ async def chess_puzzle_reward(final_response: str, env: ChessPuzzleEnv) -> Dict[
             except ValueError:
                 pass
 
-        for i, move_uci in enumerate(moves_made):
+        for move_uci in moves_made:
             try:
-                # Get best move for this position
-                best_move, best_cp = await env.get_best_move()
+                best_move, _ = await env.get_best_move()
 
-                # Check if agent's move matches best move
                 if move_uci == best_move:
                     best_move_matches += 1
-                    centipawn_total += 100.0  # Perfect score for matching best
+                    centipawn_total += 100.0
                 else:
-                    # Evaluate the quality of the actual move
                     cp_loss = await env.evaluate_move(move_uci)
-                    # Convert centipawn loss to 0-100 scale
-                    # 0 cp loss = 100, -300 cp loss = 0
                     normalized = max(0.0, min(100.0, 100.0 + (cp_loss / 3.0)))
                     centipawn_total += normalized
 
-                # Apply the move to continue analysis
                 move = chess.Move.from_uci(move_uci)
                 if move in temp_board.legal_moves:
                     temp_board.push(move)
 
             except Exception:
-                # If analysis fails, give partial credit
                 centipawn_total += 50.0
 
-    # Average centipawn score
     avg_cp = centipawn_total / num_moves if num_moves > 0 else 50.0
-    move_quality_reward = avg_cp / 100.0  # 0.0 to 1.0
+    move_quality_reward = avg_cp / 100.0
 
-    # Combine rewards
     # 60% for solving, 40% for move quality
     total_reward = 0.6 * solve_reward + 0.4 * move_quality_reward
 
-    # Build output summary
     output_parts = [
         f"Puzzle {'SOLVED!' if is_solved else 'not solved'}",
         f"Moves made: {num_moves}",
@@ -137,20 +120,18 @@ async def chess_puzzle_reward(final_response: str, env: ChessPuzzleEnv) -> Dict[
     }
 
 
-@reward(name="chess_puzzle_reward_simple", env_cls=ChessPuzzleEnv, pool_size=8)
+@reward(name="chess_puzzle_reward_simple")
 async def chess_puzzle_reward_simple(
-    final_response: str, env: ChessPuzzleEnv
+    final_response: str, context: Context
 ) -> Dict[str, Any]:
     """
     Simple binary reward for chess puzzle solving.
 
     Returns 1.0 if puzzle is solved correctly, 0.0 otherwise.
-    Useful for comparison with dense reward and for simpler training setups
-    where you only care about correct solutions.
 
     Args:
         final_response (str): The agent's final response/output (not used).
-        env (ChessPuzzleEnv): The chess puzzle environment instance.
+        context (Context): Injected rollout context; used to acquire the chess puzzle resource.
 
     Returns:
         dict: Contains:
@@ -158,6 +139,9 @@ async def chess_puzzle_reward_simple(
             - is_solved (bool): Whether the puzzle was solved
             - output (str): Human-readable status message
     """
+    env: ChessPuzzleEnv = await context.acquire_resource(
+        spec=ChessPuzzleSpec, scope="global", backend="local"
+    )
     is_solved = env.is_solved
 
     return {

@@ -6,29 +6,56 @@ These tools allow agents to interact with chess puzzles:
 - chess_move: Make a move on the board
 - chess_get_state: Get the current board state
 - chess_get_legal_moves: List all legal moves
+
+Each tool acquires the puzzle env via the rollout context, sharing the same
+resource the chess reward uses.
 """
 
 import traceback
 
-from ....envs.chess_env import ChessPuzzleEnv
+from ....core import Context
+from ....envs.chess_env import ChessPuzzleSpec
 from ...decorator import tool
 
 
+async def _get_chess_env(context: Context):
+    """Acquire the chess puzzle resource and reset it once per rollout.
+
+    The puzzle parameters (``puzzle_id``, ``fen``, ``moves``) are read from
+    ``context.metadata`` on first acquire so each rollout gets the puzzle
+    that was attached to its dataset row.
+    """
+    need_reset = not context.is_spec_acquired(ChessPuzzleSpec)
+    env = await context.acquire_resource(
+        spec=ChessPuzzleSpec,
+        scope="global",
+        backend="local",
+    )
+    if need_reset:
+        meta = context.metadata or {}
+        env_args = {
+            k: meta[k] for k in ("puzzle_id", "fen", "moves") if k in meta
+        }
+        if env_args:
+            await env.reset(env_args=env_args)
+        else:
+            await env.reset()
+    return env
+
+
 @tool(
-    env_cls=ChessPuzzleEnv,
     name="chess_move",
     description="Make a chess move in the current puzzle. The move can be in UCI format (e.g., 'e2e4', 'g1f3', 'e7e8q' for promotion) or standard algebraic notation (e.g., 'e4', 'Nf3', 'O-O' for castling, 'Qxf7#' for checkmate). Returns whether the move was correct and the new board state.",
     stateful=True,
-    pool_size=8,
 )
-async def chess_move(move: str, env: ChessPuzzleEnv):
+async def chess_move(move: str, context: Context):
     """
     Make a chess move in the puzzle.
 
     Args:
         move (str): The move to make. Can be in UCI format (e.g., 'e2e4', 'h5f7')
                    or SAN format (e.g., 'e4', 'Nf3', 'Qxf7+', 'O-O').
-        env (ChessPuzzleEnv): The chess puzzle environment instance (auto-injected).
+        context (Context): Injected rollout context; used to acquire the chess puzzle resource.
 
     Returns:
         str: The result of the move including:
@@ -38,6 +65,7 @@ async def chess_move(move: str, env: ChessPuzzleEnv):
              - Error message if the move is invalid/illegal
     """
     try:
+        env = await _get_chess_env(context)
         result = await env.step(move)
         return result
     except Exception as e:
@@ -45,18 +73,16 @@ async def chess_move(move: str, env: ChessPuzzleEnv):
 
 
 @tool(
-    env_cls=ChessPuzzleEnv,
     name="chess_get_state",
     description="Get the current chess board state including FEN notation, visual board representation, whose turn it is, and puzzle status. Use this to understand the current position before making a move.",
     stateful=True,
-    pool_size=8,
 )
-async def chess_get_state(env: ChessPuzzleEnv):
+async def chess_get_state(context: Context):
     """
     Get the current state of the chess puzzle.
 
     Args:
-        env (ChessPuzzleEnv): The chess puzzle environment instance (auto-injected).
+        context (Context): Injected rollout context; used to acquire the chess puzzle resource.
 
     Returns:
         str: A detailed representation of the current board state including:
@@ -69,6 +95,7 @@ async def chess_get_state(env: ChessPuzzleEnv):
              - Moves played so far
     """
     try:
+        env = await _get_chess_env(context)
         result = await env.step("get_state")
         return result
     except Exception as e:
@@ -76,18 +103,16 @@ async def chess_get_state(env: ChessPuzzleEnv):
 
 
 @tool(
-    env_cls=ChessPuzzleEnv,
     name="chess_get_legal_moves",
     description="Get all legal moves in the current position. Each move is shown in both UCI format (e.g., 'e2e4') and standard algebraic notation (e.g., 'e4'). Use this when you need to know what moves are available.",
     stateful=True,
-    pool_size=8,
 )
-async def chess_get_legal_moves(env: ChessPuzzleEnv):
+async def chess_get_legal_moves(context: Context):
     """
     Get all legal moves in the current position.
 
     Args:
-        env (ChessPuzzleEnv): The chess puzzle environment instance (auto-injected).
+        context (Context): Injected rollout context; used to acquire the chess puzzle resource.
 
     Returns:
         str: A comma-separated list of legal moves in format "uci (san)",
@@ -95,6 +120,7 @@ async def chess_get_legal_moves(env: ChessPuzzleEnv):
              Sorted alphabetically by UCI notation.
     """
     try:
+        env = await _get_chess_env(context)
         result = await env.step("get_legal_moves")
         return result
     except Exception as e:

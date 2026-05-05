@@ -7,7 +7,7 @@ from .src.alfworld.tools import (
     alfworld_step,
 )
 from .src.calculate.tools import calculator
-# from .src.chess.tools import chess_get_legal_moves, chess_get_state, chess_move
+from .src.chess.tools import chess_get_legal_moves, chess_get_state, chess_move
 from .src.code.tools import CodeInterpreterTool, code_interpreter
 from .src.react.tools import answer_math, answer_qa
 from .src.scienceworld.tools import scienceworld_explorer
