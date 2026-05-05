@@ -57,7 +57,7 @@ total_training_steps=200
 
 model_base_name=$(basename $model)
 project_name="Open"
-experiment_name="webshop_${model_base_name}_${adv_estimator}"
+experiment_name="webshop_${model_base_name}_${adv_estimator}_test"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -81,7 +81,7 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.path=${model} \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=$kl_coef \
     actor_rollout_ref.actor.kl_loss_type=$kl_loss_type \
@@ -89,11 +89,11 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.60 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     critic.model.path=$model \
     critic.ppo_mini_batch_size=32 \
