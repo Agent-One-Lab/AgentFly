@@ -12,13 +12,7 @@ AgentFly provides a comprehensive tool system that enables agents to interact wi
 ```python
 from agentfly.tools import tool
 
-@tool(name="calculator", description="Calculate mathematical expressions")
-def calculator(expression: str):
-    try:
-        result = eval(expression)
-        return str(result)
-    except Exception as e:
-        return f"Error: {str(e)}"
+--8<-- "src/agentfly/tools/tool_base.py:addition_tool_example"
 ```
 
 ## Stateful Tool with ResourceEngine
@@ -28,21 +22,7 @@ from agentfly.core import Context
 from agentfly.envs.python_env import PythonSandboxSpec
 from agentfly.tools import tool
 
-@tool(
-    name="env_tool",
-    description="Run an action in a sandboxed Python environment",
-    stateful=True,
-)
-async def env_tool(action: str, context: Context) -> str:
-    """
-    Run an action in the Python sandbox environment.
-
-    Args:
-        action (str): Code or command to run in the sandbox.
-        context (Context): Injected rollout context; used to acquire the sandbox resource.
-    """
-    env = await context.acquire_resource(spec=PythonSandboxSpec, scope="global", backend="local")
-    return await env.step(action)
+--8<-- "src/agentfly/tools/src/code/tools.py:code_interpreter_example"
 ```
 
 ## Tool with Schema

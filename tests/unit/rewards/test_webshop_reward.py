@@ -15,4 +15,4 @@ async def test_webshop_reward():
         assert "reward" in result
         assert result["reward"] >= 0.0
     finally:
-        await ctx.release_resource(scope="rollout")
+        await ctx.end_resource(scope="rollout")

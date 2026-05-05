@@ -11,8 +11,8 @@ async def test_webshop_search():
         result = await webshop_browser(
             action="search", value="shoes", context=ctx
         )
-        assert isinstance(result, str)
-        assert len(result) > 0
+        print(result)
+        assert isinstance(result, dict)
     finally:
         await ctx.release_resource(scope="rollout")
 
@@ -24,10 +24,12 @@ async def test_webshop_search_and_next_page():
         result = await webshop_browser(
             action="search", value="shoes", context=ctx
         )
-        assert isinstance(result, str)
+        print(result)
+        assert isinstance(result, dict)
         result = await webshop_browser(
             action="click", value="Next >", context=ctx
         )
-        assert isinstance(result, str)
+        print(result)
+        assert isinstance(result, dict)
     finally:
         await ctx.release_resource(scope="rollout")

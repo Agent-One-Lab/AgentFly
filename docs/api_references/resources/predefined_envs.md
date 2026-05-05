@@ -6,4 +6,4 @@
 
 ::: agentfly.envs.ScienceWorldEnv
 
-::: agentfly.envs.WebAgentTextEnv
+::: agentfly.envs.WebShopEnv

@@ -90,8 +90,8 @@ async def _start_enroot_container(
         from ..envs.alfworld_env import ALFWorldEnv
         resource = ALFWorldEnv(container=container, resource_id=container.name, spec=spec)
     elif spec.category == "webshop":
-        from ..envs.webshop_text_env import WebAgentTextEnv
-        resource = WebAgentTextEnv(container=container, resource_id=container.name, spec=spec)
+        from ..envs.webshop_text_env import WebShopEnv
+        resource = WebShopEnv(container=container, resource_id=container.name, spec=spec)
     elif spec.category == "container":
         resource = ContainerResource(container=container, resource_id=container.name, spec=spec)
     else:

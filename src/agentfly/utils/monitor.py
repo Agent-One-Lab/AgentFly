@@ -19,7 +19,7 @@ import io
 import json
 import os
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 import numpy as np
@@ -89,6 +89,12 @@ def serialize_for_json(obj):
         buffer = io.BytesIO()
         obj.save(buffer, format="PNG")
         return {"__image__": base64.b64encode(buffer.getvalue()).decode("utf-8")}
+    elif hasattr(obj, "model_dump") and callable(obj.model_dump):
+        # Pydantic v2 BaseModel — used by Trajectory, RunResult, etc.
+        return serialize_for_json(obj.model_dump())
+    elif is_dataclass(obj) and not isinstance(obj, type):
+        # dataclass instance — used by ToolResult, RewardResult.
+        return serialize_for_json(asdict(obj))
     elif isinstance(obj, dict):
         return {k: serialize_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, list):

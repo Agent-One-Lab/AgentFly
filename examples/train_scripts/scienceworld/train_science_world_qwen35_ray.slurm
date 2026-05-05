@@ -101,8 +101,8 @@ lr=4e-7
 max_model_len=16384
 max_new_tokens_per_turn=512
 val_batch_size=512
-batch_size=64
-num_chains=8
+batch_size=32
+num_chains=4
 # full on-policy
 mini_batch_size=$((batch_size * num_chains))
 kl_coef=0.001

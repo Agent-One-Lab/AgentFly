@@ -310,44 +310,21 @@ class BaseTool:
         return self._format_result(result, kwargs)
 
     def _format_result(self, result, kwargs):
-        """Format the result into the standard tool response format."""
-        # Result must be a string or a dict
-        if isinstance(result, str):
-            if self.max_length is not None:
-                result = result[: self.max_length]
-            result_dict = {
-                "name": self.name,
-                "arguments": kwargs,
-                "observation": result,
-                "status": self.status,
-                "info": {},
-            }
-            return result_dict
-        elif isinstance(result, dict):
-            # result should be like {"observation": "a string", "reward": 1.0}
-            assert "observation" in result, (
-                f"observation is required for {self.name} if tool call returns a dict"
-            )
-            if self.max_length is not None:
-                if len(result["observation"]) > self.max_length:
-                    result["observation"] = result["observation"][: self.max_length] + "...(truncated)"
-                    
-            observation = result.pop("observation")
-            info = result
-            result_dict = {
-                "name": self.name,
-                "arguments": kwargs,
-                "observation": observation,
-                "status": self.status,
-                "info": info,
-            }
-            if "image" in result:
-                result_dict["image"] = result["image"]
-            return result_dict
-        else:
-            raise ValueError(
-                f"Got invalid result: {type(result)} when calling {self.name} with arguments {kwargs}. The result should be a string or a dict containing 'observation' as a key."
-            )
+        """Format the result into the standard tool response dict.
+
+        Normalization is delegated to :meth:`ToolResult.from_raw`; the legacy
+        dict shape is reproduced via :meth:`ToolResult.to_dict` so existing
+        downstream consumers keep working.
+        """
+        from .types import ToolResult
+
+        return ToolResult.from_raw(
+            result,
+            name=self.name,
+            arguments=kwargs,
+            status=self.status,
+            max_length=self.max_length,
+        ).to_dict()
 
     # ========== Registration ==========
     @classmethod
@@ -476,6 +453,7 @@ if __name__ == "__main__":
     # Example 1: Decorator-based tool (existing pattern)
     from .decorator import tool
 
+    # --8<-- [start:addition_tool_example]
     @tool(name="AdditionTool", description="Adds two numbers.")
     def add(a, b: int = 1):
         """
@@ -489,6 +467,7 @@ if __name__ == "__main__":
             int: The sum of a and b.
         """
         return a + b
+    # --8<-- [end:addition_tool_example]
 
     @tool(description="Concatenates two strings.")
     def concat(s1, s2):
@@ -499,6 +478,7 @@ if __name__ == "__main__":
 
     # Example 2: Inheritance-based tool (new pattern)
     # Metadata can be defined as class attributes
+    # --8<-- [start:api_tool_example]
     class APITool(BaseTool):
         """
         Example of an inheritance-based tool that stores API credentials.
@@ -525,6 +505,7 @@ if __name__ == "__main__":
             """
             # Use self.api_key here
             return f"Result for '{query}' using API key: {self.api_key[:5]}..."
+    # --8<-- [end:api_tool_example]
 
     # Tool is automatically registered on initialization
     api_tool = APITool(api_key="secret_key_12345")

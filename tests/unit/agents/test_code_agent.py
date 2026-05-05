@@ -3,6 +3,7 @@ from agentfly.agents.specialized.code_agent import CodeAgent
 from agentfly.tools import code_interpreter
 
 
+@pytest.mark.gpu
 @pytest.mark.asyncio
 async def test_code_agent_end_to_end():
     tools = [code_interpreter]
@@ -31,7 +32,6 @@ async def test_code_agent_end_to_end():
         },
     ]
 
-    await agent.run(max_turns=4, messages=messages, num_chains=2)
+    result = await agent.run(max_turns=4, messages=messages, num_chains=2)
 
-    messages = agent.get_messages()
-    print(messages)
+    print(result.trajectories)

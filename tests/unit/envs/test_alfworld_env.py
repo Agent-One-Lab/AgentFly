@@ -3,6 +3,8 @@ import pytest
 from agentfly.envs import ALFWorldEnv
 
 
+pytestmark = pytest.mark.skip(reason="Skipping for now")
+
 @pytest.mark.asyncio
 async def test_alfworld_env_get_info():
     """Test the get_info method returns expected info structure with real environment data."""

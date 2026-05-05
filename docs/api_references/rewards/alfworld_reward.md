@@ -4,23 +4,9 @@
     options:
       show_source: true
 
-## Function Signature
-
-```python
-async def alfworld_episode_reward(prediction: str, context: Context) -> Dict[str, Any]
-```
-
 ## Description
 
-Evaluates agent performance in ALFWorld tasks by checking the episode completion status and reward from the environment state.
-
-**Parameters:**
-- **prediction** (str): Agent's predicted action or response (not directly used).
-- **context** (`Context`): Rollout execution context used to acquire the ALFWorld resource.
-
-**Returns:**
-Dict[str, Any]: Dictionary containing:
-- **reward** (float): Environment reward value for current state.
+Evaluates agent performance in ALFWorld tasks by checking the episode completion status and reward from the environment state. Returns a dict with `reward` (the environment's current reward value).
 
 **Decorator Configuration:**
 - **name**: `"alfworld_episode_reward"`

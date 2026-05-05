@@ -61,7 +61,7 @@ verl = [
     "flash-attn",
     "hydra-core",
     "liger-kernel",
-    "numpy<2.0",
+    "numpy",
     "pandas",
     "peft",
     "pyarrow>=15.0.0",
@@ -71,7 +71,6 @@ verl = [
     "ray[default]",
     "tensordict",
     "torchdata",
-    "transformers<5.0.0",
     "packaging>=20.0",
     "uvicorn",
     "fastapi"
@@ -92,3 +91,6 @@ docs = [
     "mkdocs-git-revision-date-localized-plugin",
     "mkdocs-git-authors-plugin",
 ]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]

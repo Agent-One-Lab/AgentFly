@@ -84,4 +84,4 @@ jobs:
 
       - name: Run unit test (${{ matrix.test-file }})
         run: |
-          pytest ${{ matrix.test-file }}
+          pytest -m "not gpu" ${{ matrix.test-file }}

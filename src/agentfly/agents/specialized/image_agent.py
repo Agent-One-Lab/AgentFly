@@ -119,6 +119,7 @@ def geneate_image_id(image: Image.Image) -> str:
     return str(image_id)
 
 
+# --8<-- [start:class_method_tool_init]
 class ImageEditingAgent(BaseAgent):
     def __init__(
         self,
@@ -136,6 +137,7 @@ class ImageEditingAgent(BaseAgent):
             tools=tools,
             **kwargs,
         )
+# --8<-- [end:class_method_tool_init]
 
     def _store_image(self, image: Image.Image) -> str:
         """Store an image in the instance database and return its ID"""
@@ -223,6 +225,7 @@ class ImageEditingAgent(BaseAgent):
             self._detect_and_insert_image_id(message["messages"])
         return await super().run(messages=messages, **kwargs)
 
+    # --8<-- [start:class_method_tool_method]
     @tool(
         name="qwen_image_edit",
         description="Edit an image using Qwen-Image-Edit model with natural language instructions, return the image id and the edited image. Useful for tasks like changing colors, adding/removing elements, or style transfer.",
@@ -267,3 +270,4 @@ class ImageEditingAgent(BaseAgent):
 
         result = {"observation": f"Image Id: {new_image_id}", "image": image_base64}
         return result
+    # --8<-- [end:class_method_tool_method]

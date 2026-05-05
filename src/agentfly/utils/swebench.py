@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, List
 
 import click
-
+from ..tools import run_shell_command
 from ..agents.specialized.swe_agents import BashSWEAgent, Qwen3CoderSWEAgent
 from ..agents.specialized.swe_agents.prompts import (
     InstructionSystemPrompt,
@@ -121,6 +121,10 @@ async def _run_agent_async(
     tools = None
     if tools_mode == "file":
         tools = _file_tool_list()
+    elif tools_mode == "bash":
+        tools = [run_shell_command]
+    else:
+        raise click.BadParameter(f"Unknown tools mode: {tools_mode!r}")
 
     backend_config: dict[str, Any] = {"backend": backend}
     if backend == "client":
@@ -172,22 +176,23 @@ def _save_per_sample_results(
     agent: Any,
 ) -> tuple[float, int]:
     result_dir.mkdir(parents=True, exist_ok=True)
-    trajectories = agent.trajectories
-    reward_scalars, reward_extras = agent.rewards
+    run_result = agent._require_last_run()
+    trajectories = run_result.trajectories
+    reward_scalars = run_result.rewards
+    reward_extras = run_result.reward_extras
 
     manifest: list[dict[str, Any]] = []
     for idx, traj in enumerate(trajectories):
-        iid = traj.get("instance_id") or traj.get("uid")
+        # Task identifiers come from the dataset row, which is preserved in
+        # Trajectory.metadata after the typed-trajectory refactor.
+        iid = traj.metadata.get("instance_id") or traj.metadata.get("uid")
         basename = _safe_result_basename(
             str(iid) if iid is not None else None, idx
         )
         out_path = result_dir / f"{basename}.json"
 
-        reward_full = traj.get("reward")
         r_scalar = (
-            reward_scalars[idx]
-            if idx < len(reward_scalars)
-            else (reward_full.get("reward") if isinstance(reward_full, dict) else reward_full)
+            reward_scalars[idx] if idx < len(reward_scalars) else traj.reward
         )
         extras_row = {
             k: (v[idx] if idx < len(v) else None) for k, v in reward_extras.items()
@@ -196,9 +201,9 @@ def _save_per_sample_results(
             "index": idx,
             "instance_id": iid,
             "reward": r_scalar,
-            "reward_full": serialize_for_json(reward_full),
+            "reward_full": {"reward": traj.reward, "extras": traj.metrics},
             "reward_extras": serialize_for_json(extras_row),
-            "trajectory": serialize_for_json(traj),
+            "trajectory": traj.model_dump(),
         }
         out_path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         manifest.append(
@@ -262,10 +267,10 @@ def _save_per_sample_results(
 )
 @click.option(
     "--tool-set",
-    type=click.Choice(["default", "file"], case_sensitive=False),
-    default="default",
+    type=click.Choice(["bash", "file"], case_sensitive=False),
+    default="bash",
     show_default=True,
-    help="default: agent built-ins only; file: add file workspace tools (for Qwen3 coder).",
+    help="bash: bash only; file: Use file workspace tools (for Qwen3 coder).",
 )
 @click.option(
     "--reward-name",
@@ -353,6 +358,16 @@ def main(
     if enroot_images_path:
         os.environ["ENROOT_IMAGES_PATH"] = enroot_images_path
     os.environ["ENROOT_ASYNC"] = "1" if enroot_async else "0"
+    if backend != "async_vllm" and (tensor_parallel_size != 1 or data_parallel_size != 1):
+        raise click.BadParameter(
+            "--tp/--dp only affect --backend async_vllm; use --backend async_vllm "
+            "or leave tp/dp at 1."
+        )
+    if backend == "async_vllm":
+        click.echo(
+            f"Using async_vllm engine args: tp={tensor_parallel_size}, "
+            f"dp={data_parallel_size}, max_model_len={max_model_len}"
+        )
 
     raw = json.loads(data_path.read_text(encoding="utf-8"))
     rows = _normalize_dataset_rows(raw)
@@ -365,7 +380,7 @@ def main(
         rows = rows[: max(0, limit)]
 
     messages = [_row_to_message_item(r) for r in rows]
-    tools_mode = "file" if tool_set == "file" else "default"
+    tools_mode = "file" if tool_set == "file" else "bash"
 
     rollout_agent = asyncio.run(
         _run_agent_async(
@@ -391,7 +406,7 @@ def main(
 
     accuracy, n = _save_per_sample_results(result_dir, rollout_agent)
     click.echo(
-        f"Wrote {len(rollout_agent.trajectories)} sample(s) under {result_dir.resolve()} "
+        f"Wrote {len(rollout_agent._require_last_run())} sample(s) under {result_dir.resolve()} "
         f"(see run_summary.json)."
     )
     if n:

@@ -1,43 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-
 from vllm import AsyncEngineArgs
-
-
-@dataclass
-class TransformersConfig:
-    """Configuration for Transformers backend using Hugging Face models.
-
-    Attributes:
-        temperature (float): Sampling temperature for text generation. Controls randomness.
-            Higher values (e.g., 1.0) make output more random, lower values (e.g., 0.1) make it more deterministic.
-            Defaults to 1.0.
-        max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
-        trust_remote_code (bool): Whether to trust remote code when loading models.
-            This is required for some custom models. Defaults to True.
-        device_map (str): Device mapping strategy for model placement.
-            Options include "auto", "cpu", "cuda:0", etc. Defaults to "auto".
-    """
-
-    temperature: float = 1.0
-    max_new_tokens: int = 1024
-    trust_remote_code: bool = True
-    device_map: str = "auto"
-
-
-@dataclass
-class VLLMConfig:
-    """Configuration for VLLM backend for high-performance inference.
-
-    Attributes:
-        temperature (float): Sampling temperature for text generation. Controls randomness.
-            Higher values (e.g., 1.0) make output more random, lower values (e.g., 0.1) make it more deterministic.
-            Defaults to 1.0.
-        max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
-    """
-
-    temperature: float = 1.0
-    max_new_tokens: int = 1024
 
 
 @dataclass(init=False)
@@ -72,34 +35,13 @@ class AsyncVLLMConfig:
             self.engine_args = AsyncEngineArgs()
 
 
-@dataclass
-class VerlConfig:
-    """Configuration for Verl backend.
-
-    Attributes:
-        temperature (float): Sampling temperature for text generation. Controls randomness.
-            Higher values (e.g., 1.0) make output more random, lower values (e.g., 0.1) make it more deterministic.
-            Defaults to 1.0.
-        max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
-    """
-
-    temperature: float = 1.0
-    max_new_tokens: int = 1024
-
 
 @dataclass
 class AsyncVerlConfig:
     """Configuration for Async Verl backend.
 
     Attributes:
-        temperature (float): Sampling temperature for text generation. Controls randomness.
-            Higher values (e.g., 1.0) make output more random, lower values (e.g., 0.1) make it more deterministic.
-            Defaults to 1.0.
-        max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
     """
-
-    temperature: float = 1.0
-    max_new_tokens: int = 1024
 
 
 @dataclass
@@ -123,16 +65,10 @@ class ClientConfig:
     max_requests_per_minute: int = 100
     timeout: int = 3600
     api_key: str = "EMPTY"
-    max_new_tokens: int = 1024
-    temperature: float = 1.0
-
 
 # Backend configuration mapping
 BACKEND_CONFIGS = {
-    "transformers": TransformersConfig,
-    "vllm": VLLMConfig,
     "async_vllm": AsyncVLLMConfig,
-    "verl": VerlConfig,
     "async_verl": AsyncVerlConfig,
     "client": ClientConfig,
 }

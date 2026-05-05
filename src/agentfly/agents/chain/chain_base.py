@@ -14,6 +14,8 @@ from tqdm.asyncio import tqdm_asyncio
 
 from ...core import Context, ContextConfig
 from ...rewards.reward_base import calculate_reward
+from ...rewards.types import RewardResult
+from ..types import Trajectory
 from ...tools.tool_base import submit_tool_call
 from ...utils.monitor import MetricEvent, Monitor, emit, serialize_for_json
 from ...utils.timing import Timer
@@ -72,22 +74,50 @@ class ChainRollout:
         for group_idx, messages in enumerate(messages_list):
             group_id = group_ids[group_idx]
             for j in range(num_chains):
+                cid = str(uuid.uuid4())
                 ch = Chain(
                     messages.meta
-                    | {"group_id": group_id, "group_idx": group_idx, "chain_idx": j}
+                    | {
+                        "chain_id": cid,
+                        "group_id": group_id,
+                        "group_idx": group_idx,
+                        "chain_idx": j,
+                    }
                 )
                 root = ch.add_node(
                     type="Action Input", messages=deepcopy(messages.messages)
                 )
 
-                cid = str(uuid.uuid4())
                 chains[cid] = ch
                 start_nodes[cid] = root
 
         return chains, start_nodes
 
-    def get_trajectories(self) -> List[Any]:
-        trajectories = []
+    # Reserved chain.info keys that map to typed Trajectory fields
+    # rather than going into the free-form `metadata` dict.
+    _RESERVED_INFO_KEYS = frozenset({
+        "chain_id",
+        "group_id",
+        "chain_idx",
+        "group_idx",
+        "finish_reason",
+        "rollout_time_sec",
+        "reward",
+    })
+
+    def get_trajectories(self) -> List[Trajectory]:
+        """Build :class:`Trajectory` objects for every active chain.
+
+        Maps ``chain.info`` keys into the typed Trajectory fields:
+
+        - ``reward`` (a ``RewardResult`` produced by ``calculate_reward``) →
+          ``Trajectory.reward`` (float) + ``Trajectory.metrics`` (extras)
+        - ``finish_reason``, ``rollout_time_sec``, ``chain_id``,
+          ``group_id``, ``chain_idx``, ``group_idx`` → first-class fields
+        - everything else (dataset-row passthrough fields like ``answer``,
+          ``task_id``, etc.) → ``Trajectory.metadata``
+        """
+        trajectories: List[Trajectory] = []
         # Sort by (group_idx, chain_idx) so trajectories are in deterministic order
         items = list(self.current_nodes.items())
         items.sort(
@@ -96,18 +126,50 @@ class ChainRollout:
                 self.chains[item[0]].info.get("chain_idx", 0),
             )
         )
-        for id, node in items:
-            chain = self.chains[id]
+        for chain_id, node in items:
+            chain = self.chains[chain_id]
             info = chain.info
-            trajectory_item = {}
-            # Concatenate all stored history segments for this chain.
-            # Histories may contain multiple segments when context tools are used.
-            all_segments = []
-            for segment in chain.histories:
-                all_segments.append(segment)
-            trajectory_item["trajectory_segments"] = all_segments
-            trajectory_item.update(info)
-            trajectories.append(trajectory_item)
+
+            # Histories may contain multiple segments when context tools fold.
+            segments = list(chain.histories)
+
+            # Unwrap reward into the typed (reward, metrics) split.
+            raw_reward = info.get("reward")
+            if isinstance(raw_reward, RewardResult):
+                reward_value = raw_reward.reward
+                metrics = dict(raw_reward.extras)
+            elif isinstance(raw_reward, dict):
+                # Legacy back-compat: a dict reward stored directly without
+                # going through calculate_reward (rare).
+                reward_value = raw_reward.get("reward")
+                metrics = {k: v for k, v in raw_reward.items() if k != "reward"}
+            elif isinstance(raw_reward, (int, float)):
+                reward_value = float(raw_reward)
+                metrics = {}
+            else:
+                # None when no reward function was configured.
+                reward_value = None
+                metrics = {}
+
+            # Free-form bag: everything in chain.info that isn't a reserved key.
+            metadata = {
+                k: v for k, v in info.items() if k not in self._RESERVED_INFO_KEYS
+            }
+
+            trajectories.append(
+                Trajectory(
+                    segments=segments,
+                    reward=reward_value,
+                    metrics=metrics,
+                    finish_reason=info.get("finish_reason"),
+                    rollout_time_sec=info.get("rollout_time_sec"),
+                    chain_id=info.get("chain_id"),
+                    group_id=info.get("group_id"),
+                    chain_idx=info.get("chain_idx"),
+                    group_idx=info.get("group_idx"),
+                    metadata=metadata,
+                )
+            )
         return trajectories
 
     def validate_run_args(
@@ -422,7 +484,7 @@ class ChainRollout:
                     new_content.append({"type": "image", "image": image_base64})
 
                 # Apply context folding based on the tool result (currently only summarize).
-                updated_messages = self.apply_context_folding(
+                updated_messages, did_fold_context = self.apply_context_folding(
                     chain=chain,
                     messages=newest_messages,
                     tool_name=tool_call["function"]["name"],
@@ -435,6 +497,18 @@ class ChainRollout:
 
                 action_input_node.messages = updated_messages
                 newest_messages = updated_messages.copy()
+                if did_fold_context:
+                    # Folded history is shorter; re-measure prompt tokens for the new
+                    # messages (same path as first generation) instead of keeping the
+                    # pre-fold cumulative total.
+                    try:
+                        folded_prompt_tokens = self._estimate_chat_prompt_tokens(
+                            action_input_node, tools=tools
+                        )
+                    except ValueError:
+                        folded_prompt_tokens = 0
+                    action_input_node.total_token_length = folded_prompt_tokens
+                    running_total_token_length = folded_prompt_tokens
                 action_input_node.is_terminal = (
                     result["status"] in self.terminal_status
                 )
@@ -457,7 +531,7 @@ class ChainRollout:
         tool_result_name: str,
         new_content: List[Dict[str, Any]],
         context: Context,
-    ) -> Messages:
+    ) -> Tuple[Messages, bool]:
         """
         Apply context folding based on the tool that was just executed.
 
@@ -471,7 +545,8 @@ class ChainRollout:
             new_content: Content payload for the tool message.
 
         Returns:
-            Updated Messages object after folding / appending the tool message.
+            (updated Messages, did_fold) where ``did_fold`` is True when history was
+            replaced by a summarize fold (caller should refresh cumulative token counts).
         """
         tool_turn: Dict[str, Any] = {
             "role": "tool",
@@ -494,12 +569,12 @@ class ChainRollout:
             )
             context.trajectory_format = "segmented"
             meta = messages.meta
-            return Messages.from_turns(folded_turns, **meta)
+            return Messages.from_turns(folded_turns, **meta), True
 
         # Default behavior for non-folding tools: just append the tool message.
         turns = messages.messages + [tool_turn]
         meta = messages.meta
-        return Messages.from_turns(turns, **meta)
+        return Messages.from_turns(turns, **meta), False
 
     def _normalize_full_response_content(self, content: Any) -> str:
         """Convert message content (str or list of content blocks) to a single string."""
@@ -939,7 +1014,7 @@ class ChainRollout:
         tool_calls_by_name = defaultdict(int)
 
         for trajectory in trajectories:
-            for segment in trajectory["trajectory_segments"]:
+            for segment in trajectory.segments:
                 avg_segments += 1
                 for msg in segment:
                     if msg["role"] == "assistant":
@@ -1045,10 +1120,10 @@ class ChainRollout:
                 )
                 evt = MetricEvent(
                     kind="text",
-                    name="Agent/rollout/slowest_message",
+                    name="agent/rollout/slowest_message",
                     value=slowest_message_json,
                     x=self.global_step,
-                    x_name="Agent/rollout/step",
+                    x_name="agent/rollout/step",
                 )
                 emit(evt)
 
@@ -1062,18 +1137,27 @@ class ChainRollout:
                 )
                 emit(evt)
 
-        reward_values, other_values = self.rewards
-        avg_reward = sum(reward_values) / len(reward_values)
-        evt = MetricEvent(
-            kind="scalar",
-            name="agent/rollout/reward",
-            value=avg_reward,
-            x=self.global_step,
-            x_name="agent/rollout/step",
-        )
-        emit(evt)
+        # Compute reward + extras from the typed Trajectory objects already
+        # built at the top of monitor_step. Chains without a reward function
+        # produce reward=None; filter those out before averaging.
+        reward_values = [t.reward for t in trajectories if t.reward is not None]
+        other_values: Dict[str, List[Any]] = defaultdict(list)
+        for t in trajectories:
+            for k, v in t.metrics.items():
+                other_values[k].append(v)
+
+        if reward_values:
+            avg_reward = sum(reward_values) / len(reward_values)
+            evt = MetricEvent(
+                kind="scalar",
+                name="agent/rollout/reward",
+                value=avg_reward,
+                x=self.global_step,
+                x_name="agent/rollout/step",
+            )
+            emit(evt)
         for key, value in other_values.items():
-            if isinstance(value[0], float) or isinstance(value[0], int):
+            if value and isinstance(value[0], (float, int)) and not isinstance(value[0], bool):
                 avg_value = sum(value) / len(value)
                 evt = MetricEvent(
                     kind="scalar",

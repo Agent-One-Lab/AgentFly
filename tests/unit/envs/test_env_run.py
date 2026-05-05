@@ -1,6 +1,6 @@
 import asyncio
 import time
-from agentfly.envs import PythonSandboxEnv
+from agentfly.envs import PythonSandboxSpec
 import pytest
 
 
@@ -14,39 +14,38 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_python_sandbox_env():
-    env = PythonSandboxEnv()
-    assert env is not None
-    await env.start()
-    await env.reset()
-    obs = await env.step("print('Hello, world!')")
-    assert obs == "Hello, world!\n", f"Response: {obs}"
-    await env.aclose()
+async def test_python_sandbox_env(local_runner):
+    env = await local_runner.start_resource(PythonSandboxSpec)
+    try:
+        assert env is not None
+        obs = await env.step("print('Hello, world!')")
+        assert obs == "Hello, world!\n", f"Response: {obs}"
+    finally:
+        await local_runner.end_resource(env)
 
 
 N_REQUESTS = 1_00
 
 
 @pytest.mark.asyncio
-async def test_python_sandbox_env_concurrent_requests():
+async def test_python_sandbox_env_concurrent_requests(local_runner):
     # Record time
     start_time = time.time()
-    env = PythonSandboxEnv(max_episodes=2)  # only one reset needed
-    await env.start()
-    await env.reset()
+    env = await local_runner.start_resource(PythonSandboxSpec)
 
     async def run(i: int):
         code = f"print({i})"
         obs = await env.step(code)
         return i, obs.strip()
 
-    tasks = [asyncio.create_task(run(i)) for i in range(N_REQUESTS)]
-    results = await asyncio.gather(*tasks)
+    try:
+        tasks = [asyncio.create_task(run(i)) for i in range(N_REQUESTS)]
+        results = await asyncio.gather(*tasks)
 
-    for i, out in results:
-        assert out == str(i)
-
-    await env.aclose()
+        for i, out in results:
+            assert out == str(i)
+    finally:
+        await local_runner.end_resource(env)
 
     end_time = time.time()
     print(f"Time taken: {end_time - start_time} seconds")

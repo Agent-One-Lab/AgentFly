@@ -11,19 +11,7 @@ The AgentFly framework now supports defining tools on class methods using the `@
 Standalone function tools are the traditional way to define tools in AgentFly. These are independent functions that don't require any instance context.
 
 ```python
-@tool(name="AdditionTool", description="Adds two numbers.")
-def add(a: int, b: int = 1) -> int:
-    """
-    Adds two numbers.
-
-    Args:
-        a (int): The first number.
-        b (int): The second number which should be a non-negative integer.
-
-    Returns:
-        int: The sum of a and b.
-    """
-    return a + b
+--8<-- "src/agentfly/tools/tool_base.py:addition_tool_example"
 ```
 
 **Characteristics:**
@@ -36,32 +24,16 @@ def add(a: int, b: int = 1) -> int:
 
 Class method tools are methods within a class that are decorated with `@tool`. These tools have access to the class instance and can use instance variables, methods, and state.
 
-```python
-class ImageEditingAgent(BaseAgent):
-    def __init__(self, model_name_or_path: str, **kwargs):
-        self._image_database = {}
-        tools = [self.auto_inpaint_image_tool]
-        super().__init__(
-            model_name_or_path=model_name_or_path,
-            system_prompt=IMAGE_AGENT_SYSTEM_PROMPT,
-            tools=tools,
-            **kwargs
-        )
+The `ImageEditingAgent` in AgentFly registers a class-method tool by including the bound method in its `tools` list during `__init__`:
 
-    @tool(
-        name="auto_inpaint_image",
-        description="Automatically detect objects and inpaint them in one operation."
-    )
-    async def auto_inpaint_image_tool(
-        self,
-        image_id: str,
-        detect_prompt: str,
-        prompt: str,
-        # ... other parameters
-    ) -> str:
-        # This method has access to self._image_database
-        image = self._get_image(image_id)
-        # ... implementation
+```python
+--8<-- "src/agentfly/agents/specialized/image_agent.py:class_method_tool_init"
+```
+
+The tool itself is just a regular method decorated with `@tool`. Because the first parameter is `self`, the framework automatically binds the instance and the method has full access to `self._image_database` and other instance state:
+
+```python
+--8<-- "src/agentfly/agents/specialized/image_agent.py:class_method_tool_method"
 ```
 
 **Characteristics:**

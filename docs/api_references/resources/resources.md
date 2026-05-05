@@ -4,7 +4,7 @@
 
 Declarative configuration used by the engine to create and scale resources:
 
-::: agentfly.resources.types.ResourceSpec
+::: agentfly.resources.types.BaseResourceSpec
     options:
       show_root_heading: true
       show_members: true

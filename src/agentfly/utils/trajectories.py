@@ -12,13 +12,29 @@ import click
 from ..agents import HFAgent
 
 
-def gather_responses(trajectories: List[Dict]):
+def gather_responses(trajectories):
+    """Extract (id, response_text) for each trajectory.
+
+    Reads the chain UUID and the last message of the last segment. ``id``
+    falls back to the dataset-row ``id`` field (e.g. HotpotQA) if present.
+    """
     responses = []
     for trajectory in trajectories:
+        last_segment = trajectory.segments[-1] if trajectory.segments else []
+        last_msg = last_segment[-1] if last_segment else {}
+        content = last_msg.get("content")
+        if isinstance(content, list):
+            text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
+            response_text = "".join(text_parts)
+        elif isinstance(content, str):
+            response_text = content
+        else:
+            response_text = ""
+
         responses.append(
             {
-                "id": trajectory["id"],
-                "response": trajectory["messages"][-1]["content"][0]["text"],
+                "id": trajectory.chain_id or trajectory.metadata.get("id"),
+                "response": response_text,
             }
         )
 
@@ -63,13 +79,13 @@ def main(
             },
             local_cache_dir="test_cache",
         )
-        await agent.run(
+        result = await agent.run(
             messages=messages,
             num_chains=num_chains,
             max_concurrent_chains=max_concurrent_chains,
             max_turns=max_turns,
         )
-        responses = gather_responses(agent.trajectories)
+        responses = gather_responses(result.trajectories)
 
         os.makedirs(output_dir, exist_ok=True)
         with open(

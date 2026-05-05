@@ -3,7 +3,10 @@ from agentfly.agents import ImageEditingAgent
 import os
 from datetime import datetime
 
+import pytest
 
+
+@pytest.mark.gpu
 async def test_image_editing():
     """
     测试ImageEditingAgent的图像编辑功能
@@ -123,6 +126,7 @@ async def test_image_editing():
     print("\n🎉 所有测试完成！")
 
 
+@pytest.mark.gpu
 async def test_specific_function():
     """
     测试特定功能的示例

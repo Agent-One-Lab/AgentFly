@@ -1,5 +1,6 @@
 from .agent_base import BaseAgent
 from .auto import AutoAgent
+from .types import RunResult, Trajectory
 from ..utils.llm_backends import (
     AsyncVerlBackend,
     AsyncVLLMBackend,
@@ -27,6 +28,8 @@ __all__ = [
     "HFAgent",
     "ImageEditingAgent",
     "ActionAgent",
+    "Trajectory",
+    "RunResult",
     "ClientBackend",
     "ClientConfig",
     "AsyncVLLMBackend",

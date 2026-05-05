@@ -1,14 +1,13 @@
 import pytest
-from agentfly.agents.react.react_agent import ReactAgent
-from agentfly.tools.src.webshop.tools import webshop_browser
-from agentfly.tools.src.react.tools import answer
+from agentfly.agents import ReactAgent
+from agentfly.tools import webshop_browser
 from agentfly.rewards import webshop_reward
 
 
 @pytest.mark.gpu
 @pytest.mark.asyncio(loop_scope="session")
 async def test_webshop_agent_call():
-    tools = [webshop_browser, answer]
+    tools = [webshop_browser]
     agent = ReactAgent(
         "Qwen/Qwen2.5-3B-Instruct",
         tools=tools,

@@ -33,28 +33,11 @@ async def custom_tool(arg1, arg2):
     return observation
 ```
 
-2. Inheriting from the `BaseTool` class. The tool execution interface is the call method of the class.
+2. Inheriting from the `BaseTool` class. The tool execution interface is the `call` method of the class.
 ```python
 from agentfly.tools import BaseTool
-class APITool(BaseTool)
-    name="api_tool"
-    description="This is a tool that uses API key"
 
-    def __init__(self, api_key):
-        self.api_key = api_key
-
-    def call(self, query):
-        """
-        This is a tool that uses API key
-
-        Args:
-            query (str): query to use for the tool
-
-        Returns:
-            observation: observation string
-        """
-
-        return f"Call with query {query} and key {self.api_key}"
+--8<-- "src/agentfly/tools/tool_base.py:api_tool_example"
 ```
 
 
@@ -82,57 +65,28 @@ class CustomAgent(BaseAgent):
 
 
 ## Non-Stateful & Stateful Tool
-We define two types of tools:
 
-1. Non-Stateful Tool does not keep environment states. For such tool, we can simply write a function and decorate it with `@tool`.
+We define two types of tools.
 
-    ```python
-    @tool(name="AdditionTool", description="Adds two numbers.")
-        def add(a, b: int = 1):
-            """
-            Adds two numbers.
+### 1. Non-Stateful Tool
 
-            Args:
-                a (int): The first number.
-                b (int): The second number which should be a non-negative integer.
+Non-stateful tools don't keep environment state. Just write a function and decorate it with `@tool`:
 
-            Returns:
-                int: The sum of a and b.
-            """
-            return a + b
-    ```
+```python
+--8<-- "src/agentfly/tools/tool_base.py:addition_tool_example"
+```
 
-2. Stateful Tool keeps environmental state across turns or actions. In the new design, **stateful tools acquire resources directly via `Context` and `ResourceSpec`** instead of specifying `env_cls` on the decorator. The resource engine manages pooling and reuse; tools just request the resource they need and call its `step`-like interface.
+### 2. Stateful Tool
 
-    ```python
-    from agentfly.core import Context
-    from agentfly.envs.python_env import PythonSandboxSpec
-    from agentfly.tools import tool
+Stateful tools keep environmental state across turns or actions. In the new design, **stateful tools acquire resources directly via `Context` and `ResourceSpec`** instead of specifying `env_cls` on the decorator. The resource engine manages pooling and reuse; tools just request the resource they need and call its `step`-like interface.
 
-    @tool(
-        name="code_interpreter",
-        description="Run code in a sandboxed Python container and return stdout/stderr",
-        stateful=True,
-    )
-    async def code_interpreter(code: str, context: Context) -> str:
-        """
-        Run the code in a sandboxed container and return the output from stdout or stderr.
+```python
+from agentfly.core import Context
+from agentfly.envs.python_env import PythonSandboxSpec
+from agentfly.tools import tool
 
-        Args:
-            code (str): The code to run.
-            context (Context): Injected rollout context; used to acquire the Python sandbox resource.
-
-        Returns:
-            str: The output from stdout or stderr.
-        """
-        code = str(code)
-        env = await context.acquire_resource(spec=PythonSandboxSpec, scope="global", backend="local")
-        try:
-            obs = await env.step(code)
-            return str(obs)
-        except Exception as e:
-            return f"Error: {str(e)}"
-    ```
+--8<-- "src/agentfly/tools/src/code/tools.py:code_interpreter_example"
+```
 
 ## Tool Calling
 
@@ -151,6 +105,12 @@ For stateful tools, **isolation and sharing are handled by `Context` and `Resour
 - The underlying `ResourceSpec` (e.g., `max_global_num`) and engine configuration control **pool size and scaling**, rather than `pool_size` on the decorator.
 
 This design lets tools focus on logic (`env.step(action)`) while the engine manages isolation, pooling, and reuse behind the scenes.
+
+## Tool Return Values
+
+A `@tool` function returns either a `str` (used directly as the observation the LLM sees) or a `dict`. If it returns a dict, the dict must include an `observation: str` key; an optional `image` key is extracted to its own field for multi-modal tools, and any other keys are forwarded as extra info alongside the observation.
+
+Internally, the framework normalizes both shapes into a typed `ToolResult` at the boundary (`agentfly.tools.BaseTool._format_result`), exposing `.observation: str`, `.image: Optional[str]`, `.info: Dict[str, Any]`, plus `.name` and `.arguments`. You don't need to construct `ToolResult` yourself — the conversion is automatic. The chain code receives the typed form (or the legacy dict shape via `ToolResult.to_dict()` during the migration window).
 
 ## Tool Calling Formats
 

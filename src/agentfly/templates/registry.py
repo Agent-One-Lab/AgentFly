@@ -74,7 +74,7 @@ register_template(
 
 XLMToolCallTemplate = """<|im_start|>system\n{system_message}
 
-You have access to external functions (tools). When necessary, you may call them to help answer the user’s query.
+You have access to external functions (tools). When necessary, you may call them to help answer the user's query.
 
 AVAILABLE TOOLS:
 

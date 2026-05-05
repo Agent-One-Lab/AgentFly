@@ -42,6 +42,7 @@ def _build_real_api_model_spec() -> tuple[APIModelResourceSpec, float]:
     return spec, startup_timeout
 
 
+@pytest.mark.gpu
 @pytest.mark.asyncio
 async def test_api_model_resource_real_lifecycle_and_generate():
     spec, startup_timeout = _build_real_api_model_spec()

@@ -22,6 +22,7 @@ from .reward_base import (
     register_reward,
     reward,
 )
+from .types import RewardResult, RewardReturn
 from .scienceworld_reward import scienceworld_reward
 from .webshop_reward import webshop_reward
 from .swe_rewards.swe_rewards import swe_reward, r2e_gym_reward
@@ -29,6 +30,8 @@ from .vlm_as_judge.simuscene_reward import vlm_as_judge_pass_reward, vlm_as_judg
 
 __all__ = [
     "BaseReward",
+    "RewardResult",
+    "RewardReturn",
     "get_reward_from_name",
     "get_rewards_from_names",
     "list_available_rewards",

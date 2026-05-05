@@ -1,5 +1,5 @@
 import torch
-from agentfly.agents.react.react_agent import ReactAgent
+from agentfly.agents import ReactAgent
 from agentfly.tools import answer_qa
 import pytest
 

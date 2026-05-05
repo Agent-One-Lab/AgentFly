@@ -75,7 +75,11 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path:
+        - .
+      check_paths: true
+      dedent_subsections: true
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.tasklist:
@@ -99,9 +103,15 @@ nav:
     - start/first_agent.md
     - start/first_tool_reward.md
     - start/first_training.md
+    - start/data_preparation.md
+    - start/hydra_config.md
+    - start/cli.md
+    - start/build_your_own_task.md
   - Features & Concepts:
+    - features/system_architecture.md
     - features/agent_rollout.md
     - features/tool_system.md
+    - features/tool_for_class_method.md
     - features/reward_system.md
     - features/resources.md
   - API Reference:
@@ -129,6 +139,7 @@ nav:
       - api_references/training/training.md
   - Examples:
     - examples/predefined_training_examples.md
+    - examples/image_agent.md
 
 extra:
   social:

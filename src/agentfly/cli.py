@@ -16,6 +16,7 @@ def main():
         print("  train    - Run the PPO training script with Hydra arguments.")
         print("  deploy   - Print a vLLM serve command for local inference.")
         print("  swebench - Run an SWE-Bench-style agent over a JSON dataset.")
+        print("  search   - Start the dense-retriever HTTP server.")
         sys.exit(0)
 
     command = sys.argv[1]

@@ -36,6 +36,7 @@ def _minimal_sample_for_sqlparse():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skipping due to container patching, prefer to use r2e-gym's reward.")
 async def test_evaluate_swesmith_returns_status_and_resolved():
     """evaluate_swesmith with container returns dict with 'status' and 'resolved'."""
     sample = _minimal_sample_for_sqlparse()
@@ -59,7 +60,7 @@ async def test_evaluate_swesmith_returns_status_and_resolved():
             sample=sample,
             patch="",  # empty patch
             container=container_res._container,
-        )
+    )
         assert isinstance(result, dict)
         assert "status" in result
         assert "resolved" in result
@@ -71,4 +72,4 @@ async def test_evaluate_swesmith_returns_status_and_resolved():
             pytest.skip(f"Sample not valid for this image: {e}")
         raise
     finally:
-        await context.release_resource(scope="rollout")
+        await context.end_resource(scope="rollout")

@@ -28,6 +28,8 @@ export TRITON_HOME=/tmp/triton_cache
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
 export ENROOT_IMAGES_PATH=/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images/r2e-gym-lite
+export SSPO_MULTITURN_VALUE_POSITION=first_response
+
 
 
 # =================== Ray start ===================
@@ -58,16 +60,15 @@ sleep 10
 # export VERL_LOGGING_LEVEL=DEBUG
 
 model=Qwen/Qwen3.5-4B
-template="qwen3-think"
 lr=4e-7
-max_model_len=40960
+max_model_len=102400
 max_new_tokens_per_turn=4096
 val_batch_size=512
-train_batch_size=16
+train_batch_size=8
 num_chains=8
 max_concurrent_chains=48
 mini_batch_size=$((train_batch_size * num_chains))
-sequence_parallel_size=1
+sequence_parallel_size=4
 kl_coef=0.001
 train_dataset="./data/rlhf/os/r2e-gym-lite.json"
 eval_dataset="./data/rlhf/os/r2e-gym-lite.json"
@@ -75,7 +76,6 @@ tools="[create_file,read_file,edit_file,grep_search,undo_edit,run_python]"
 reward_name="r2e_gym_reward"
 train_on_last_turn=False
 base_model_name=$(basename $model)
-experiment_name="swe_r2e_gym_tools_${base_model_name}"
 
 # Long-context: use_remove_padding=True + ulysses_sequence_parallel_size=4 splits the sequence across
 # 4 GPUs so activation memory per GPU is ~4x lower while keeping full max_model_len (e.g. 32768).
@@ -86,14 +86,27 @@ experiment_name="swe_r2e_gym_tools_${base_model_name}"
 # adv_estimator=remax
 adv_estimator=grpo
 # adv_estimator=gae
+# adv_estimator=sspo_multiturn
+use_critic=False
+critic_lr=5e-6
+gamma=0.99
+lam=0.95
+
 entropy_coeff=0.001
 kl_loss_type=mse
 agent_type=qwen3coder_swe
-max_turns=30
+max_turns=50
 tool_parser_name="qwen3_coder"
 total_training_steps=300
 lr_warmup_steps_ratio=0.01
 project_name="Resource"
+
+# lora settings
+lora_rank=32
+lora_alpha=64
+lora_target_modules="all-linear"
+
+experiment_name="swe_r2e_gym_tools_${base_model_name}_${adv_estimator}_valueposition-${SSPO_MULTITURN_VALUE_POSITION}_lora_${lora_rank}"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -101,11 +114,9 @@ python -m agentfly.cli train \
     data.val_files=${eval_dataset} \
     data.val_batch_size=$val_batch_size \
     data.train_batch_size=$train_batch_size \
-    agent.train_on_last_turn=$train_on_last_turn \
     agent.use_agent=True \
     agent.init_config.agent_type=$agent_type \
     agent.init_config.model_name_or_path=$model \
-    agent.init_config.template=$template \
     agent.init_config.max_model_len=$max_model_len \
     agent.init_config.tool_parser_name=$tool_parser_name \
     agent.init_config.tools=${tools} \
@@ -118,6 +129,12 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.model.lora_rank=$lora_rank \
+    actor_rollout_ref.model.lora_alpha=$lora_alpha \
+    actor_rollout_ref.model.lora.rank=$lora_rank \
+    actor_rollout_ref.model.lora.alpha=$lora_alpha \
+    actor_rollout_ref.model.target_modules=$lora_target_modules \
+    actor_rollout_ref.model.lora.merge=True \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=$sequence_parallel_size \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
@@ -134,14 +151,21 @@ python -m agentfly.cli train \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+    actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes=4096 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.ulysses_sequence_parallel_size=$sequence_parallel_size \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    critic.enable=$use_critic \
     critic.model.path=$model \
+    critic.optim.lr=$critic_lr \
     critic.ppo_mini_batch_size=$train_batch_size \
+    critic.model.use_remove_padding=True \
+    critic.ulysses_sequence_parallel_size=$sequence_parallel_size \
     critic.ppo_micro_batch_size_per_gpu=1 \
     critic.model.enable_activation_offload=True \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
+    algorithm.gamma=$gamma \
+    algorithm.lam=$lam \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name=${project_name} \

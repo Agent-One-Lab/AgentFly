@@ -37,11 +37,35 @@ State your current best understanding of how to complete the task, the plan you 
 - Do not include information you are not confident about without flagging it as a hypothesis.
 - Do not invent details to fill out a section. If a section is genuinely empty (e.g., no failed attempts yet), write "None yet" and move on.
 - Do not summarize your own reasoning process — summarize the state of the work.
-- The next session cannot ask you clarifying questions. Anything ambiguous will be resolved by them guessing. Reduce guesswork.
+- The next session cannot ask you clarifying questions. Anything ambiguous will be resolved by them guessing. Reduce guesswork.""",
+    "progress": """You are working on a multi-turn task. Your context will be reset periodically, so you must summarize your progress so that you can continue effectively in the next round.
 
-Produce only the summary. Do not add preamble or closing remarks."""
+Generate your summary using exactly this format:
 
+TASK STATE:
+- Goal: [restate the original task in one sentence]
+- Information gathered: [list 2-4 key facts you have learned, each on a new line starting with "-"]
+- Tools used: [list the tools you have called, each on a new line starting with "-"]
+
+PROGRESS:
+- Completed: [what subtasks are definitively done, each on a new line starting with "-"]
+- In progress: [what you are currently working on, one line]
+- Not yet started: [what still needs to happen, each on a new line starting with "-"]
+
+PLAN:
+- Current hypothesis: [your best guess about the answer or solution path, one line]
+- Next action: [the specific tool call you will make next]
+- Backup plan: [what you will try if the next action fails, one line]
+
+Important rules:
+- Be concrete. Use specific names, numbers, and identifiers, not vague descriptions.
+- Be brief. Each bullet should be one line.
+- If a section does not apply yet, write "- (none yet)" rather than leaving it empty.
+- Do not call any tools in this turn."""
 }
+
+CONTEXT_TRIGGER_MESSAGE_TYPE_ENV = "CONTEXT_TRIGGER_MESSAGE_TYPE"
+CONTEXT_TRIGGER_TURNS_ENV = "CONTEXT_TRIGGER_TURNS"
 
 
 class ActionAgent(BaseAgent):
@@ -57,22 +81,30 @@ class ActionAgent(BaseAgent):
         tool_parser_name: Optional[str] = None,
         tools: List = [],
         context_trigger_turns: Optional[int] = None,
-        context_trigger_message: Optional[str] = None,
+        context_trigger_message_type: Optional[str] = None,
         **kwargs,
     ):
         self.action_tool_name = tools[0].name
+        if context_trigger_turns is None:
+            env_turns = os.getenv(CONTEXT_TRIGGER_TURNS_ENV)
+            if env_turns is not None and str(env_turns).strip() != "":
+                try:
+                    context_trigger_turns = int(env_turns)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}"
+                    ) from exc
+
         if context_trigger_turns is not None and context_trigger_turns < 1:
             raise ValueError("context_trigger_turns must be >= 1 when set")
-        
-        # Temporarily use environment variable to set context_trigger_turns
-        if context_trigger_turns is None:
-            context_trigger_turns = os.getenv("CONTEXT_TRIGGER_TURNS", None)
 
         self.context_trigger_turns = context_trigger_turns
-        self.context_trigger_message = (
-            context_trigger_message
-            if context_trigger_message is not None
-            else _DEFAULT_CONTEXT_TRIGGER_MESSAGE
+        message_type = context_trigger_message_type
+        if message_type is None:
+            message_type = os.getenv(CONTEXT_TRIGGER_MESSAGE_TYPE_ENV, "base")
+        self.context_trigger_message = CONTEXT_TRIGGER_MESSAGE_DICT.get(
+            message_type,
+            CONTEXT_TRIGGER_MESSAGE_DICT["base"],
         )
         super().__init__(
             model_name_or_path, tool_parser_name=tool_parser_name, tools=tools, **kwargs
@@ -126,6 +158,35 @@ class ActionAgent(BaseAgent):
                     return True
         return False
 
+    def _is_context_triggered_segment(self, current_segment: Optional[List[Dict]]) -> bool:
+        """True when this segment ends with the injected summarize-trigger user message."""
+        if not current_segment:
+            return False
+        last = current_segment[-1]
+        if last.get("role") != "user":
+            return False
+        return self._turn_text(last).strip() == self.context_trigger_message.strip()
+
+    @staticmethod
+    def _extract_forced_summary_text(response: str) -> str:
+        """Build summary text for forced summarize mode from the entire raw response."""
+        text = (response or "").strip()
+        if not text:
+            return ""
+
+        # If the model wrapped output in <summarize>...</summarize>, keep only inner text.
+        match = re.search(
+            r"<summarize>\s*(.*?)\s*</summarize>", text, re.IGNORECASE | re.DOTALL
+        )
+        if match:
+            return match.group(1).strip()
+
+        # Fallback for malformed wrapping where tags are present but not well-formed.
+        if re.search(r"</?summarize>", text, re.IGNORECASE):
+            return re.sub(r"</?summarize>", "", text, flags=re.IGNORECASE).strip()
+
+        return text
+
     def _parse_single_response(self, response: str, current_segment: List[Dict]) -> Dict:
         """
         Parse a single model response using the action format:
@@ -153,6 +214,35 @@ class ActionAgent(BaseAgent):
             }
         formatted_tool_calls = []
         end_task_terminal = False
+        if self._is_context_triggered_segment(current_segment):
+            summary_text = self._extract_forced_summary_text(response)
+            if not summary_text:
+                return {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": response}],
+                    "tool_calls": [],
+                    "loss": True,
+                    "status": "terminal",
+                }
+            end_task_terminal = summary_text.lower() == "end task"
+            formatted_tool_calls = [
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {
+                        "name": "summarize",
+                        "arguments": json.dumps({"summary": summary_text}),
+                    },
+                }
+            ]
+            return {
+                "role": "assistant",
+                "content": [{"type": "text", "text": response}],
+                "tool_calls": formatted_tool_calls,
+                "loss": True,
+                "status": "terminal" if end_task_terminal else "continue",
+            }
+
         for i, m in enumerate(TOOL_TAG_PATTERN.finditer(response)):
             tag = m.group(1).lower()
             body = m.group(2).strip()

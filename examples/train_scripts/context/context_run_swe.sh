@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=train
 #SBATCH --time=200:00:00
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
 #SBATCH --account=iq
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
@@ -28,7 +28,9 @@ export TRITON_HOME=/tmp/triton_cache
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
 export ENROOT_IMAGES_PATH=/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images/r2e-gym-lite
-
+export CONTEXT_TRIGGER_TURNS=10
+export REWARD_DECOMPOSITION=broadcast
+export CONTEXT_TRIGGER_MESSAGE_TYPE=progress
 
 # =================== Ray start ===================
 # ray stop at all nodes
@@ -95,17 +97,17 @@ Key Principles
 
 7. Clean up. Remove any temporary test files you created during debugging."
 
-model=Qwen/Qwen3-32B
-template="qwen-xml-think"
+# model=Qwen/Qwen3-32B
+model=Qwen/Qwen3.5-4B
 lr=4e-7
-max_model_len=40960
+max_model_len=102400
 max_new_tokens_per_turn=4096
 val_batch_size=512
-train_batch_size=16
+train_batch_size=8
 num_chains=8
 max_concurrent_chains=48
 mini_batch_size=$((train_batch_size * num_chains))
-sequence_parallel_size=4
+sequence_parallel_size=2
 kl_coef=0.001
 train_dataset="./data/rlhf/os/r2e-gym-lite.json"
 eval_dataset="./data/rlhf/os/r2e-gym-lite.json"
@@ -113,7 +115,7 @@ tools="[create_file,read_file,edit_file,grep_search,undo_edit,run_python]"
 reward_name="r2e_gym_reward"
 train_on_last_turn=False
 base_model_name=$(basename $model)
-experiment_name="swe_r2e_gym_tools_${base_model_name}_system"
+experiment_name="swe_r2e_gym_tools_${base_model_name}_context_${adv_estimator}_trigger"
 
 # Long-context: use_remove_padding=True + ulysses_sequence_parallel_size=4 splits the sequence across
 # 4 GPUs so activation memory per GPU is ~4x lower while keeping full max_model_len (e.g. 32768).
@@ -127,7 +129,7 @@ adv_estimator=grpo
 entropy_coeff=0.001
 kl_loss_type=mse
 agent_type=qwen3coder_swe
-max_turns=30
+max_turns=50
 tool_parser_name="qwen3_coder"
 total_training_steps=300
 lr_warmup_steps_ratio=0.01
@@ -144,7 +146,6 @@ python -m agentfly.cli train \
     "agent.init_config.system_prompt=\"${system_prompt}\"" \
     agent.init_config.agent_type=$agent_type \
     agent.init_config.model_name_or_path=$model \
-    agent.init_config.template=$template \
     agent.init_config.max_model_len=$max_model_len \
     agent.init_config.tool_parser_name=$tool_parser_name \
     agent.init_config.tools=${tools} \
@@ -187,7 +188,7 @@ python -m agentfly.cli train \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=${worker_num} \
-    trainer.save_freq=20 \
+    trainer.save_freq=50 \
     trainer.test_freq=${total_training_steps} \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=False

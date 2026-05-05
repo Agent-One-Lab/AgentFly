@@ -13,6 +13,16 @@ address_head=$head_node_ip:$port
 # export GLOO_SOCKET_IFNAME=ens10f0np0
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
+# Reward decomposition strategy: last_only | broadcast | uniform | geometric
+export REWARD_DECOMPOSITION=uniform
+# Decay rate for geometric mode; ignored otherwise.
+export REWARD_DECOMPOSITION_GAMMA=0.9
+# Trigger summarize after this many assistant turns
+export CONTEXT_TRIGGER_TURNS=10
+# Context trigger message variant: base | detail
+export CONTEXT_TRIGGER_MESSAGE_TYPE=base
+
+export CONTEXTRL_SPPO_VALUE_POSITION=first_response
 
 # export VERL_LOGGING_LEVEL=DEBUG
 
@@ -165,11 +175,11 @@ Remember that you must put your action inside <action> and </action> tags."
 
 template=action-agent
 lr=4e-7
-max_model_len=16384
+max_model_len=8192
 max_new_tokens_per_turn=512
 val_batch_size=512
-batch_size=64
-num_chains=8
+batch_size=32
+num_chains=4
 # full on-policy
 mini_batch_size=$((batch_size * num_chains))
 kl_coef=0.001
@@ -178,10 +188,16 @@ eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
-adv_estimator=grpo
+# adv_estimator=grpo
 # adv_estimator=gae
 # adv_estimator=contextrl
-use_critic=False
+# use_critic=True
+# adv_estimator=contextrl_depth_grouped
+
+adv_estimator=contextrl_sppo
+use_critic=True
+
+critic_lr="5e-6"
 
 agent_type=action
 tools="[scienceworld_explorer,summarize]"
@@ -190,13 +206,14 @@ reward_name="scienceworld_reward"
 entropy_coeff=0.001
 kl_loss_type=mse
 max_turns=30
-lr_warmup_steps_ratio=0.08
+lr_warmup_steps_ratio=0.01
 total_training_steps=300
 gamma=0.99
 lam=0.95
 
+model_base_name=$(basename $model)
 project_name="Context"
-experiment_name="scienceworld_qwen3-4b-instruct_summarize_${adv_estimator}_trigger10"
+experiment_name="scienceworld_${model_base_name}_${adv_estimator}_fix_message-${CONTEXT_TRIGGER_MESSAGE_TYPE}_triggerturns-${CONTEXT_TRIGGER_TURNS}_decomp-${REWARD_DECOMPOSITION}_compare_valueposition-${CONTEXTRL_SPPO_VALUE_POSITION}"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -220,25 +237,25 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.path=${model} \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=$kl_coef \
     actor_rollout_ref.actor.kl_loss_type=$kl_loss_type \
     actor_rollout_ref.actor.entropy_coeff=$entropy_coeff \
-    actor_rollout_ref.model.enable_gradient_checkpointing=False \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.60 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.50 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     critic.enable=$use_critic \
     critic.model.path=$model \
-    critic.optim.lr="1e-6" \
+    critic.optim.lr=$critic_lr \
     critic.ppo_mini_batch_size=32 \
-    critic.ppo_micro_batch_size_per_gpu=2 \
+    critic.ppo_micro_batch_size_per_gpu=1 \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
     algorithm.gamma=$gamma \
     algorithm.lam=$lam \

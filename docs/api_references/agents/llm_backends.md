@@ -12,7 +12,7 @@ Among them, Verl backend is designed for internal training usage. The Verl backe
 
 Configuration for asynchronous vLLM backend with engine arguments:
 
-::: agentfly.agents.llm_backends.backend_configs.AsyncVLLMConfig
+::: agentfly.utils.llm_backends.backend_configs.AsyncVLLMConfig
     options:
       show_inheritance: true
 
@@ -20,7 +20,7 @@ Configuration for asynchronous vLLM backend with engine arguments:
 
 Configuration for asynchronous Verl backend:
 
-::: agentfly.agents.llm_backends.backend_configs.AsyncVerlConfig
+::: agentfly.utils.llm_backends.backend_configs.AsyncVerlConfig
     options:
       show_inheritance: true
 
@@ -28,7 +28,7 @@ Configuration for asynchronous Verl backend:
 
 Configuration for OpenAI-compatible client backends:
 
-::: agentfly.agents.llm_backends.backend_configs.ClientConfig
+::: agentfly.utils.llm_backends.backend_configs.ClientConfig
     options:
       show_inheritance: true
 
@@ -38,7 +38,7 @@ Configuration for OpenAI-compatible client backends:
 
 Abstract base class for all LLM backends:
 
-::: agentfly.agents.llm_backends.llm_backends.LLMBackend
+::: agentfly.utils.llm_backends.llm_backends.LLMBackend
     options:
       show_inheritance: true
 
@@ -46,7 +46,7 @@ Abstract base class for all LLM backends:
 
 Asynchronous vLLM implementation for high-performance model inference:
 
-::: agentfly.agents.llm_backends.llm_backends.AsyncVLLMBackend
+::: agentfly.utils.llm_backends.llm_backends.AsyncVLLMBackend
     options:
       show_inheritance: true
 
@@ -54,7 +54,7 @@ Asynchronous vLLM implementation for high-performance model inference:
 
 Asynchronous Verl implementation for distributed model inference:
 
-::: agentfly.agents.llm_backends.llm_backends.AsyncVerlBackend
+::: agentfly.utils.llm_backends.llm_backends.AsyncVerlBackend
     options:
       show_inheritance: true
 
@@ -62,7 +62,7 @@ Asynchronous Verl implementation for distributed model inference:
 
 OpenAI-compatible client backend for remote API inference:
 
-::: agentfly.agents.llm_backends.llm_backends.ClientBackend
+::: agentfly.utils.llm_backends.llm_backends.ClientBackend
     options:
       show_inheritance: true
 
@@ -75,13 +75,13 @@ Backends are designed to work together with agents. Here are examples showing ho
 ```python
 from agentfly.agents import HFAgent
 from agentfly.tools import calculator
-from agentfly.rewards import math_reward_string_equal
-from agentfly.agents.llm_backends import AsyncVLLMConfig
+from agentfly.rewards import math_equal_reward_tool
+from agentfly.utils.llm_backends import AsyncVLLMConfig
 
 agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
     tools=[calculator],
-    reward_fn=math_reward_string_equal,
+    reward_fn=math_equal_reward_tool,
     template="qwen2.5",
     backend_config=AsyncVLLMConfig(
         pipeline_parallel_size=2,
@@ -97,13 +97,13 @@ agent = HFAgent(
 ```python
 from agentfly.agents import HFAgent
 from agentfly.tools import calculator
-from agentfly.rewards import math_reward_string_equal
-from agentfly.agents.llm_backends import ClientConfig
+from agentfly.rewards import math_equal_reward_tool
+from agentfly.utils.llm_backends import ClientConfig
 
 agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
     tools=[calculator],
-    reward_fn=math_reward_string_equal,
+    reward_fn=math_equal_reward_tool,
     template="qwen2.5",
     backend_config=ClientConfig(
         base_url="http://localhost:8000/v1",

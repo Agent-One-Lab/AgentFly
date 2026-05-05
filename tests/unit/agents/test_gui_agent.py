@@ -14,6 +14,7 @@ from agentfly.utils.ui_action_parser import (
 from agentfly.tools import pyautogui_code_generator
 
 
+@pytest.mark.gpu
 class TestGUIAgent:
     """Test suite for GUI Agent implementation."""
 

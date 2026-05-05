@@ -27,6 +27,7 @@ def _build_real_vllm_spec_from_env() -> VLLMModelResourceSpec:
     )
 
 
+@pytest.mark.gpu
 @pytest.mark.asyncio
 async def test_vllm_model_resource_real_lifecycle_and_generate():
     spec = _build_real_vllm_spec_from_env()

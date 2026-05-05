@@ -10,21 +10,7 @@ The ALFWorld reward system provides sparse, outcome-based evaluation for task co
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-async def alfworld_episode_reward(prediction: str, context: Context) -> Dict[str, Any]
-```
-
-**Description:** Evaluate the reward for an agent's action in the ALFWorld environment
-
-**Parameters:**
-- **prediction** (str): The agent's predicted action or response (not directly used in evaluation but required by the reward interface)
-- **context** (`Context`): Rollout execution context used to acquire the ALFWorld resource.
-
-**Returns:**
-Dict[str, Any]: A dictionary containing:
-- reward (float): The numerical reward value for the current state. Positive values indicate progress or task completion, zero indicates no progress, negative values indicate invalid actions or moving away from the goal
+**Description:** Evaluate the reward for an agent's action in the ALFWorld environment. Returns a dict with `reward` (the environment's current reward).
 
 ## Usage with ReactAgent
 
@@ -71,15 +57,15 @@ react_agent = ReactAgent(
 )
 
 # After agent execution, rewards are automatically calculated
-await react_agent.run_async(
-    max_steps=12,
-    start_messages=messages,
-    num_chains=4
+result = await react_agent.run(
+    messages=messages,
+    max_turns=12,
+    num_chains=4,
 )
 
 # Get rewards for all trajectories
-rewards, other_values = react_agent.rewards
-print(f"Rewards: {rewards}")
+print(f"Rewards: {result.rewards}")
+print(f"Reward extras: {result.reward_extras}")
 ```
 
 ### Simple Direct Usage

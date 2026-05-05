@@ -18,6 +18,7 @@ from .src.search.dense_retriever import dense_retrieve
 from .src.ui.tools import pyautogui_code_generator
 from .src.webshop.tools import webshop_browser
 from .tool_base import BaseTool
+from .types import ToolResult, ToolReturn
 from .src.context.tools import summarize
 
 from .src.file.tools import (
@@ -46,6 +47,8 @@ def invalid_input_tool(tool_input):
 __all__ = [
     "tool",
     "BaseTool",
+    "ToolResult",
+    "ToolReturn",
     "code_interpreter",
     "CodeInterpreterTool",
     "summarize",

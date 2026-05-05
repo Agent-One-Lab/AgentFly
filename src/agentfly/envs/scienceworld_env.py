@@ -30,7 +30,7 @@ ScienceWorldSpec = ContainerResourceSpec(
     container_port=2700,
     start_timeout=10.0,
     host_ip="127.0.0.1",
-    max_global_num=96,
+    max_global_num=48,
 )
 
 

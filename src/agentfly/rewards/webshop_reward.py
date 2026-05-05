@@ -3,6 +3,7 @@ from ..envs.webshop_text_env import WebShopSpec
 from .reward_base import reward
 
 
+# --8<-- [start:webshop_reward_example]
 @reward(name="webshop_reward")
 async def webshop_reward(
     final_response: str, context: Context, task_id: int
@@ -31,3 +32,4 @@ async def webshop_reward(
             "reward": 0.0,
             "output": f"Error webshop reward function: {e}",
         }
+# --8<-- [end:webshop_reward_example]

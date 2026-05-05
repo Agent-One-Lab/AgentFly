@@ -58,6 +58,7 @@ def em_score(prediction, ground_truth):
     return float(normalized_prediction == normalized_ground_truth)
 
 
+# --8<-- [start:qa_f1_reward_example]
 @reward(name="qa_f1_reward")
 def qa_f1_reward(final_response: str, answer: str, trajectory: List[str]) -> float:
     """
@@ -87,6 +88,7 @@ def qa_f1_reward(final_response: str, answer: str, trajectory: List[str]) -> flo
         "precision": precision,
         "recall": recall,
     }
+# --8<-- [end:qa_f1_reward_example]
 
 
 @reward(name="qa_f1_reward_tool")

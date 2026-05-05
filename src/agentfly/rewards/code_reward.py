@@ -3,6 +3,7 @@ from ..envs.python_env import PythonSandboxSpec
 from .reward_base import reward
 
 
+# --8<-- [start:code_reward_test_example]
 @reward(name="code_reward_test")
 async def code_reward_test(prediction: str, context: Context) -> dict:
     """
@@ -18,3 +19,4 @@ async def code_reward_test(prediction: str, context: Context) -> dict:
         return {"reward": 1.0, "output": result}
     except Exception as e:
         return {"reward": 0.0, "output": str(e)}
+# --8<-- [end:code_reward_test_example]

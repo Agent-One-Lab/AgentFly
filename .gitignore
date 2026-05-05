@@ -137,6 +137,7 @@ data/
 agentfly/agents/data/*
 test_cache/
 results/
+*.json
 
 # local logs
 logs

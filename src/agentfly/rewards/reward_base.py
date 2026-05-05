@@ -1,19 +1,30 @@
 import inspect
 from typing import Callable, List, Optional
 
+from .types import RewardResult
+
 # Global reward registry
 REWARD_REGISTRY = {}
 
 
-async def calculate_reward(reward_fn: Callable | None, **kwargs):
-    """Execute a reward function and await async results when needed."""
+async def calculate_reward(reward_fn: Callable | None, **kwargs) -> Optional[RewardResult]:
+    """Execute a reward function and normalize its return into a ``RewardResult``.
+
+    The reward function may return a ``float``, a ``dict`` with a ``reward``
+    key (plus arbitrary extras), a ``RewardResult``, or ``None``.
+    All forms are funneled through :meth:`RewardResult.from_raw`.
+
+    Returns ``None`` only when ``reward_fn`` itself is ``None`` (i.e. the agent
+    has no reward configured). When a reward function is set, this always
+    returns a :class:`RewardResult`.
+    """
     if reward_fn is None:
         return None
 
-    reward = reward_fn(**kwargs)
-    if inspect.isawaitable(reward):
-        reward = await reward
-    return reward
+    raw = reward_fn(**kwargs)
+    if inspect.isawaitable(raw):
+        raw = await raw
+    return RewardResult.from_raw(raw)
 
 
 class BaseReward:

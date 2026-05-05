@@ -85,7 +85,7 @@ total_training_steps=200
 
 model_base_name=$(basename $model)
 project_name="Open"
-experiment_name="webshop_${model_base_name}_${adv_estimator}"
+experiment_name="webshop_${model_base_name}_${adv_estimator}_test"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -136,4 +136,4 @@ python -m agentfly.cli train \
     trainer.save_freq=100 \
     trainer.test_freq=300 \
     trainer.total_training_steps=$total_training_steps \
-    trainer.val_before_train=True
+    trainer.val_before_train=False

@@ -10,26 +10,9 @@ The Retrieval tools provide semantic search capabilities for document retrieval 
     options:
       show_source: true
 
-**Tool Signature:**
-
-```python
-@tool(
-    name="asyncdense_retrieve",
-    description="Use a dense retriever to retrieve documents from a corpus.",
-    max_length=4096,
-)
-async def asyncdense_retrieve(query: str)
-```
-
 **Description:**
 
-Retrieves relevant documents from a Wikipedia corpus using dense vector embeddings and semantic similarity search. Automatically initializes the retriever model and FAISS index on first use.
-
-**Call Signature:**
-- **For this non-stateful tool:** ``asyncdense_retrieve(query=...)``
-
-**Parameters:**
-- **query** (str): Search query string. Automatically prepends "query: " prefix for E5 model optimization if not already present.
+Retrieves relevant documents from a Wikipedia corpus using dense vector embeddings and semantic similarity search. Automatically initializes the retriever model and FAISS index on first use. Call as `asyncdense_retrieve(query=...)`. The query string automatically prepends `"query: "` prefix for E5 model optimization if not already present.
 
 **Returns:**
 Tool result dict with:
@@ -71,26 +54,9 @@ docs = await asyncdense_retrieve("How does photosynthesis work?")
     options:
       show_source: true
 
-**Tool Signature:**
-
-```python
-@tool(
-    name="dense_retrieve",
-    description="Use a dense retriever to retrieve documents from a corpus.",
-    max_length=4096
-)
-async def dense_retrieve(query: str)
-```
-
 **Description:**
 
-Retrieves relevant documents from a Wikipedia corpus using dense vector embeddings and semantic similarity search. Similar to asyncdense_retrieve with slightly different internal implementation.
-
-**Call Signature:**
-- **For this non-stateful tool:** ``dense_retrieve(query=...)``
-
-**Parameters:**
-- **query** (str): Search query string. Automatically prepends "query: " prefix for E5 model optimization if not already present.
+Retrieves relevant documents from a Wikipedia corpus using dense vector embeddings and semantic similarity search. Similar to `asyncdense_retrieve` with a slightly different internal implementation. Call as `dense_retrieve(query=...)`. The query string automatically prepends `"query: "` prefix for E5 model optimization if not already present.
 
 **Returns:**
 Tool result dict with:

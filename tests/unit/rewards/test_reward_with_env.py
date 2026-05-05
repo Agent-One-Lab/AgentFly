@@ -13,4 +13,4 @@ async def test_code_reward_test():
         assert result["reward"] == 1.0
         assert "Hello, World!" in result["output"]
     finally:
-        await ctx.release_resource(scope="rollout")
+        await ctx.end_resource(scope="rollout")

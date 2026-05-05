@@ -13,6 +13,7 @@ address_head=$head_node_ip:$port
 # export GLOO_SOCKET_IFNAME=ens10f0np0
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
+export SSPO_MULTITURN_VALUE_POSITION=first_response
 
 # export VERL_LOGGING_LEVEL=DEBUG
 
@@ -27,7 +28,7 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 
 # model=Qwen/Qwen2.5-3B-Instruct
 # template="qwen3-instruct-no-tool"
 
-model="Qwen/Qwen2.5-7B-Instruct"
+model="Qwen/Qwen2.5-3B-Instruct"
 template="action-agent"
 lr=5e-7
 max_model_len=16384
@@ -53,17 +54,23 @@ train_on_last_turn=False
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
 # adv_estimator=grpo
-adv_estimator=gae
+# adv_estimator=gae
+adv_estimator=sspo_multiturn
+use_critic=True
+critic_lr=5e-6
+gamma=0.99
+lam=0.95
+
 entropy_coeff=0.001
 kl_loss_type=low_var_kl
 agent_type=searchr1
 max_turns=4
 tool_parser_name="hermes"
-test_freq=50
+test_freq=200
 save_freq=100
 total_training_steps=210
 lr_warmup_steps_ratio=0.03
-project_name="SearchR1"
+project_name="Open"
 
 base_name=$(basename $model)
 experiment_name=${base_name}_${template}_${reward_name}_${adv_estimator}
@@ -106,10 +113,14 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    critic.enable=$use_critic \
+    critic.optim.lr=$critic_lr \
     critic.model.path=$model \
     critic.ppo_mini_batch_size=$train_batch_size \
-    critic.ppo_micro_batch_size_per_gpu=2 \
+    critic.ppo_micro_batch_size_per_gpu=1 \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
+    algorithm.gamma=$gamma \
+    algorithm.lam=$lam \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name=${project_name} \
@@ -119,4 +130,4 @@ python3 -m agentfly.cli train \
     trainer.save_freq=$save_freq \
     trainer.test_freq=$test_freq \
     trainer.total_training_steps=$total_training_steps \
-    trainer.val_before_train=True
+    trainer.val_before_train=False

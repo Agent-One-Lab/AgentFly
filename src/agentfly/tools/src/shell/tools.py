@@ -63,9 +63,9 @@ async def _run_shell(context: Context, cmd: str) -> str:
     if not image_id:
         return "Error: context.metadata['image_id'] is required for shell tool."
 
-    # allowed, block_reason = _SHELL_COMMAND_FILTER.check(cmd)
-    # if not allowed:
-    #     return block_reason
+    allowed, block_reason = _SHELL_COMMAND_FILTER.check(cmd)
+    if not allowed:
+        return block_reason
 
     rollout_id = context.rollout_id
     spec = ContainerResourceSpec(

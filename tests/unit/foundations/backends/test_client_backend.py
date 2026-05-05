@@ -6,14 +6,10 @@ from agentfly.utils.llm_backends.llm_backends import ClientBackend
 
 def test_client_backend_initialization_defaults():
     """Test ClientBackend initialization with default parameters"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     assert backend.model_name == "test-model"
-    assert backend.template == "qwen2.5"
     assert backend.base_url == "http://localhost:8000/v1"
-    assert backend.timeout == 600
-    assert backend.max_new_tokens == 8192
-    assert backend._max_tokens == 100
     assert backend.client is not None
 
 
@@ -21,28 +17,21 @@ def test_client_backend_initialization_custom_params():
     """Test ClientBackend initialization with custom parameters"""
     backend = ClientBackend(
         model_name_or_path="custom-model",
-        template="custom-template",
         base_url="https://api.example.com/v1",
         max_requests_per_minute=200,
         timeout=300,
         api_key="custom-key",
-        max_length=4096,
-        max_new_tokens=2048,
     )
 
     assert backend.model_name == "custom-model"
-    assert backend.template == "custom-template"
     assert backend.base_url == "https://api.example.com/v1"
     assert backend.timeout == 300
-    assert backend.max_length == 4096
-    assert backend.max_new_tokens == 2048
-    assert backend._max_tokens == 200
 
 
 @pytest.mark.asyncio
 async def test_generate_async_single_message():
     """Test async generation with a single message"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {
@@ -64,7 +53,7 @@ async def test_generate_async_single_message():
 @pytest.mark.asyncio
 async def test_generate_async_batch_messages():
     """Test async generation with batch messages"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {
@@ -88,7 +77,7 @@ async def test_generate_async_batch_messages():
 @pytest.mark.asyncio
 async def test_generate_async_with_tools_non_openai():
     """Test async generation with tools for non-OpenAI models"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     tools = [
         {
@@ -119,7 +108,6 @@ async def test_generate_async_with_openai_model():
     """Test async generation with OpenAI model (gpt in name)"""
     backend = ClientBackend(
         model_name_or_path="gpt-4",
-        template="qwen2.5",
         base_url="https://api.openai.com/v1",
     )
 
@@ -142,7 +130,7 @@ async def test_generate_async_with_openai_model():
 @pytest.mark.asyncio
 async def test_generate_async_with_num_return_sequences():
     """Test async generation with multiple return sequences"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     # Mock response with 3 choices (n=3)
     mock_response = Mock()
@@ -167,15 +155,11 @@ async def test_generate_async_with_num_return_sequences():
     assert response[1] == "Response 2"
     assert response[2] == "Response 3"
 
-    # Verify n parameter was passed correctly
-    call_kwargs = backend.client.chat.completions.create.call_args[1]
-    assert call_kwargs.get("n") == 3
-
 
 @pytest.mark.asyncio
 async def test_generate_streaming():
     """Test streaming generation"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {
@@ -196,7 +180,7 @@ async def test_generate_streaming():
 
 def test_generate_sync_single_message():
     """Test synchronous generation with a single message"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {
@@ -216,7 +200,7 @@ def test_generate_sync_single_message():
 
 def test_apply_chat_template():
     """Test chat template application"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     messages_list = [
         [{"role": "user", "content": "Hello"}],
@@ -235,7 +219,7 @@ def test_apply_chat_template():
 
 def test_convert_to_openai_chat_without_tool_call_processing():
     """Test message conversion without tool call processing"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     messages = [
         {"role": "user", "content": "Hello"},
@@ -257,7 +241,7 @@ def test_convert_to_openai_chat_without_tool_call_processing():
 
 def test_convert_to_openai_chat_with_openai_model():
     """Test message conversion for OpenAI models"""
-    backend = ClientBackend(model_name_or_path="gpt-4", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="gpt-4")
 
     messages = [
         {"role": "user", "content": "Hello"},
@@ -282,7 +266,7 @@ def test_convert_to_openai_chat_with_openai_model():
 
 def test_preprocess_messages_and_args_non_openai():
     """Test message preprocessing for non-OpenAI models"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     messages_list = [[{"role": "user", "content": "Hello"}]]
 
@@ -298,7 +282,6 @@ def test_preprocess_messages_and_args_openai():
     """Test message preprocessing for OpenAI models"""
     backend = ClientBackend(
         model_name_or_path="gpt-4",
-        template="qwen2.5",
         base_url="https://api.openai.com/v1",
     )
 
@@ -316,7 +299,7 @@ def test_preprocess_messages_and_args_openai():
 async def test_rate_limiting():
     """Test that rate limiting is applied"""
     backend = ClientBackend(
-        model_name_or_path="test-model", template="qwen2.5", max_requests_per_minute=2
+        model_name_or_path="test-model", max_requests_per_minute=2
     )
 
     mock_response = Mock()
@@ -341,7 +324,7 @@ async def test_rate_limiting():
 @pytest.mark.asyncio
 async def test_generate_with_custom_kwargs():
     """Test generation with custom kwargs like temperature"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {
@@ -365,7 +348,7 @@ async def test_generate_with_custom_kwargs():
 @pytest.mark.asyncio
 async def test_generate_with_vision_inputs():
     """Test generation with image inputs"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {
@@ -409,34 +392,10 @@ async def test_generate_with_vision_inputs():
                 assert "image_url" in content[1]
 
 
-def test_max_new_tokens_parameter():
-    """Test that max_new_tokens parameter is used correctly"""
-    backend = ClientBackend(
-        model_name_or_path="test-model", template="qwen2.5", max_new_tokens=2048
-    )
-
-    assert backend.max_new_tokens == 2048
-
-    mock_response = Mock()
-    mock_response.dict.return_value = {
-        "choices": [{"message": {"content": "Response", "tool_calls": None}}]
-    }
-
-    backend.client = Mock()
-    backend.client.chat.completions.create.return_value = mock_response
-
-    messages = [{"role": "user", "content": "Hello"}]
-    response = backend.generate(messages)
-
-    # Verify max_completion_tokens was set
-    call_kwargs = backend.client.chat.completions.create.call_args[1]
-    assert call_kwargs.get("max_completion_tokens") == 2048
-
-
 @pytest.mark.asyncio
 async def test_generate_batch_with_different_sizes():
     """Test batch generation with different message sizes"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {
@@ -464,7 +423,7 @@ async def test_generate_batch_with_different_sizes():
 
 def test_convert_to_openai_chat_with_image_content():
     """Test message conversion with image content"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     with patch(
         "agentfly.utils.llm_backends.llm_backends.image_to_data_uri"
@@ -499,7 +458,6 @@ async def test_generate_with_tool_choice_auto():
     """Test generation with tool_choice='auto' for OpenAI models"""
     backend = ClientBackend(
         model_name_or_path="gpt-4",
-        template="qwen2.5",
         base_url="https://api.openai.com/v1",
     )
 
@@ -542,7 +500,7 @@ async def test_generate_with_tool_choice_auto():
 
 def test_generate_sync_vs_async_context():
     """Test that generate() works in both sync and async contexts"""
-    backend = ClientBackend(model_name_or_path="test-model", template="qwen2.5")
+    backend = ClientBackend(model_name_or_path="test-model")
 
     mock_response = Mock()
     mock_response.dict.return_value = {

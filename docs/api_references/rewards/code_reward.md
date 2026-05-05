@@ -4,24 +4,9 @@
     options:
       show_source: true
 
-## Function Signature
-
-```python
-async def code_reward_test(prediction: str, context: Context) -> dict
-```
-
 ## Description
 
-Evaluates code execution in a sandboxed Python environment, providing binary success/failure feedback.
-
-**Parameters:**
-- **prediction** (str): Python code to execute.
-- **context** (`Context`): Rollout execution context used to acquire the Python sandbox resource.
-
-**Returns:**
-dict: Dictionary containing:
-- **reward** (float): 1.0 if execution successful, 0.0 if error occurred.
-- **output** (str): Execution result or error message.
+Evaluates code execution in a sandboxed Python environment, providing binary success/failure feedback. Returns a dict with `reward` (1.0 on success, 0.0 on error) and `output` (stdout/stderr or exception message).
 
 **Decorator Configuration:**
 - **name**: `"code_reward_test"`

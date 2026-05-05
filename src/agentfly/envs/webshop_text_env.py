@@ -35,7 +35,7 @@ WebShopSpec = ContainerResourceSpec(
 )
 
 
-class WebAgentTextEnv(ContainerResource):
+class WebShopEnv(ContainerResource):
     """
     ContainerResource for WebShop text environment. Runner starts the container; start() connects and loads home.
     Use via Context.acquire_resource(spec=WebShopSpec, scope="rollout", backend="local").

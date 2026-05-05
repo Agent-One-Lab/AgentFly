@@ -1,15 +1,22 @@
 export ENROOT_IMAGES_PATH="/mnt/weka/home/renxi.wang/Agent-One-Lab/enroot-py/data/images/swe-bench-verified"
 
 # model_name_or_path="Qwen/Qwen3.5-4B"
-model_name_or_path="/mnt/weka/home/renxi.wang/Research/AgentFly/checkpoints/Resource/swe_r2e_gym_tools_Qwen3.5-9B"
+# model_name_or_path="/mnt/weka/home/renxi.wang/Research/AgentFly/checkpoints/Resource/swe_r2e_gym_tools_Qwen3.5-9B"
 
 # model_name_or_path="Qwen/Qwen3.5-9B"
 
-# model_name_or_path="Qwen/Qwen3-32B"
+model_name_or_path="Qwen/Qwen3-32B"
 
 # model_name_or_path="/mnt/weka/home/renxi.wang/Research/AgentFly/checkpoints/Resource/swe_r2e_gym_tools_Qwen3-32B_system"
+
+
+# model_name_or_path="/mnt/weka/home/renxi.wang/Agent-One-Lab/workspace/AgentFly/checkpoints/Resource/test_swe_train_r2e_gym_postprocess"
+
 base_name=$(basename $model_name_or_path)
-result_dir="results/swe/${base_name}"
+
+agent="bash"
+setting="bash"
+result_dir="results/swe/${base_name}-agent_${agent}-setting_${setting}"
 max_concurrent_chains=48
 max_model_len=40000
 
@@ -22,7 +29,7 @@ python -m agentfly.cli swebench \
   --reward-name r2e_gym_reward \
   --max-concurrent-chains ${max_concurrent_chains} \
   --max-model-len ${max_model_len} \
-  --agent qwen3_coder \
-  --tool-set file
-#   --backend async_vllm \
-#   --tp 2 --dp 4
+  --agent ${agent} \
+  --tool-set ${setting} \
+  # --backend async_vllm \
+  # --tp 2 --dp 4

@@ -10,24 +10,7 @@ The ALFWorld tools provide a Python interface for agents to interact with ALFWor
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-async def alfworld_step(action: str, context: Context) -> dict
-```
-
-**Description:** Take an action in the ALFWorld environment and return the observation
-
-**Parameters:**
-- **action** (str): The action command to execute in the environment. Examples: "go to kitchen", "take apple", "open fridge", "look around"
-- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
-
-**Returns:**
-dict: A dictionary containing:
-- observation (str): The text observation from the environment after taking the action
-- reward (float): The reward received for this action
-- done (bool): Whether the episode has completed (task finished or failed)
-- info (dict): Additional information including the reward value
+**Description:** Take an action in the ALFWorld environment. Returns a dict with `observation`, `reward`, `done`, and `info`. Example actions: "go to kitchen", "take apple", "open fridge", "look around".
 
 ### alfworld_reset
 
@@ -35,19 +18,7 @@ dict: A dictionary containing:
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-async def alfworld_reset(context: Context) -> str
-```
-
-**Description:** Reset the ALFWorld environment to start a new episode
-
-**Parameters:**
-- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
-
-**Returns:**
-str: The initial observation containing the task description and starting state of the environment
+**Description:** Reset the ALFWorld environment to start a new episode. Returns the initial observation describing the task and starting state.
 
 ### alfworld_get_admissible_commands
 
@@ -55,19 +26,7 @@ str: The initial observation containing the task description and starting state 
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-async def alfworld_get_admissible_commands(context: Context) -> str
-```
-
-**Description:** Get the list of admissible commands for the current state in ALFWorld
-
-**Parameters:**
-- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
-
-**Returns:**
-str: A newline-separated string of valid commands that can be executed in the current state
+**Description:** Get the list of admissible commands for the current state in ALFWorld. Returns a newline-separated string of valid commands.
 
 ### alfworld_get_task_objective
 
@@ -75,19 +34,7 @@ str: A newline-separated string of valid commands that can be executed in the cu
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-async def alfworld_get_task_objective(context: Context) -> str
-```
-
-**Description:** Get the current task objective/goal from the ALFWorld environment
-
-**Parameters:**
-- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
-
-**Returns:**
-str: A formatted string containing the task objective and task type. Format: "Task: [objective]\nTask Type: [type]"
+**Description:** Get the current task objective/goal. Returns a formatted string `Task: [objective]\nTask Type: [type]`.
 
 ## Usage with ReactAgent
 
@@ -154,10 +101,10 @@ messages = [
 ]
 
 # Run agent with multiple trajectories
-await react_agent.run_async(
-    max_steps=12,
-    start_messages=messages,
-    num_chains=4  # Generate 4 trajectories for the question
+await react_agent.run(
+    messages=messages,
+    max_turns=12,
+    num_chains=4,  # Generate 4 trajectories for the question
 )
 ```
 

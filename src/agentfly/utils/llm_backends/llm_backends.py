@@ -6,6 +6,7 @@ This module provides a unified interface to different LLM implementations.
 import asyncio
 import copy
 import logging
+import time
 import uuid
 from functools import partial
 from typing import AsyncGenerator, Callable, Dict, List, Optional
@@ -40,10 +41,6 @@ class LLMBackend:
     Attributes:
         config: Configuration dictionary containing backend-specific parameters.
     """
-
-    def __init__(self, **kwargs):
-        self.config = kwargs
-
     def apply_chat_template(
         self,
         messages_list: List[List[Dict]],
@@ -108,8 +105,7 @@ class AsyncVLLMBackend(LLMBackend):
             max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
             **kwargs: Additional configuration parameters that will be passed to AsyncEngineArgs.
         """
-        super().__init__(**kwargs)
-
+        super().__init__()
         self.model_name = model_name_or_path
         self.template = template
 
@@ -136,9 +132,25 @@ class AsyncVLLMBackend(LLMBackend):
             inputs.append(mixed_inputs)
         return inputs
 
+    def _convert_to_chat_without_tool_call_processing(
+        self, messages: List[Dict]
+    ) -> List[Dict]:
+        """
+        Keep pure assistant text history for local chat-template rendering.
+        Remove tool-call artifacts that may confuse template/tool parsing.
+        """
+        processed_messages = []
+        for message in messages:
+            processed_message = {}
+            for k, v in message.items():
+                if k not in ["tool_calls", "tool_call_id", "tool_choice"]:
+                    processed_message[k] = v
+            processed_messages.append(processed_message)
+        return processed_messages
+
     async def _generate_single(
         self, prompt: str, sampling_params: SamplingParams
-    ) -> str:
+    ):
         outputs_gen = self.llm_engine.generate(
             prompt,
             sampling_params=sampling_params,
@@ -146,60 +158,113 @@ class AsyncVLLMBackend(LLMBackend):
         )
         async for output in outputs_gen:
             final_output = output
-        return final_output.outputs
+        return final_output
+
+    async def _apply_chat_template_async(
+        self, messages_list: List[List[Dict]], tools: List[Dict] = None
+    ):
+        """
+        Render chat templates off the event loop.
+        Chat.prompt()/vision_inputs() are synchronous and can block under load.
+        """
+        return await asyncio.to_thread(
+            self.apply_chat_template,
+            messages_list,
+            self.template,
+            True,
+            tools,
+        )
 
     async def generate_async(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt using vLLM"""
+        return_dict = kwargs.pop("return_dict", False)
         sampling_params = {}
         if "temperature" in kwargs:
             sampling_params["temperature"] = kwargs["temperature"]
-        if "n" in kwargs:
-            sampling_params["n"] = kwargs["n"]
         if "max_tokens" in kwargs or "max_new_tokens" in kwargs:
             if "max_tokens" in kwargs and "max_new_tokens" in kwargs:
                 raise ValueError("max_tokens and max_new_tokens cannot be used together")
-            
+
             if "max_tokens" in kwargs:
                 sampling_params["max_tokens"] = kwargs.get("max_tokens")
             else:
                 sampling_params["max_tokens"] = kwargs.get("max_new_tokens")
-        
+
+        # Force SamplingParams.n=1 and instead duplicate inputs to get n
+        # completions per prompt. vLLM v1's AsyncLLM with n>1 has a generator-
+        # exhaustion bug that deadlocks the `async for output in outputs_gen`
+        # loop in _generate_single, so we route around it.
         sampling_params = SamplingParams(**sampling_params)
         n = kwargs.get("n", 1)
 
         tools = kwargs.get("tools", None)
-        prompts, vision_inputs = self.apply_chat_template(
-            messages_list, self.template, tools=tools
+        messages_list = [
+            self._convert_to_chat_without_tool_call_processing(messages)
+            for messages in messages_list
+        ]
+        print(f"[AsyncVLLMBackend.generate_async] applying chat template")
+        prompts, vision_inputs = await self._apply_chat_template_async(
+            messages_list, tools=tools
         )
         inputs = self._process_inputs(prompts, vision_inputs)
         if n > 1:
             inputs = [_input for _input in inputs for _ in range(n)]
-        logger.debug(f"[AsyncVLLMBackend] inputs: {inputs}")
+        logger.debug("[AsyncVLLMBackend] prepared %d input(s)", len(inputs))
         tasks = [self._generate_single(_input, sampling_params) for _input in inputs]
-        outputs = await asyncio.gather(*tasks)
-        # Flatten the outputs
-        outputs = [output for output_list in outputs for output in output_list]
-        response_texts = [output.text for output in outputs]
+
+        print(f"[AsyncVLLMBackend.generate_async] generating ...")
+        request_outputs = await asyncio.gather(*tasks)
+        # Flatten candidate texts across requests.
+        response_texts = [
+            out.text
+            for req_out in request_outputs
+            for out in getattr(req_out, "outputs", [])
+        ]
+        # Keep one total length per request to align with chain_base._extract_total_length().
+        total_lengths = []
+        for req_out in request_outputs:
+            prompt_len = len(getattr(req_out, "prompt_token_ids", []) or [])
+            completion_lens = [
+                len(getattr(out, "token_ids", []) or [])
+                for out in getattr(req_out, "outputs", [])
+            ]
+            completion_len = max(completion_lens) if completion_lens else 0
+            total_lengths.append(prompt_len + completion_len)
         logger.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
 
+        if return_dict:
+            return {
+                "response_texts": response_texts,
+                "tool_calls": [None] * len(response_texts),
+                "response_dict": {"backend": "async_vllm"},
+                "total_lengths": total_lengths,
+            }
         return response_texts
 
     async def generate_streaming(
         self, messages_list: List[List[Dict]], **kwargs
     ) -> AsyncGenerator[str, None]:
         """Generate text with streaming support using Async vLLM"""
-        max_tokens = kwargs.get("max_tokens", self.max_tokens)
-        temperature = kwargs.get("temperature", self.temperature)
-        n = kwargs.get("n", 1)
+
+        params = {}
+        if "max_tokens" in kwargs:
+            params["max_tokens"] = kwargs["max_tokens"]
+        if "temperature" in kwargs:
+            params["temperature"] = kwargs["temperature"]
+        if "n" in kwargs:
+            params["n"] = kwargs["n"]
+        
         sampling_params = SamplingParams(
-            n=n,
-            max_tokens=max_tokens,
-            temperature=temperature,
+            **params
         )
 
         tools = kwargs.get("tools", None)
-        prompts, vision_inputs = self.apply_chat_template(
-            messages_list, self.template, tools=tools
+        messages_list = [
+            self._convert_to_chat_without_tool_call_processing(messages)
+            for messages in messages_list
+        ]
+        prompts, vision_inputs = await self._apply_chat_template_async(
+            messages_list, tools=tools
         )
         inputs = self._process_inputs(prompts, vision_inputs)
 
@@ -226,7 +291,7 @@ class AsyncVerlBackend(LLMBackend):
     complex inference pipelines.
     """
 
-    def __init__(self, llm_engine, model_name_or_path: str, template: str, **kwargs):
+    def __init__(self, llm_engine, model_name_or_path: str, template: str):
         """Initialize AsyncVerlBackend.
 
         Args:
@@ -235,7 +300,7 @@ class AsyncVerlBackend(LLMBackend):
             template (str): Chat template to use for formatting messages.
             **kwargs: Additional configuration parameters.
         """
-        super().__init__(**kwargs)
+        super().__init__()
         self.model_name = model_name_or_path
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
@@ -273,17 +338,7 @@ class AsyncVerlBackend(LLMBackend):
     ) -> list:
         """
         We use the pure generated content as the history. So we don't want any tool call to be part of the history.
-        This is used when models are not openai's official models like GPT-4o.
         """
-        # messages = copy.deepcopy(messages)
-        # for message in messages:
-        #     if "tool_calls" in message:
-        #         del message["tool_calls"]
-        #     if "tool_call_id" in message:
-        #         del message["tool_call_id"]
-        #     if "tool_choice" in message:
-        #         del message["tool_choice"]
-        # return messages
 
         processed_messages = []
         for message in messages:
@@ -381,10 +436,6 @@ class ClientBackend(LLMBackend):
         max_requests_per_minute: int = 100,
         timeout: int = 3600,
         api_key: str = "EMPTY",
-        max_tokens: int = 1024,
-        temperature: float = 1.0,
-        n: int = 1,
-        **kwargs,
     ):
         """Initialize ClientBackend.
 
@@ -398,7 +449,7 @@ class ClientBackend(LLMBackend):
             max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
             **kwargs: Additional configuration parameters.
         """
-        super().__init__(**kwargs)
+        super().__init__()
 
         # --- connection
         self.model_name = model_name_or_path
@@ -420,11 +471,6 @@ class ClientBackend(LLMBackend):
 
         # --- misc
         self.timeout = timeout
-
-        # --- generation parameters
-        self.max_tokens = max_tokens
-        self.temperature = temperature
-        self.n = n
 
 
     def _is_gemini_model(self, model_name: str, base_url: str) -> bool:

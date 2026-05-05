@@ -1,7 +1,7 @@
 import pytest
 from agentfly.agents.auto import AutoAgent
-from agentfly.agents.react.react_agent import ReactAgent
-from agentfly.agents.specialized.code_agent import CodeAgent
+from agentfly.agents import ReactAgent
+from agentfly.agents import CodeAgent
 
 
 def test_auto_agent_from_config_react():
@@ -9,15 +9,17 @@ def test_auto_agent_from_config_react():
         "agent_type": "react",
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "template": None,
-        "tools": ["google_search", "answer"],
-        "backend": "client",
+        "tools": ["search", "answer_qa"],
+        "backend_config": {
+            "backend": "client",
+        },
     }
 
     agent = AutoAgent.from_config(config)
 
     assert isinstance(agent, ReactAgent)
     assert agent.model_name_or_path == "Qwen/Qwen2.5-3B-Instruct"
-    assert agent.template is None
+    assert agent.template == agent.model_name_or_path
     assert len(agent.tools) == 2
     assert agent.backend == "client"
 
@@ -28,7 +30,9 @@ def test_auto_agent_from_config_code():
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "template": None,
         "tools": ["code_interpreter"],
-        "backend": "client",
+        "backend_config": {
+            "backend": "client",
+        },
     }
 
     agent = AutoAgent.from_config(config)
@@ -44,9 +48,11 @@ def test_auto_agent_from_pretrained():
         model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
         agent_type="react",
         template=None,
-        tools=["google_search", "answer"],
+        tools=["search", "answer_qa"],
         debug=True,
-        backend="client",
+        backend_config={
+            "backend": "client",
+        },
     )
 
     assert isinstance(agent, ReactAgent)
@@ -57,9 +63,11 @@ def test_auto_agent_with_reward():
         "agent_type": "react",
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "template": None,
-        "tools": ["google_search", "answer"],
+        "tools": ["search", "answer_qa"],
         "reward_name": "qa_f1_reward",
-        "backend": "client",
+        "backend_config": {
+            "backend": "client",
+        },
     }
 
     agent = AutoAgent.from_config(config)
@@ -73,8 +81,10 @@ def test_auto_agent_invalid_type():
         "agent_type": "invalid_type",
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
         "template": None,
-        "tools": ["google_search", "answer"],
-        "backend": "client",
+        "tools": ["search", "answer_qa"],
+        "backend_config": {
+            "backend": "client",
+        },
     }
 
     with pytest.raises(ValueError):
@@ -84,8 +94,10 @@ def test_auto_agent_invalid_type():
 def test_auto_agent_missing_params():
     config = {
         "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
-        "tools": ["google_search", "answer"],
-        "backend": "client",
+        "tools": ["search", "answer_qa"],
+        "backend_config": {
+            "backend": "client",
+        },
     }
 
     with pytest.raises(ValueError):

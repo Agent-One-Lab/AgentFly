@@ -1,0 +1,51 @@
+name: Docs Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Free up disk space
+        run: |
+          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          docker system prune -af || true
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install -e '.[docs]' --no-build-isolation
+
+      # Catches the structural drift this project keeps hitting:
+      #   - mkdocstrings cannot import a class/module renamed in source
+      #   - pymdownx.snippets (check_paths: true) cannot find an included
+      #     test/source file because it was moved or renamed
+      # Non-strict for now because ~59 markdown-link warnings remain;
+      # promote to --strict once those are cleaned up.
+      - name: Build docs
+        run: |
+          set -o pipefail
+          mkdocs build 2>&1 | tee build.log
+          if grep -q '^ERROR' build.log; then
+            echo "::error::Docs build emitted ERROR-level messages (broken module path or snippet include)."
+            exit 1
+          fi

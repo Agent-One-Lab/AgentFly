@@ -12,3 +12,5 @@ async def test_scienceworld_reward():
     result = await scienceworld_reward(final_response=prediction, context=ctx)
     assert "reward" in result
     assert result["reward"] >= 0.0
+
+    await ctx.end_resource(scope="rollout")

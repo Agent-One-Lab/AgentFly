@@ -25,7 +25,7 @@ Configure the agent behavior and capabilities:
 - **`agent.init_config.template`**: Chat template name (e.g., `qwen2.5`, `qwen2.5-vl`)
 - **`agent.init_config.agent_type`**: Agent type - `hf`, `react`, `code`, `gui`, etc.
 - **`agent.init_config.tools`**: List of tools available to the agent (e.g., `[calculator]`, `[google_search,answer]`)
-- **`agent.init_config.reward_name`**: Name of the reward function to use (e.g., `math_reward_string_equal`, `qa_f1_reward`)
+- **`agent.init_config.reward_name`**: Name of the reward function to use (e.g., `math_equal_reward_tool`, `qa_f1_reward`)
 - **`agent.init_config.backend_config.backend`**: Backend for agent execution - `async_verl` (recommended) or others
 - **`agent.run_config.max_turns`**: Maximum number of interaction turns per episode
 - **`agent.run_config.num_chains`**: Number of parallel interaction chains per sample
@@ -131,7 +131,7 @@ python -m agentfly.cli train \
     agent.init_config.tools="[calculator]" \
     agent.init_config.template=qwen2.5 \
     agent.init_config.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
-    agent.init_config.reward_name="math_reward_string_equal" \
+    agent.init_config.reward_name="math_equal_reward_tool" \
     agent.init_config.backend_config.backend=async_verl \
     agent.run_config.max_turns=3 \
     agent.run_config.num_chains=8 \

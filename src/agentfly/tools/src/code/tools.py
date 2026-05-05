@@ -6,6 +6,7 @@ from ...decorator import tool
 from ...tool_base import BaseTool
 
 
+# --8<-- [start:code_interpreter_example]
 @tool(
     name="code_interpreter",
     description="Run the code in docker container and return the output from stdout or stderr",
@@ -33,6 +34,7 @@ async def code_interpreter(code: str, context: Context):
         return str(obs)
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
+# --8<-- [end:code_interpreter_example]
 
 
 class CodeInterpreterTool(BaseTool):

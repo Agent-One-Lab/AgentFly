@@ -2,6 +2,8 @@
 
 Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, multimodal)
 
+!!! note
+    Parts of this documentation are AI-generated. We aim to keep it accurate, but if you find a discrepancy with the code, the code is the source of truth — please open an issue or PR.
 
 ![Overall Structure](https://agent-one-lab.github.io/assets/agentfly/overview.png)
 

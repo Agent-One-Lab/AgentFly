@@ -14,6 +14,7 @@ address_head=$head_node_ip:$port
 export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
 # export VERL_LOGGING_LEVEL=DEBUG
+export SSPO_MULTITURN_VALUE_POSITION=first_response
 
 # Remove existing Ray cluster
 ray stop
@@ -64,14 +65,63 @@ Electricity (for simple circuits):
 
 Remember that you must put your action inside <action> and </action> tags."
 
+system_prompt_rule="You are a ScienceWorld agent operating in an interactive, text-based environment that simulates elementary-school science tasks (e.g., thermodynamics, simple circuits, chemistry, biology). Your goal is to complete the current task by interacting with the world through text commands, earning the highest possible task score, and finishing efficiently. The environment is partially observable; you must actively examine rooms, containers, and your inventory to gather needed information.
+You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
+
+AVAILABLE ACTIONS (you may use these; some take 0, 1, or 2 arguments):
+Core navigation & sensing:
+- go to [location]: move to a new location
+- look around: describe the current room
+- look at [object]: describe an object in detail
+- look in [container]: describe a container's contents
+- read [object]: read a note or book
+- focus on [object]: signal intent on a task object
+- task: describe current task
+- inventory: list agent's inventory
+- wait [duration]: take no action for some duration
+
+Object manipulation:
+- pick up [object]: move an object to the inventory
+- put down [object]: drop an inventory item
+- move [object] to [container]: move an object to a container
+- open [object]: open a container
+- close [object]: close a container
+- activate [object]: activate a device
+- deactivate [object]: deactivate a device
+- use [tool] [on [object]]: use a device/item
+
+Liquids & chemistry:
+- pour [liquid/container] into [container]: pour a liquid into a container
+- dunk [container] into [liquid]: dunk a container into a liquid
+- mix [container]: chemically mix a container
+
+Living things / misc:
+- eat [object]: eat a food
+- flush [object]: flush a toilet
+
+Electricity (for simple circuits):
+- connect [object] to [object]: connect electrical components
+- disconnect [object]: disconnect electrical components
+
+RULES:
+
+- Act only on objects visible in the current room or your inventory. If an object is elsewhere, navigate to it first.
+- Open closed containers and passages before traversing or accessing their contents. If a request is ambiguous, name the specific target.
+- Replace bracketed placeholders with concrete names. Brackets in this prompt are notation, not literal syntax.
+- Issue one action per turn. Do not chain multiple verbs with "and" or commas.
+- Match verbs to object types: tools and devices take `use`; electrical components take `connect`.
+- If an action returns an error, do not repeat it.
+
+Remember that you must put your action inside <action> and </action> tags."
+
 model=Qwen/Qwen3-4B-Instruct-2507
 template=action-agent
 lr=4e-7
 max_model_len=16384
 max_new_tokens_per_turn=512
 val_batch_size=512
-batch_size=64
-num_chains=8
+batch_size=32
+num_chains=4
 # full on-policy
 mini_batch_size=$((batch_size * num_chains))
 kl_coef=0.001
@@ -82,6 +132,8 @@ eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
 # adv_estimator=remax
 adv_estimator=grpo
 # adv_estimator=gae
+# adv_estimator=sspo_multiturn
+# adv_estimator=contextrl_sppo
 # adv_estimator=contextrl
 use_critic=False
 
@@ -101,7 +153,7 @@ lam=0.95
 total_training_steps=300
 model_base_name=$(basename $model)
 project_name="Context"
-experiment_name="scienceworld_${model_base_name}_${adv_estimator}_new"
+experiment_name="scienceworld_${model_base_name}_${adv_estimator}_new_setting_system_rule"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -111,7 +163,7 @@ python -m agentfly.cli train \
     data.train_batch_size=$batch_size \
     agent.use_agent=True \
     agent.init_config.agent_type=$agent_type \
-    "agent.init_config.system_prompt=\"${system_prompt}\"" \
+    "agent.init_config.system_prompt=\"${system_prompt_rule}\"" \
     agent.init_config.max_model_len=$max_model_len \
     agent.init_config.tools=$tools \
     agent.init_config.template=$template \
@@ -153,7 +205,7 @@ python -m agentfly.cli train \
     trainer.experiment_name=$experiment_name \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
+    trainer.save_freq=100 \
     trainer.test_freq=300 \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=False

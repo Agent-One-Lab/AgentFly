@@ -10,22 +10,7 @@ The Code reward system provides evaluation functions for code execution tasks. T
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-async def code_reward_test(prediction: str, context: Context) -> dict
-```
-
-**Description:** Evaluate the reward for code execution based on successful completion.
-
-**Parameters:**
-- **prediction** (str): The code snippet to execute and evaluate.
-- **context** (`Context`): Rollout execution context used to acquire the Python sandbox resource.
-
-**Returns:**
-- **dict**: Dictionary containing:
-    - **reward** (float): 1.0 for successful execution, 0.0 for failures.
-    - **output** (str): The execution result or error message.
+**Description:** Evaluate the reward for code execution based on successful completion. Returns a dict with `reward` (1.0 success / 0.0 failure) and `output` (stdout/stderr or error).
 
 **Reward Configuration:**
 - **Resource Spec**: `PythonSandboxSpec` (container-based Python HTTP sandbox).

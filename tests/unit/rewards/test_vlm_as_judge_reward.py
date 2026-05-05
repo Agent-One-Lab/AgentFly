@@ -54,7 +54,8 @@ def _build_test_questions() -> dict:
     }
 
 
-@pytest.mark.asyncio
+@pytest.mark.gpu
+@pytest.mark.asyncio(scope="session")
 async def test_vlm_as_judge_pass_reward_real_vlm():
     if not VLM_MODELS:
         pytest.skip("Set VLM_MODELS in this test file to run the integration test.")
@@ -85,7 +86,7 @@ async def test_vlm_as_judge_pass_reward_real_vlm():
         )
     finally:
         sr._build_api_model_spec = original_builder
-        await ctx.release_resource(scope="rollout")
+        await ctx.end_resource(scope="rollout")
 
     print(f"reward result: {result}", flush=True)
 

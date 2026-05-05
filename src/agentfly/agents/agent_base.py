@@ -18,6 +18,7 @@ from chat_bricks import (
 from termcolor import colored
 
 from ..templates import *  # noqa: F403
+from ..rewards.types import RewardResult
 from ..tools.tool_base import BaseTool
 from ..core.context import Context
 from ..core.context_config import ContextConfig
@@ -25,6 +26,7 @@ from ..utils.monitor import JsonlSink, Monitor, WandbSink
 from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
 from .chain.chain_base import ChainRollout
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
+from .types import RunResult, Trajectory
 from ..utils.llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
 from ..utils.llm_backends.backend_configs import BACKEND_CONFIGS
 from .utils.messages import MessagesList
@@ -76,6 +78,100 @@ if VLLM_TOOL_PARSER_AVAILABLE:
     silence_tool_parsers()
 
 logger = logging.getLogger(__name__)
+
+
+REWARD_DECOMPOSITION_MODES = ("last_only", "broadcast", "uniform", "geometric")
+
+
+def decompose_trajectory_reward(
+    reward: float,
+    num_segments: int,
+    mode: str = "last_only",
+    gamma: float = 0.9,
+) -> List[float]:
+    """Distribute a trajectory's outcome reward across its segments.
+
+    Modes:
+        - "last_only": [0, 0, ..., 0, R]
+              Sparse outcome — only the final segment receives the reward.
+        - "broadcast": [R, R, ..., R]
+              Each segment sees the full R. Total trajectory reward = n * R
+              (NOT conservative — inflates magnitude with segment count).
+        - "uniform":   [R/n, R/n, ..., R/n]
+              Sum-to-R, equal weight per segment. Conservative.
+        - "geometric": [R · γ^{n-1-k} · (1 − γ) / (1 − γ^n)] for k = 0..n-1
+              Sum-to-R, more weight on segments closer to the outcome.
+              γ → 1 collapses to "uniform". Conservative.
+
+    Conservative modes preserve total trajectory reward equal to R, so PPO
+    clipping ranges, KL budgets, and learning rates tuned against sparse
+    rewards continue to apply without retuning.
+
+    Args:
+        reward: trajectory outcome reward R.
+        num_segments: number of segments n in the trajectory (>= 1).
+        mode: one of REWARD_DECOMPOSITION_MODES.
+        gamma: decay rate for "geometric" mode. Ignored otherwise.
+
+    Returns:
+        List of per-segment rewards of length num_segments.
+
+    Raises:
+        ValueError: if mode is unknown or num_segments < 1.
+    """
+    if num_segments < 1:
+        raise ValueError(f"num_segments must be >= 1, got {num_segments}")
+    if mode not in REWARD_DECOMPOSITION_MODES:
+        raise ValueError(
+            f"mode must be one of {REWARD_DECOMPOSITION_MODES}, got: {mode!r}"
+        )
+
+    n = num_segments
+    if mode == "last_only":
+        return [0.0] * (n - 1) + [reward]
+    if mode == "broadcast":
+        return [reward] * n
+    if mode == "uniform":
+        per = reward / n
+        return [per] * n
+    # geometric
+    if n == 1 or gamma >= 1.0:
+        per = reward / n
+        return [per] * n
+    raw = [gamma ** (n - 1 - k) for k in range(n)]
+    total = sum(raw)
+    return [reward * (w / total) for w in raw]
+
+
+def _resolve_reward_decomposition_config() -> tuple:
+    """Resolve (mode, gamma) for trajectory reward decomposition from env vars.
+
+    Env vars:
+        REWARD_DECOMPOSITION:       one of REWARD_DECOMPOSITION_MODES.
+                                    Default: "last_only".
+        REWARD_DECOMPOSITION_GAMMA: float decay rate for "geometric" mode.
+                                    Default: 0.9.
+    """
+    env_decomp = os.getenv("REWARD_DECOMPOSITION")
+    if env_decomp is not None and env_decomp.strip() != "":
+        mode = env_decomp.strip().lower()
+        if mode not in REWARD_DECOMPOSITION_MODES:
+            raise ValueError(
+                f"REWARD_DECOMPOSITION must be one of {list(REWARD_DECOMPOSITION_MODES)}, "
+                f"got: {env_decomp!r}"
+            )
+    else:
+        mode = "last_only"
+
+    env_gamma = os.getenv("REWARD_DECOMPOSITION_GAMMA", "0.9")
+    try:
+        gamma = float(env_gamma)
+    except ValueError as exc:
+        raise ValueError(
+            f"REWARD_DECOMPOSITION_GAMMA must be a float, got: {env_gamma!r}"
+        ) from exc
+
+    return mode, gamma
 
 
 class BaseAgent(ChainRollout, ABC):
@@ -196,6 +292,11 @@ class BaseAgent(ChainRollout, ABC):
             self.tool_parser = ParserCls(self.tokenizer)
 
         super().__init__()
+
+        # Result of the most recent agent.run(...) call. Populated by run();
+        # consumed by get_verl_data_proto(). None until the first run.
+        self._last_run_result: Optional["RunResult"] = None
+
         if kwargs:
             raise ValueError(f"Unused arguments for agent: {kwargs}")
 
@@ -258,6 +359,22 @@ class BaseAgent(ChainRollout, ABC):
                 except Exception:
                     pass
 
+            # For async_vllm, prefer explicit kwargs like tensor/data parallel sizes over
+            # a default config's pre-built engine_args placeholder.
+            if backend == "async_vllm":
+                explicit_async_vllm_keys = {
+                    "tensor_parallel_size",
+                    "data_parallel_size",
+                    "pipeline_parallel_size",
+                    "max_model_len",
+                    "gpu_memory_utilization",
+                    "dtype",
+                    "quantization",
+                    "trust_remote_code",
+                }
+                if any(k in self.backend_config for k in explicit_async_vllm_keys):
+                    config_kwargs.pop("engine_args", None)
+
             if backend == "async_vllm":
                 llm_engine = AsyncVLLMBackend(
                     model_name_or_path, self.template, **config_kwargs
@@ -270,7 +387,7 @@ class BaseAgent(ChainRollout, ABC):
                     **config_kwargs,
                 )
             elif backend == "client":
-                # ClientBackend(model_name_or_path, base_url=..., ); no template as 2nd arg
+                
                 llm_engine = ClientBackend(model_name_or_path, **config_kwargs)
             else:
                 raise ValueError(f"Backend {backend} is not supported.")
@@ -334,10 +451,13 @@ class BaseAgent(ChainRollout, ABC):
         generation_config: Optional[Dict[str, Any]] = {},
         context_config: Optional[ContextConfig] = None,
         **kwargs,
-    ):
-        """
-        This is the main interface for running the agent. It is a wrapper of different
-        rollout methods, which must be asynchronous. Currently, we only support chain-based rollout.
+    ) -> RunResult:
+        """Run the agent on a batch of messages and return the rollout result.
+
+        This is the main interface for running the agent. It is a wrapper of
+        different rollout methods, which must be asynchronous. Currently we
+        only support chain-based rollout.
+
         Args:
             messages: List of messages to generate responses for.
             max_turns: The maximum number of turns to generate.
@@ -345,6 +465,11 @@ class BaseAgent(ChainRollout, ABC):
             context_config: Optional settings for :class:`~agentfly.core.context.Context` (resource backend).
             **kwargs: Additional keyword arguments for generation (passed to ``run_async``).
 
+        Returns:
+            :class:`~agentfly.agents.types.RunResult` containing the trajectories
+            produced by this run. The same result is also cached on the agent so
+            that :meth:`get_verl_data_proto` can be called afterwards without
+            re-running.
         """
         processed_messages = self._preprocess_messages(messages)
         self._preprocess_backends()
@@ -358,6 +483,10 @@ class BaseAgent(ChainRollout, ABC):
         )
 
         self._postprocess_backends()
+
+        trajectories = self.postprocess_trajectories(self.get_trajectories())
+        self._last_run_result = RunResult(trajectories=trajectories)
+        return self._last_run_result
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", (
@@ -412,19 +541,21 @@ class BaseAgent(ChainRollout, ABC):
     def timing_data(self):
         return self.timer.timing_data
 
-    def postprocess_trajectories(self, trajectories: List[Dict]) -> List[Dict]:
-        """
-        Preprocess the trajectories of the agent.
+    def postprocess_trajectories(self, trajectories: List[Trajectory]) -> List[Trajectory]:
+        """Hook for subclasses to post-process trajectories before they're
+        wrapped in a :class:`RunResult`. Default implementation is identity.
         """
         return trajectories
 
-    @property
-    def trajectories(self):
-        """Get the trajectories of the agent."""
-
-        trajectories = self.get_trajectories()
-        trajectories = self.postprocess_trajectories(trajectories)
-        return trajectories
+    def _require_last_run(self) -> RunResult:
+        """Return the cached :class:`RunResult` from the most recent
+        :meth:`run` call, raising a clear error if ``run`` hasn't been called yet."""
+        if self._last_run_result is None:
+            raise RuntimeError(
+                "agent.run(...) has not been called yet; no RunResult is available. "
+                "Call `result = await agent.run(...)` first."
+            )
+        return self._last_run_result
 
     def tokenize_trajectories(
         self,
@@ -689,22 +820,6 @@ class BaseAgent(ChainRollout, ABC):
 
         return new_messages_list
 
-    @property
-    def rewards(self):
-        reward_values = []
-        other_values = defaultdict(list)
-        for trajectory in self.trajectories:
-            reward_value_or_dict = trajectory["reward"]
-
-            if isinstance(reward_value_or_dict, dict):
-                reward_values.append(reward_value_or_dict["reward"])
-                for key, value in reward_value_or_dict.items():
-                    if key != "reward":
-                        other_values[key].append(value)
-            else:
-                reward_values.append(reward_value_or_dict)
-
-        return reward_values, other_values
 
     def print_messages(self, index: int = 0):
         messages = self.get_messages()
@@ -739,19 +854,19 @@ class BaseAgent(ChainRollout, ABC):
         self,
         train_on_last_turn: bool = False,
         world_size: int = 1,
-        reward_on_last_segment_only: bool = False,
         pad_to_multiple_of: Optional[int] = None,
     ):
-        trajectories = self.trajectories
+        run_result = self._require_last_run()
+        trajectories = run_result.trajectories
         segments_list = []
         other_info_list = []
         for batch_idx, trajectory in enumerate(trajectories):
-            trajectory_segments = trajectory["trajectory_segments"]
+            trajectory_segments = trajectory.segments
             for segment_idx, segment in enumerate(trajectory_segments):
                 segments_list.append(segment)
-                info = {
-                    key: value for key, value in trajectory.items() if key != "trajectory_segments"
-                }
+                # Per-segment metadata: everything about the trajectory
+                # except segments themselves, plus segment indexing.
+                info = trajectory.model_dump(exclude={"segments"})
                 info["batch_idx"] = batch_idx
                 info["segment_idx"] = segment_idx
                 other_info_list.append(info)
@@ -765,25 +880,27 @@ class BaseAgent(ChainRollout, ABC):
             train_on_last_turn=train_on_last_turn,
         )
 
-        reward_values, other_values = self.rewards
+        reward_values = run_result.rewards
+        other_values = defaultdict(list)
+        for k, v in run_result.reward_extras.items():
+            other_values[k] = list(v)
 
-        # Expand to segment level:
-        # - Default: trajectory i has n_i segments -> repeat reward i for all n_i segments.
-        # - If reward_on_last_segment_only=True: use 0.0 for first n_i-1 segments, reward i only on the last.
-        reward_on_last_segment_only = False
+        # Expand trajectory reward to segment level. See docstring of
+        # `decompose_trajectory_reward` for the available modes.
+        decomposition_mode, decomposition_gamma = _resolve_reward_decomposition_config()
         reward_values_segment: List[float] = []
         for trajectory in trajectories:
-            n = len(trajectory["trajectory_segments"])
-            r = trajectory["reward"]
-            if isinstance(r, dict):
-                r = r["reward"]
-            if reward_on_last_segment_only:
-                if n <= 0:
-                    continue
-                reward_values_segment.extend([0.0] * (n - 1))
-                reward_values_segment.append(r)
-            else:
-                reward_values_segment.extend([r] * n)
+            n = trajectory.num_segments
+            if n <= 0:
+                continue
+            reward_values_segment.extend(
+                decompose_trajectory_reward(
+                    reward=trajectory.reward,
+                    num_segments=n,
+                    mode=decomposition_mode,
+                    gamma=decomposition_gamma,
+                )
+            )
         num_trajectories = len(trajectories)
         other_values_segment = {}
         for key, values in other_values.items():
@@ -793,14 +910,14 @@ class BaseAgent(ChainRollout, ABC):
                 values = list(values) + [0.0] * (num_trajectories - len(values))
             other_values_segment[key] = []
             for traj_idx, trajectory in enumerate(trajectories):
-                n = len(trajectory["trajectory_segments"])
+                n = trajectory.num_segments
                 val = values[traj_idx]
                 other_values_segment[key].extend([val] * n)
         reward_values = reward_values_segment
         other_values = other_values_segment
 
         # Number of segments per trajectory (one integer per trajectory).
-        repeat_times = [len(t["trajectory_segments"]) for t in trajectories]
+        repeat_times = [t.num_segments for t in trajectories]
 
         align = pad_to_multiple_of
         if align and align > 1:

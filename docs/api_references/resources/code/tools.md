@@ -10,20 +10,7 @@ The Code environment provides tools for executing Python code in secure, isolate
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-async def code_interpreter(code: str, context: Context) -> str
-```
-
 **Description:** Execute Python code in a sandboxed container environment acquired via `context.acquire_resource(...)`, and return the output from stdout or stderr.
-
-**Parameters:**
-- **code** (str): The Python code to execute in the sandbox environment
-- **context** (`Context`): Injected rollout context. During agent rollouts, `Context` is provided automatically.
-
-**Returns:**
-- **str**: The output from code execution (stdout) or error messages (stderr)
 
 **Tool Configuration:**
 - **ResourceSpec**: `PythonSandboxSpec`
@@ -60,12 +47,12 @@ react_agent = ReactAgent(
 )
 
 # Agent can now use code execution for calculations
-await react_agent.run_async(
-    max_steps=5,
-    start_messages=[{
+await react_agent.run(
+    messages=[{
         "messages": [{"role": "user", "content": "Calculate the standard deviation of the numbers [1, 4, 6, 7, 12, 15, 18, 20] and explain the result"}],
-        "question": "Calculate the standard deviation of the numbers [1, 4, 6, 7, 12, 15, 18, 20] and explain the result"
+        "question": "Calculate the standard deviation of the numbers [1, 4, 6, 7, 12, 15, 18, 20] and explain the result",
     }],
-    num_chains=1
+    max_turns=5,
+    num_chains=1,
 )
 ```
