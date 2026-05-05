@@ -2,8 +2,8 @@
 
 Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, multimodal)
 
-
-
+!!! note
+    Parts of this documentation are AI-generated. We aim to keep it accurate, but if you find a discrepancy with the code, the code is the source of truth — please open an issue or PR.
 
 ![Overall Structure](https://agent-one-lab.github.io/assets/agentfly/overview.png)
 
@@ -22,11 +22,11 @@ Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, mu
 
     <div class="grid cards" markdown>
 
-    -   :material-file-document-outline: __AgentFly: Extensible and Scalable Reinforcement Learning for LM Agents__
+    -   :material-file-document-outline: __AgentFly: Extensible and Scalable Reinforcement Learning for LLM Agents__
 
         ---
 
-        Language model (LM) agents have gained significant attention for their ability to autonomously complete tasks through interactions with environments, tools, and APIs. LM agents are primarily built with prompt engineering or supervised finetuning. At the same time, reinforcement learning (RL) has been explored to enhance LM's capabilities, such as reasoning and factuality. However, the combination of the LM agents and reinforcement learning (Agent-RL) remains underexplored and lacks systematic study. To this end, we built AgentFly, a scalable and extensible Agent-RL framework designed to empower LM agents with a variety of RL algorithms...
+        Methods to build LLM agents have evolved from prompt engineering and supervised finetuning to agentic reinforcement learning (agentic RL). AgentFly is an agentic RL framework that tackles bottlenecks in environment interaction, reward calculation, and large-scale training through a four-layer design: an agent layer for defining agents, tools, and rewards; a rollout layer that drives agent loops and collects trajectories; a context layer that injects task metadata and coordinates resources; and a resource layer that manages low-level execution backends such as containers and model engines. With a suite of prebuilt tools and environments (including search, code, and interactive environments), AgentFly enables scalable training of multi-turn, tool-using LLM agents across diverse tasks.
 
         [:octicons-arrow-right-24: Read Paper](https://arxiv.org/abs/2507.14897)
     </div>

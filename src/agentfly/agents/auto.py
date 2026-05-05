@@ -3,12 +3,13 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from ..rewards.reward_base import get_reward_from_name
 from ..tools import get_tools_from_names
 from .agent_base import BaseAgent
-from .react.react_agent import ReactAgent
+from .specialized.react_agent import ReactAgent
+from .specialized.action_agent import ActionAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
-from .specialized.hf_agent import HFAgent
-from .specialized.openai_agent import OpenAIAgent
-from .specialized.think_agent import ThinkAgent
+from .specialized.swe_agents import BashSWEAgent, FunctionCallSWEAgent, Qwen3CoderSWEAgent
+from .specialized.hf_agent import HFAgent, SearchR1Agent
+from omegaconf import OmegaConf, DictConfig
 
 
 class AutoAgent:
@@ -89,16 +90,26 @@ class AutoAgent:
             raise ValueError("Config could not be None")
 
         # construct a copy for agent_kwargs
-        agent_kwargs = {}
-        for k, v in config.items():
-            agent_kwargs[k] = v
+        if isinstance(config, dict):
+            agent_kwargs = {}
+            for k, v in config.items():
+                agent_kwargs[k] = v
+        elif isinstance(config, DictConfig):
+            agent_kwargs = OmegaConf.to_container(config)
+        else:
+            raise ValueError(f"Unsupported config type: {type(config)}")
 
-        required_params = ["agent_type", "tools", "backend"]
+        required_params = ["agent_type", "tools", "backend_config"]
         missing_params = [param for param in required_params if not config.get(param)]
 
         if missing_params:
             raise ValueError(
                 f"Missing required parameters: {', '.join(missing_params)}"
+            )
+        backend_config = agent_kwargs["backend_config"]
+        if not isinstance(backend_config, dict) or "backend" not in backend_config:
+            raise ValueError(
+                f"backend_config must be a dict with at least a 'backend' key (e.g. {{'backend': 'async_vllm'}}), got {backend_config}"
             )
 
         agent_type = config["agent_type"]
@@ -117,6 +128,8 @@ class AutoAgent:
 
         if "use_agent" in agent_kwargs:
             agent_kwargs.pop("use_agent")
+        # BaseAgent only accepts backend_config, not backend
+        agent_kwargs.pop("backend", None)
 
         agent = agent_class(**agent_kwargs)
 
@@ -170,7 +183,9 @@ class AutoAgent:
 # Auto-register built-in agent types
 AutoAgent.register_agent("react", ReactAgent)
 AutoAgent.register_agent("code", CodeAgent)
-AutoAgent.register_agent("openai", OpenAIAgent)
-AutoAgent.register_agent("think", ThinkAgent)
 AutoAgent.register_agent("gui", GUIAgent)
 AutoAgent.register_agent("hf", HFAgent)
+AutoAgent.register_agent("searchr1", SearchR1Agent)
+AutoAgent.register_agent("action", ActionAgent)
+AutoAgent.register_agent("bash_swe", BashSWEAgent)
+AutoAgent.register_agent("qwen3coder_swe", Qwen3CoderSWEAgent)

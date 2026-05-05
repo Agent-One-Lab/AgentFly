@@ -2,11 +2,11 @@ from agentfly.agents import ReactAgent, CodeAgent
 from agentfly.tools import (
     answer_qa,
     code_interpreter,
-    asyncdense_retrieve,
+    async_dense_retrieve,
     webshop_browser,
     scienceworld_explorer,
 )
-from agentfly.rewards import math_reward, scienceworld_reward, webshop_reward
+from agentfly.rewards import math_equal_reward, scienceworld_reward, webshop_reward
 import pytest
 
 
@@ -16,12 +16,12 @@ async def test_code_agent():
     agent = CodeAgent(
         model_name_or_path="Agent-One/Qwen2.5-3B-Code-Code",
         tools=[code_interpreter],
-        reward_fn=math_reward,
+        reward_fn=math_equal_reward,
         template="qwen2.5-no-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
-    await agent.run(
+    run_result = await agent.run(
         messages=[
             {
                 "messages": [
@@ -38,8 +38,8 @@ async def test_code_agent():
         num_chains=1,
         enable_streaming=True,
     )
-    print(f"Trajectories: {agent.trajectories}")
-    print(f"Rewards: {agent.rewards}")
+    print(f"Trajectories: {run_result.trajectories}")
+    print(f"Rewards: {run_result.rewards}")
 
 
 @pytest.mark.gpu
@@ -49,10 +49,10 @@ async def test_react_vqa_agent():
         model_name_or_path="Agent-One/Qwen2.5-VL-3B-VQA-React",
         tools=[answer_qa],
         template="qwen2.5-vl",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
-    await agent.run(
+    run_result = await agent.run(
         messages=[
             {
                 "role": "user",
@@ -69,18 +69,20 @@ async def test_react_vqa_agent():
         num_chains=1,
         enable_streaming=True,
     )
-    print(agent.trajectories)
+    print(run_result.trajectories)
 
 
+@pytest.mark.gpu
+@pytest.mark.asyncio(loop_scope="session")
 async def test_react_vqa_retrieval_agent():
     agent = ReactAgent(
         model_name_or_path="Agent-One/Qwen2.5-VL-3B-Retrieval-React",
-        tools=[asyncdense_retrieve, answer_qa],
+        tools=[async_dense_retrieve, answer_qa],
         template="qwen2.5-vl",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
-    await agent.run(
+    run_result = await agent.run(
         messages=[
             {
                 "role": "user",
@@ -100,19 +102,21 @@ async def test_react_vqa_retrieval_agent():
         num_chains=1,
         enable_streaming=True,
     )
-    print(agent.trajectories)
+    print(run_result.trajectories)
 
 
+@pytest.mark.gpu
+@pytest.mark.asyncio(loop_scope="session")
 async def test_react_scienceworld_agent():
     agent = ReactAgent(
         model_name_or_path="Agent-One/Qwen2.5-7B-ScienceWorld-React",
         tools=[scienceworld_explorer],
         reward_fn=scienceworld_reward,
         template="qwen2.5-no-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
-    await agent.run(
+    run_result = await agent.run(
         messages={
             "messages": [
                 {
@@ -128,20 +132,22 @@ async def test_react_scienceworld_agent():
         num_chains=1,
         enable_streaming=True,
     )
-    print(f"Trajectories: {agent.trajectories}")
-    print(f"Rewards: {agent.rewards}")
+    print(f"Trajectories: {run_result.trajectories}")
+    print(f"Rewards: {run_result.rewards}")
 
 
+@pytest.mark.gpu
+@pytest.mark.asyncio(loop_scope="session")
 async def test_react_webshop_agent():
     agent = ReactAgent(
         model_name_or_path="Agent-One/Qwen2.5-7B-Webshop-React",
         tools=[webshop_browser],
         reward_fn=webshop_reward,
         template="qwen2.5-no-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
-    await agent.run(
+    run_result = await agent.run(
         messages={
             "messages": [
                 {
@@ -166,5 +172,5 @@ async def test_react_webshop_agent():
         num_chains=1,
         enable_streaming=True,
     )
-    print(f"Trajectories: {agent.trajectories}")
-    print(f"Rewards: {agent.rewards}")
+    print(f"Trajectories: {run_result.trajectories}")
+    print(f"Rewards: {run_result.rewards}")

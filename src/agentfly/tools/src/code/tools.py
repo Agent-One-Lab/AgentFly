@@ -1,59 +1,40 @@
-import json
 import traceback
 
-import requests
-
-from ....envs.python_env import PythonSandboxEnv
+from ....core import Context
+from ....envs.python_env import PythonSandboxSpec
 from ...decorator import tool
 from ...tool_base import BaseTool
 
 
-def make_request(url, payload, headers, timeout=20):
-    """Make a single request to the server"""
-    try:
-        response = requests.post(
-            url, json=payload, headers=headers, timeout=timeout, verify=False
-        )
-        response.raise_for_status()  # This will raise an exception for HTTP errors
-        return response.json()
-    except requests.exceptions.Timeout:
-        return {"error": "Request timed out after {} seconds".format(timeout)}
-    except requests.exceptions.ConnectionError as e:
-        return {
-            "error": f"Connection error: {str(e)}\nPlease check if the server is running and accessible."
-        }
-    except requests.exceptions.RequestException as e:
-        return {"error": f"Request failed: {str(e)}\n{traceback.format_exc()}"}
-    except json.JSONDecodeError:
-        return {"error": "Invalid JSON response from server"}
-    except Exception as e:
-        return {"error": f"Unexpected error: {str(e)}\n{traceback.format_exc()}"}
-
-
+# --8<-- [start:code_interpreter_example]
 @tool(
-    env_cls=PythonSandboxEnv,
     name="code_interpreter",
     description="Run the code in docker container and return the output from stdout or stderr",
-    stateful=True,
-    pool_size=32,
 )
-async def code_interpreter(code: str, env: PythonSandboxEnv):
+async def code_interpreter(code: str, context: Context):
     """
-    Run the code in docker container and return the output from stdout or stderr
+    Run the code in docker container and return the output from stdout or stderr.
+
+    Uses one Python sandbox per rollout (acquired via Context); the sandbox is
+    released when the rollout ends. Warm the pool at training start with
+    ResourceEngine.start(python_sandbox_spec(), size=32, backend="local") if needed.
 
     Args:
-        code (str): The code to run.
-        env (PythonSandboxEnv): The Python sandbox environment instance
+        code: The code to run.
+        context: Injected rollout context; used to acquire the sandbox resource.
 
     Returns:
-        str: The output from stdout or stderr
+        str: The output from stdout or stderr.
     """
     code = str(code)
+    spec = PythonSandboxSpec
+    env = await context.acquire_resource(spec=spec, scope="global", backend="local")
     try:
         obs = await env.step(code)
         return str(obs)
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
+# --8<-- [end:code_interpreter_example]
 
 
 class CodeInterpreterTool(BaseTool):
@@ -61,14 +42,19 @@ class CodeInterpreterTool(BaseTool):
     description = (
         "Run the code in docker container and return the output from stdout or stderr"
     )
-    env_cls = PythonSandboxEnv
-    pool_size = 32
 
     def __init__(self):
         super().__init__()
 
-    async def call(self, code: str, env: PythonSandboxEnv):
+    async def call(self, code: str, context: Context):
+        """
+        Args:
+            code: The code to run.
+            context: Injected rollout context for acquiring the sandbox.
+        """
         code = str(code)
+        spec = PythonSandboxSpec
+        env = await context.acquire_resource(spec=spec, scope="global", backend="local")
         try:
             obs = await env.step(code)
             return str(obs)

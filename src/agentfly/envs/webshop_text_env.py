@@ -4,12 +4,13 @@ import re
 import string
 import time
 from ast import literal_eval
+from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
 from bs4.element import Comment
 
-from .env_base import BaseEnv, SupportsDocker
+from ..resources import ContainerResource, ContainerResourceSpec
 
 END_BUTTON = "Buy Now"
 NEXT_PAGE = "Next >"
@@ -23,88 +24,74 @@ ACTION_TO_TEMPLATE = {
     "Attributes": "attributes_page.html",
 }
 
+WebShopSpec = ContainerResourceSpec(
+    category="webshop",
+    image="rifoag/webshop-simulator-env:latest",
+    ports={"3000/tcp": None},
+    container_port=3000,
+    start_timeout=180.0,
+    host_ip="127.0.0.1",
+    max_global_num=8,
+)
 
-class WebAgentTextEnv(BaseEnv, SupportsDocker):
+
+class WebShopEnv(ContainerResource):
     """
-    Text mode of WebShop environment.
-    This class simulates a text-based shopping environment for agents to interact with a webshop.
-    It manages the environment state, handles actions, and communicates with a backend server via HTTP.
+    ContainerResource for WebShop text environment. Runner starts the container; start() connects and loads home.
+    Use via Context.acquire_resource(spec=WebShopSpec, scope="rollout", backend="local").
     """
 
-    def __init__(
-        self,
-        image: str = "rifoag/webshop-simulator-env:latest",
-        runtime: str = "runc",
-        cpu: int = 2,
-        mem: str = "2g",
-        start_timeout: float = 180.0,
-        host_ip: str = "127.0.0.1",
-        container_port: int = 3000,
-        observation_mode: str = "text",
-    ):
-        """
-        Initialize the WebAgentTextEnv environment.
-        Sets up Docker image, runtime, resource limits, and observation mode.
-        """
-        super().__init__()
-        self.image = image
-        self.runtime = runtime
-        self.cpu = cpu
-        self.mem = mem
-        self.start_timeout = start_timeout
-        self.host_ip = host_ip
-        self.container_port = container_port
+    def __init__(self, container: Any, resource_id: str, spec: ContainerResourceSpec):
+        super().__init__(container=container, resource_id=resource_id, spec=spec)
+        self.container_port = int(spec.container_port or 3000)
+        self.start_timeout = float(spec.start_timeout or 180.0)
+        self.host_ip = spec.host_ip or "127.0.0.1"
         self._client: httpx.AsyncClient | None = None
-
         self.session_id = "".join(random.choices(string.ascii_lowercase, k=10))
-        self.observation_mode = observation_mode
-
+        self.observation_mode = "text"
         self.home_html = None
         self.state = {"html": None, "url": None}
         self.text_to_clickable = None
+        self.server = None  # no server ref in resource mode
+
+    @property
+    def category(self) -> str:
+        return "webshop"
+
+    async def _connect(self) -> None:
+        deadline = time.time() + self.start_timeout
+        host_port = None
+        while time.time() < deadline:
+            await asyncio.to_thread(self._container.reload)
+            ports = self._container.attrs.get("NetworkSettings", {}).get("Ports") or {}
+            binding = ports.get(f"{self.container_port}/tcp")
+            if binding and binding[0].get("HostPort"):
+                host_port = binding[0]["HostPort"]
+                break
+            await asyncio.sleep(0.1)
+        if host_port is None:
+            try:
+                logs = await asyncio.to_thread(self._container.logs)
+                logs = logs.decode() if hasattr(logs, "decode") else str(logs)
+            except Exception:
+                logs = "Could not get logs"
+            raise RuntimeError(f"Port mapping not found. {logs}")
+        base_url = f"http://{self.host_ip}:{host_port}"
+        self._client = httpx.AsyncClient(base_url=base_url, timeout=20.0)
 
     async def _wait_ready(self) -> None:
-        """
-        Poll until the server answers or we time out.
-        Raises RuntimeError if the server does not become ready in time.
-        """
         deadline = time.time() + self.start_timeout
         while time.time() < deadline:
             try:
-                r = await self._client.get("/health")
-                if r.status_code == 200:
+                if self._client and (await self._client.get("/health")).status_code == 200:
                     return
             except httpx.TransportError:
                 pass
             await asyncio.sleep(0.1)
-
-        # Last-ditch diagnostics
-        logs = self.get_container_logs()
-        raise RuntimeError(
-            f"WebShop server did not become ready within {self.start_timeout}s.\n{logs}"
-        )
+        raise RuntimeError("WebShop did not become ready within timeout.")
 
     async def start(self) -> None:
-        """
-        Start the environment and allocate any resources.
-        Launches the Docker container, connects to the backend, and loads the home page.
-        """
-        await self._docker_start(
-            image=self.image,
-            runtime=self.runtime,
-            cpu_count=self.cpu,
-            mem_limit=self.mem,
-            ports={f"{self.container_port}/tcp": None},
-            read_only=True,
-            cap_drop=["ALL"],
-            pids_limit=256,
-            tmpfs={
-                "/tmp": "rw,noexec,nosuid,size=100m",
-                "/var/tmp": "rw,noexec,nosuid,size=100m",
-                "/usr/tmp": "rw,noexec,nosuid,size=100m",
-            },
-        )
-
+        await super().start()
         await self._connect()
         await self._wait_ready()
         r = await self._client.get(f"/index/{self.session_id}")
@@ -432,51 +419,14 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
         else:
             return ob
 
-    async def aclose(self) -> None:
-        """
-        Release everything allocated by the environment.
-        Stops the Docker container and closes the HTTP client.
-        """
-        # empty the states
+    async def end(self) -> None:
+        """Release client and clear state; container is released by the resource engine."""
         self.state = {"html": None, "url": None}
         self.text_to_clickable = None
-        await self._docker_stop()
         if self._client:
             await self._client.aclose()
             self._client = None
-
-    def close(self) -> None:
-        """
-        Release everything allocated by the environment (alias for aclose).
-        """
-        if self._container:
-            self._container.kill()
-            self._container = None
-
-    async def _connect(self):
-        """
-        Discover which host port Docker chose and open an httpx client
-        targeting http://127.0.0.1:<host_port>.
-        Raises RuntimeError if port mapping is not found.
-        """
-        deadline = time.time() + self.start_timeout
-        host_port = None
-
-        while time.time() < deadline:
-            ports = self._container.attrs["NetworkSettings"]["Ports"]
-            binding = ports.get(f"{self.container_port}/tcp")
-            if binding:
-                host_port = binding[0]["HostPort"]
-                break
-            await asyncio.sleep(0.1)
-            self._container.reload()
-
-        if host_port is None:
-            logs = self._container.logs().decode()
-            raise RuntimeError(f"Port mapping not found. Logs:\n{logs}")
-
-        base_url = f"http://{self.host_ip}:{host_port}"
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=20.0)
+        await super().end()
 
     def get_available_actions(self):
         """
@@ -590,7 +540,12 @@ class WebAgentTextEnv(BaseEnv, SupportsDocker):
                     else:
                         processed_t = f"  [button] {t} [button_]"
                 elif t.parent.get("class") == ["product-link"]:  # product asins
-                    if f"{t}" in self.server.user_sessions[self.session_id]["asins"]:
+                    asins = []
+                    if getattr(self, "server", None) and self.session_id in getattr(
+                        self.server, "user_sessions", {}
+                    ):
+                        asins = self.server.user_sessions[self.session_id].get("asins", [])
+                    if f"{t}" in asins:
                         processed_t = f"\n[clicked button] {t} [clicked button_]"
                     else:
                         processed_t = f"\n[button] {t} [button_]"

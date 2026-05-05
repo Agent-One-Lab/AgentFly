@@ -3,7 +3,10 @@ from agentfly.agents import ImageEditingAgent
 import os
 from datetime import datetime
 
+import pytest
 
+
+@pytest.mark.gpu
 async def test_image_editing():
     """
     测试ImageEditingAgent的图像编辑功能
@@ -14,7 +17,7 @@ async def test_image_editing():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",  # 实时显示处理过程
     )
 
@@ -123,6 +126,7 @@ async def test_image_editing():
     print("\n🎉 所有测试完成！")
 
 
+@pytest.mark.gpu
 async def test_specific_function():
     """
     测试特定功能的示例
@@ -130,7 +134,7 @@ async def test_specific_function():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
 
@@ -172,7 +176,7 @@ async def interactive_test():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
         streaming="console",
     )
 

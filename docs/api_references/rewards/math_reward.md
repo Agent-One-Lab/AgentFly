@@ -2,104 +2,33 @@
 
 Math reward functions evaluate agent performance on mathematical problem-solving tasks with various behavioral requirements.
 
-## math_reward
+## math_equal_reward
 
 ::: agentfly.rewards.math_equal_reward
     options:
       show_source: true
 
-**Function Signature:**
+Returns 1.0 if the agent's answer is mathematically equivalent to the gold answer, 0.0 otherwise.
 
-```python
-def math_reward(prediction: str, golden_answer: str, **kwargs) -> float
-```
-
-**Description:** Basic mathematical answer correctness evaluation using symbolic math comparison.
-
-**Parameters:**
-- **prediction** (str): Agent's predicted answer
-- **golden_answer** (str): Correct mathematical answer
-- **kwargs**: Additional arguments (ignored)
-
-**Returns:**
-float: 1.0 if answers are mathematically equivalent, 0.0 otherwise
-
-## math_reward_tool
+## math_equal_reward_tool
 
 ::: agentfly.rewards.math_equal_reward_tool
     options:
       show_source: true
 
-**Function Signature:**
+Like `math_equal_reward` but gated on tool usage:
 
-```python
-def math_reward_tool(prediction: str, answer: str, trajectory: List[Dict]) -> dict
-```
+- 0.0 if no tool used
+- 0.1 if tool used but answer incorrect
+- 1.0 if tool used and answer correct
 
-**Description:** Evaluates mathematical correctness with tool usage requirement.
-
-**Parameters:**
-- **prediction** (str): Agent's predicted answer
-- **answer** (str): Correct mathematical answer
-- **trajectory** (List[Dict]): Agent's conversation trajectory
-
-**Returns:**
-dict: Dictionary containing:
-- **reward** (float):
-    - 0.0 if no tool used
-    - 0.1 if tool used but answer incorrect
-    - 1.0 if tool used and answer correct
-- **acc** (float): 1.0 if answer correct, 0.0 otherwise
-
-## math_reward_thought
+## math_equal_reward_think
 
 ::: agentfly.rewards.math_equal_reward_think
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-def math_reward_think(prediction: str, answer: str, trajectory: List[Dict]) -> dict
-```
-
-**Description:** Rewards mathematical correctness with thinking process requirement.
-
-**Parameters:**
-- **prediction** (str): Agent's predicted answer
-- **answer** (str): Correct mathematical answer
-- **trajectory** (List[Dict]): Agent's conversation trajectory
-
-**Returns:**
-dict: Dictionary containing:
-- **reward** (float):
-    - 0.0 if no tool used or missing thought patterns
-    - 0.1 if partial compliance (tool XOR thought)
-    - 1.0 if both tool used and all responses start with "thought"
-- **acc** (float): 1.0 if answer correct, 0.0 otherwise
-
-## math_reward_think (Advanced)
-
-**Function Signature:**
-
-```python
-def math_reward_think(prediction: str, answer: str, trajectory: List[Dict]) -> dict
-```
-
-**Description:** Advanced reward requiring structured thinking in `<think>...</think>` tags.
-
-**Parameters:**
-- **prediction** (str): Agent's predicted answer
-- **answer** (str): Correct mathematical answer
-- **trajectory** (List[Dict]): Agent's conversation trajectory
-
-**Returns:**
-dict: Dictionary containing:
-- **reward** (float):
-    - 0.0 if no `<think>` tags or no tool usage
-    - 0.1 if requirements met but answer incorrect
-    - 1.0 if requirements met and answer correct
-- **acc** (float): 1.0 if answer correct, 0.0 otherwise
+Adds a structured-thinking requirement on top of `math_equal_reward_tool`: assistant turns must use `<think>...</think>` tags.
 
 ## Technical Details
 
@@ -123,26 +52,13 @@ dict: Dictionary containing:
 **Common Usage Patterns:**
 
 ```python
+from agentfly.rewards import math_equal_reward, math_equal_reward_tool
+
 # Basic correctness
-result = math_reward("\\boxed{42}", "\\boxed{42}")
-print(result)  # 1.0
+--8<-- "tests/docs/rewards/test_reward_examples.py:math_equal_reward_basic"
 
 # Tool usage requirement
-trajectory = [
-    {"role": "assistant", "content": "I need to calculate..."},
-    {"role": "tool", "content": "calculation result"},
-    {"role": "assistant", "content": "The answer is \\boxed{42}"}
-]
-result = math_reward_tool("\\boxed{42}", "\\boxed{42}", trajectory)
-print(result)  # {"reward": 1.0, "acc": 1.0}
-
-# Structured thinking requirement
-trajectory = [
-    {"role": "assistant", "content": "<think>Let me solve this step by step</think><answer>\\boxed{42}</answer>"},
-    {"role": "tool", "content": "verification"},
-]
-result = math_reward_think("\\boxed{42}", "\\boxed{42}", trajectory)
-print(result)  # {"reward": 1.0, "acc": 1.0}
+--8<-- "tests/docs/rewards/test_reward_examples.py:math_equal_reward_tool_with_trajectory"
 ```
 
 **Use Cases:**

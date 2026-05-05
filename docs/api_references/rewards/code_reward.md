@@ -4,29 +4,14 @@
     options:
       show_source: true
 
-## Function Signature
-
-```python
-async def code_reward_test(prediction: str, env: PythonSandboxEnv) -> dict
-```
-
 ## Description
 
-Evaluates code execution in a sandboxed Python environment, providing binary success/failure feedback.
-
-**Parameters:**
-- **prediction** (str): Python code to execute
-- **env** (PythonSandboxEnv): Python sandbox environment instance
-
-**Returns:**
-dict: Dictionary containing:
-- **reward** (float): 1.0 if execution successful, 0.0 if error occurred
-- **output** (str): Execution result or error message
+Evaluates code execution in a sandboxed Python environment, providing binary success/failure feedback. Returns a dict with `reward` (1.0 on success, 0.0 on error) and `output` (stdout/stderr or exception message).
 
 **Decorator Configuration:**
-- **name**: "code_reward_test"
-- **env_cls**: PythonSandboxEnv
-- **pool_size**: 16
+- **name**: `"code_reward_test"`
+- **resource_spec**: `PythonSandboxSpec`
+- **backend**: `"local"`
 
 ## Technical Details
 
@@ -44,23 +29,21 @@ dict: Dictionary containing:
 **Example Usage:**
 
 ```python
-from agentfly.rewards import get_reward_from_name
-from agentfly.envs import PythonSandboxEnv
+from agentfly.core import Context
+from agentfly.rewards.code_reward import code_reward_test
 
-# Get reward function
-reward_fn = get_reward_from_name("code_reward_test")
-
-# Create environment
-env = PythonSandboxEnv()
-await env.start()
-
-# Test successful code
-result = await reward_fn("print('Hello, World!')", env=env)
+# Inside a rollout, `context` is injected and passed through to rewards.
+result = await code_reward_test(
+    prediction="print('Hello, World!')",
+    context=context,
+)
 print(result)
 # {"reward": 1.0, "output": "Hello, World!"}
 
-# Test erroneous code
-result = await reward_fn("print(undefined_variable)", env=env)
+result = await code_reward_test(
+    prediction="print(undefined_variable)",
+    context=context,
+)
 print(result)
 # {"reward": 0.0, "output": "NameError: name 'undefined_variable' is not defined"}
 ```

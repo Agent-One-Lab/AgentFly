@@ -1,25 +1,27 @@
-from ..envs.webshop_text_env import WebAgentTextEnv
+from ..core import Context
+from ..envs.webshop_text_env import WebShopSpec
 from .reward_base import reward
 
 
-@reward(name="webshop_reward", env_cls=WebAgentTextEnv, pool_size=8)
+# --8<-- [start:webshop_reward_example]
+@reward(name="webshop_reward")
 async def webshop_reward(
-    final_response: str, env: WebAgentTextEnv, task_id: int
+    final_response: str, context: Context, task_id: int
 ) -> dict:
     """
-    Calculates the reward for the WebShop environment based on the environment state. Match the purchased product with the golden answer characteristics.
-    Actual logic for reward calculation is in the environment and partially in step method of the environment.
-    Adapted from https://arxiv.org/pdf/2207.01206
+    Calculates the reward for the WebShop environment based on the environment state.
+    Uses the same rollout resource as the webshop tools (context.acquire_resource).
 
     Args:
         final_response (str): The agent's final response. Not used in this reward function.
-        env (WebAgentTextEnv): The environment instance for the WebShop task.
+        context (Context): Injected rollout context; used to acquire the WebShop resource.
         task_id (int): The identifier for the current task. Used to match with golden answer.
 
     Returns:
-        dict: A dictionary containing the reward (float) and output (str) from the environment step. If an error occurs, returns a reward of 0.0 and an error message as output.
+        dict: A dictionary containing the reward (float) and output (str) from the environment step.
     """
     try:
+        env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
         result = await env.step("get_reward", task_id)
         return {
             "reward": result["reward"],
@@ -30,3 +32,4 @@ async def webshop_reward(
             "reward": 0.0,
             "output": f"Error webshop reward function: {e}",
         }
+# --8<-- [end:webshop_reward_example]

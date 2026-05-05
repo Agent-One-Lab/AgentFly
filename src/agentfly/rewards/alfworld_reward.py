@@ -1,27 +1,20 @@
 from typing import Any, Dict
 
-from ..envs.alfworld_env import ALFWorldEnv
+from ..core import Context
+from ..envs.alfworld_env import ALFWorldSpec
 from .reward_base import reward
 
 
-@reward(
-    name="alfworld_episode_reward",
-    env_cls=ALFWorldEnv,
-    pool_size=8,  # Reasonable pool size for ALFWorld environments
-)
-async def alfworld_episode_reward(prediction: str, env: ALFWorldEnv) -> Dict[str, Any]:
+@reward(name="alfworld_episode_reward")
+async def alfworld_episode_reward(context: Context) -> Dict[str, Any]:
     """
     Simple ALFWorld episode reward that checks if the episode is done.
+    Uses the same rollout resource as the alfworld tools (context.acquire_resource).
     """
-
-    # Step with empty action to get current state
-    print("------Reward--------------")
-    obs, reward_val, done, info = await env.step("")
+    env = await context.acquire_resource(spec=ALFWorldSpec, scope="global", backend="local")
+    _obs, reward_val, _done, _info = await env.step("")
     if reward_val is None:
-        print("Reward is None")
         reward_val = 0.0
-    print(reward_val)
-    print("--------------\n")
 
     return {
         "reward": reward_val,

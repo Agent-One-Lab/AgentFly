@@ -5,75 +5,50 @@ We put reward calculation into the agent side instead of trainer side and use a 
 2. Reward calculation can be designed to be asynchronous for efficiency.
 
 ### Definition
-Similar to tools, we can decide whether to use environments in the reward definition. The return should either be a value, or a dictionary containing `reward` as one of keys. We can use decorator `@tool` or inherit from the `BaseReward` class. Any additional keys in the returned dict (e.g. `em`, `f1`, `fmt`) are passed through and documented in training and validation.
+Similar to tools, reward functions can be **purely functional** (no external resources) or **stateful** (using environments/resources via `Context`). The return should either be a float value, or a dictionary containing `reward` as one of keys. We can use the `@reward` decorator or inherit from the `BaseReward` class. Any additional keys in the returned dict (e.g. `em`, `f1`, `fmt`) are passed through and documented in training and validation.
 
 
+
+A purely functional reward decorated with `@reward`:
 
 ```python
-@reward(name="qa_f1_reward")
-def qa_f1_reward(final_response: str, golden_answer: str, trajectory: List[str]) -> float:
-    """A reward function that uses f1 score as reward value"""
-    f1, precision, recall = f1_score(final_response, golden_answer)
-    em = em_score(final_response, golden_answer)
+--8<-- "src/agentfly/rewards/qa_reward.py:qa_f1_reward_example"
+```
 
-    return {
-        "reward": f1,
-        "f1": f1,
-        "em": em,
-        "precision": precision,
-        "recall": recall,
-    }
+A class-based reward that holds external credentials or state, by inheriting from `BaseReward`:
 
+```python
 class APIReward(BaseReward):
-    name="api_reward"
+    name = "api_reward"
+
     def __init__(self, api_key):
         self.api_key = api_key
 
-    def call(query: str):
-
+    def call(self, query: str):
         # call request with api key
         result = requests.request(api_key=self.api_key, query=query)
+        return result["reward"]
+```
 
-        return result['reward']
+A stateful async reward that shares an environment with the corresponding tools through `Context`:
 
-@reward(name="webshop_reward", env_cls=WebAgentTextEnv, pool_size=8)
-async def webshop_reward(final_response: str, env: WebAgentTextEnv, task_id: int) -> dict:
-    """
-    Calculates the reward for the WebShop environment based on the environment state. Match the purchased product with the golden answer characteristics.
-    Actual logic for reward calculation is in the environment and partially in step method of the environment.
-    Adapted from https://arxiv.org/pdf/2207.01206
+```python
+from agentfly.core import Context
+from agentfly.envs.webshop_text_env import WebShopSpec
 
-    Args:
-        final_response (str): The agent's predicted action or response. Not used in this reward function.
-        env (WebAgentTextEnv): The environment instance for the WebShop task.
-        task_id (int): The identifier for the current task. Used to match with golden answer.
-
-    Returns:
-        dict: A dictionary containing the reward (float) and output (str) from the environment step. If an error occurs, returns a reward of 0.0 and an error message as output.
-    """
-    try:
-        result = await env.step('get_reward', task_id)
-        return {
-            "reward": result["reward"],
-            "output": result["observation"],
-        }
-    except Exception as e:
-        return {
-            "reward": 0.0,
-            "output": f"Error webshop reward function: {e}",
-        }
+--8<-- "src/agentfly/rewards/webshop_reward.py:webshop_reward_example"
 ```
 
 
 ## Predefined Fields
 
-When agent uses the reward function, it will detects automatically for three keys: `final_response`, `trajectory`, and `id` and assign these values to rewards.
+When an agent uses a reward function, it will automatically detect and fill several special fields when they appear in the reward signature: `final_response`, `trajectory`, and (via `Context`) the rollout-level identifiers.
 
-- `final_response`: The final response the agent generate for the task.
+- `final_response`: The final response the agent generates for the task.
 - `trajectory`: The whole interaction trajectory.
-- `id`: The trajectory id. This will be the within the trajectory. And tools and rewards will share the same id for the same task. So tools and rewards are assigned same environments.
+- `context`: The rollout execution context, which knows the rollout id, group id and provides `acquire_resource` for sharing environments with tools.
 
-When defining the function, you can set these (except `id`) to your arguments and directly use them in you reward calculation. For `id`, you can give `env` as argument and directly use it. The chain rollout will ensure the reward give the same environment as in tools for the same task.
+When defining the function, you can set these to your arguments and directly use them in reward calculation. For stateful rewards that need to share an environment with tools, prefer taking a `context: Context` argument and using `context.acquire_resource(...)` with the same `ResourceSpec` as the corresponding tools.
 
 ## Additional Fields
 
@@ -110,6 +85,6 @@ def summary_reward(final_response, length_penalty, max_length):
 
 ## Return Values
 
-Each a `float` value or a dictionary containing `reward` as key should be returned. If the return value is `float`, it is directly used as rewards. If a dictionary is returned, the `reward` is used as rewards. While other keys are still documented.
+A reward function returns either a `float` or a `dict` containing a `reward` key. When a `float` is returned, it is used directly. When a `dict` is returned, the value at `reward` is used as the scalar reward and every other key is logged as an extra metric (`reward_extra/{key}/mean`, `.../max`, `.../min`) in the metrics produced by `compute_data_metrics`.
 
-Extra keys (besides `reward`) are logged as `reward_extra/{key}/mean`, `reward_extra/{key}/max`, `reward_extra/{key}/min` in the metrics produced by `compute_data_metrics` (`verl/verl/trainer/ppo/metric_utils.py`).
+Internally, the framework normalizes both shapes into a typed `RewardResult` at the boundary (`agentfly.rewards.calculate_reward`), exposing `.reward: float` and `.extras: Dict[str, Any]`. You don't need to construct `RewardResult` yourself — the conversion is automatic. The typed form lands on the trajectory as `Trajectory.reward` (the float) and `Trajectory.metrics` (the extras dict).

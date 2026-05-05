@@ -38,8 +38,7 @@ dependencies = [
     "redis",
     "docker",
     "openai",
-    "faiss-cpu",
-    "vllm==0.10.0",
+    "vllm==0.19.0",
     "termcolor",
     "tenacity",
     "bs4",
@@ -72,7 +71,6 @@ verl = [
     "ray[default]",
     "tensordict",
     "torchdata",
-    "transformers<5.0.0",
     "packaging>=20.0",
     "uvicorn",
     "fastapi"
@@ -93,3 +91,6 @@ docs = [
     "mkdocs-git-revision-date-localized-plugin",
     "mkdocs-git-authors-plugin",
 ]
+
+[tool.uv.extra-build-dependencies]
+flash-attn = ["torch"]

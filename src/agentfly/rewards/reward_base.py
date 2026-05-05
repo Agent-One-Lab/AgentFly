@@ -1,12 +1,30 @@
-import asyncio
 import inspect
 from typing import Callable, List, Optional
 
-from ..envs.env_base import BaseEnv
-from ..envs.manager.env_manager import EnvironmentManager
+from .types import RewardResult
 
 # Global reward registry
 REWARD_REGISTRY = {}
+
+
+async def calculate_reward(reward_fn: Callable | None, **kwargs) -> Optional[RewardResult]:
+    """Execute a reward function and normalize its return into a ``RewardResult``.
+
+    The reward function may return a ``float``, a ``dict`` with a ``reward``
+    key (plus arbitrary extras), a ``RewardResult``, or ``None``.
+    All forms are funneled through :meth:`RewardResult.from_raw`.
+
+    Returns ``None`` only when ``reward_fn`` itself is ``None`` (i.e. the agent
+    has no reward configured). When a reward function is set, this always
+    returns a :class:`RewardResult`.
+    """
+    if reward_fn is None:
+        return None
+
+    raw = reward_fn(**kwargs)
+    if inspect.isawaitable(raw):
+        raw = await raw
+    return RewardResult.from_raw(raw)
 
 
 class BaseReward:
@@ -56,30 +74,20 @@ class BaseReward:
     result = await my_reward(prediction="hello", answer="hello")
     ```
 
-    Note: Metadata (name, env_cls, pool_size, etc.) is stored as class attributes,
-    making it shared across all instances of the same reward class.
+    Note: Metadata (name, etc.) is stored as class attributes.
+    Stateful rewards get resources via Context (injected by caller): use
+    context.acquire_resource(spec=..., scope="rollout", backend="local").
     """
 
     # ========== Class Attributes ==========
     name: str | None = None
-    env_cls: type[BaseEnv] | None = None
-    pool_size: int = -1  # -1 means no pool
-    env_kwargs: dict = {}
     auto_register: bool = True
-
-    # Class-level environment state (shared across all instances of the same reward class)
-    _envs: dict[str, BaseEnv] = {}
-    _locks: dict[str, asyncio.Lock] = {}
-    _initialized: bool = False
 
     # ========== Instance Attributes ==========
     def __init__(
         self,
         name: str | None = None,
         func: Callable | None = None,
-        env_cls: type[BaseEnv] | None = None,
-        pool_size: int = -1,
-        env_kwargs: dict | None = None,
         auto_register: bool = True,
     ):
         """
@@ -88,27 +96,17 @@ class BaseReward:
         Args:
             name: Optional name override (for decorator-based rewards)
             func: Optional function (for decorator-based rewards)
-            env_cls: Optional environment class override
-            pool_size: Optional pool size override
-            env_kwargs: Optional environment kwargs override
             auto_register: Whether to automatically register this reward instance (defaults to True)
 
         Note:
-            - Class attributes (name, env_cls, etc.) must be set at class definition time.
-            - For inheritance-based rewards, the 'call' method must be defined to provide the reward logic.
-            - The 'func' parameter is only used for decorator-based rewards.
+            - For stateful rewards, accept context: Context and call
+              context.acquire_resource(spec=..., scope="rollout", backend="local").
+            - Caller must pass context (and any env) in kwargs when invoking the reward.
         """
         cls = type(self)
 
-        # Set class attributes if provided (for decorator-based rewards)
         if name is not None:
             cls.name = name
-        if env_cls is not None:
-            cls.env_cls = env_cls
-        if pool_size != -1:
-            cls.pool_size = pool_size
-        if env_kwargs is not None:
-            cls.env_kwargs = env_kwargs
         if "auto_register" not in cls.__dict__:
             cls.auto_register = auto_register
 
@@ -129,14 +127,13 @@ class BaseReward:
             self.user_func = None
             self._func_sig = None
 
-        # Determine if this reward is async (stateful rewards are always async)
-        # Use __dict__ to avoid triggering __getattr__ in metaclass
+        # Determine if this reward is async
         if "_is_async_call" not in cls.__dict__:
             user_func_is_async = (
                 self.user_func is not None
                 and inspect.iscoroutinefunction(self.user_func)
             )
-            cls._is_async_call = cls.env_cls is not None or user_func_is_async
+            cls._is_async_call = user_func_is_async
 
         # Instance-level attributes
         self.keys = None
@@ -194,35 +191,15 @@ class BaseReward:
         else:
             return self.user_func(**filtered_kwargs)
 
-    async def _execute_stateful_reward(self, id: str, **kwargs):
-        """Execute a stateful reward with environment management."""
-        cls = type(self)
-        await cls._initialize_envs()
-        env = await cls._acquire_env(id)
-
-        async with cls._locks[id]:
-            assert kwargs.get("env", None) is None, (
-                "env is not allowed to be passed to rewards with environments."
-            )
-            filtered_kwargs = self._filter_kwargs(kwargs)
-            if inspect.iscoroutinefunction(self.user_func):
-                return await self.user_func(env=env, **filtered_kwargs)
-            else:
-                return self.user_func(env=env, **filtered_kwargs)
-
     def __call__(self, **kwargs):
         """
         Allow rewards to be called directly as functions.
 
         Args:
-            **kwargs: The arguments to call the reward with. All arguments must be specified as keyword arguments.
-                     For stateful rewards, the id is also required for isolation.
+            **kwargs: All arguments as keyword arguments (e.g. context, prediction, env).
 
         Returns:
-            reward_value_or_dict or coroutine: Returns a coroutine if the reward is async (stateful or has async user function),
-            otherwise returns the result directly. The result is a float number or a dictionary with the following keys:
-                - "reward": A float number
-                - "any other keys": All must be a float number
+            reward_value_or_dict or coroutine: Coroutine if async, else direct result.
         """
         cls = type(self)
         # If async is needed, return a coroutine
@@ -250,22 +227,12 @@ class BaseReward:
         """Internal async implementation of __call__."""
         self._check_function_set()
 
-        # Execute the function
         try:
-            if self.env_cls is None:
-                # For non-stateful rewards, directly execute the function
-                reward_value_or_dict = await self._execute_user_function_async(**kwargs)
-            else:
-                # For stateful rewards, handle environment management
-                id = kwargs.pop("id", None)
-                if id is None:
-                    raise ValueError("id is required for rewards with environments.")
-                reward_value_or_dict = await self._execute_stateful_reward(id, **kwargs)
+            reward_value_or_dict = await self._execute_user_function_async(**kwargs)
         except Exception as e:
             raise e  # For debugging
             reward_value_or_dict = str(e)
 
-        # Format and return result
         return self._format_reward_result(reward_value_or_dict)
 
     def _format_reward_result(self, reward_value_or_dict):
@@ -282,60 +249,8 @@ class BaseReward:
                 f'Invalid reward: {reward_value_or_dict}, must be a float number or a dictionary with the following "reward" as a key.'
             )
 
-    # ========== Environment Management ==========
-    @classmethod
-    async def _initialize_envs(cls):
-        """Lazy initialization of the environment pool."""
-        if cls.env_cls is not None and not cls._initialized:
-            await EnvironmentManager.start(
-                cls.env_cls, size=cls.pool_size, env_kwargs=cls.env_kwargs
-            )
-            cls._initialized = True
-
-    @classmethod
-    async def _acquire_env(cls, id: str):
-        """Acquire an environment from existing environments or the pool."""
-        env = cls._envs.get(id)
-        if env is None:
-            if cls.env_cls is None:
-                return None
-            env = await EnvironmentManager.acquire(cls.env_cls, id=id)
-            cls._envs[id] = env
-            cls._locks[id] = asyncio.Lock()
-        return env
-
-    @classmethod
-    async def release(cls, id: str, success: bool = True):
-        """Release a specific environment."""
-        if cls.env_cls is None or id not in cls._envs:
-            return
-
-        env = cls._envs.pop(id)
-        cls._locks.pop(id)
-        await EnvironmentManager.release(env, id=id, finished=success)
-
-    @classmethod
-    async def release_all(cls):
-        """Release all environments."""
-        if cls.env_cls is None:
-            return
-
-        env_ids = list(cls._envs.keys())
-        await asyncio.gather(
-            *[cls._release_single(env_id, success=True) for env_id in env_ids]
-        )
-
-    @classmethod
-    async def _release_single(cls, id: str, success: bool = True):
-        """Release a single environment (internal method)."""
-        if id not in cls._envs:
-            return
-        env = cls._envs.pop(id)
-        cls._locks.pop(id)
-        await EnvironmentManager.release(env, id=id, finished=success)
-
     def __repr__(self):
-        return f"BaseReward(name={self.name!r}, env_cls={self.env_cls})"
+        return f"BaseReward(name={self.name!r})"
 
 
 class _CallableRewardClass(type):
@@ -382,21 +297,17 @@ class _CallableRewardClass(type):
 
 def reward(
     name: Optional[str] = None,
-    env_cls: type[BaseEnv] | None = None,
-    env_kwargs: dict | None = None,
-    pool_size: int = -1,
     auto_register: bool = True,
 ):
     """
     Decorator that creates a BaseReward and registers it.
 
-    Similar to the @tool decorator in tool system.
+    Stateful rewards should accept context: Context and call
+    context.acquire_resource(spec=..., scope="rollout", backend="local").
+    The caller must pass context (and any other args) when invoking the reward.
 
     Args:
         name: The name of the reward (defaults to function name)
-        env_cls: The environment class for the reward
-        env_kwargs: The kwargs for the environment class
-        pool_size: The size of the pool for the environment
         auto_register: Whether to automatically register in REWARD_REGISTRY
 
     Returns:
@@ -404,30 +315,19 @@ def reward(
     """
 
     def decorator(func):
-        # No parameter validation - rewards can have any parameters
-        # All arguments must be passed as keyword arguments when calling
         func_name = func.__name__
         if func_name and name:
             final_name = name
         else:
             final_name = func_name
 
-        # Create a BaseReward subclass with class-level metadata attributes
-        # This ensures all instances share the same metadata
-        # Use _CallableRewardClass metaclass to make the class itself callable
-        # The class inherits from BaseReward, so isinstance/issubclass checks work correctly
-        # This makes decorator-based rewards compatible with inheritance-based rewards
         reward_class_name = f"_Reward_{final_name}"
         reward_class = _CallableRewardClass(
             reward_class_name,
-            (BaseReward,),  # Inherit from BaseReward class
+            (BaseReward,),
             {
                 "name": final_name,
-                "env_cls": env_cls,
-                "pool_size": pool_size,
-                "env_kwargs": env_kwargs or {},
                 "auto_register": auto_register,
-                # Store the function as a class attribute for reference
                 "_func": func,
             },
         )

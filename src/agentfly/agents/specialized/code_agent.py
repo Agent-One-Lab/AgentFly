@@ -1,7 +1,8 @@
 import json
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
+from ...core.context import Context
 from ..agent_base import BaseAgent
 
 
@@ -35,17 +36,23 @@ The code is in markdown format, enclosed with ```python and ```. In each turn, o
 
 class CodeAgent(BaseAgent):
     def __init__(
-        self, model_name_or_path: str, template: str, tools: List = None, **kwargs
+        self, model_name_or_path: str, tools: List = None, system_prompt: str = CodeAgentSystemPrompt, **kwargs
     ):
+        if system_prompt is None or system_prompt == "":
+            system_prompt = CodeAgentSystemPrompt
         super().__init__(
             model_name_or_path=model_name_or_path,
-            template=template,
-            system_prompt=CodeAgentSystemPrompt,
+            system_prompt=system_prompt,
             tools=tools,
             **kwargs,
         )
 
-    def parse(self, responses: List[str]) -> Tuple[dict, int, int]:
+    def parse(
+        self,
+        responses: List[str],
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> Tuple[dict, int, int]:
         """
         Generates an assistant message compatible with tool-calling.
         Returns:

@@ -1,5 +1,5 @@
 import torch
-from agentfly.agents.react.react_agent import ReactAgent
+from agentfly.agents import ReactAgent
 from agentfly.tools import answer_qa
 import pytest
 
@@ -16,7 +16,7 @@ async def test_vision_agent():
         tools=tools,
         template="qwen2.5-vl",
         task_info=task_info,
-        backend="async_vllm",
+        backend_config={"backend": "async_vllm"},
     )
 
     messages = [

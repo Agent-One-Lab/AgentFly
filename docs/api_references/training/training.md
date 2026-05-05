@@ -21,15 +21,18 @@ All configuration is done through Hydra command-line overrides, allowing flexibl
 Configure the agent behavior and capabilities:
 
 - **`agent.use_agent`**: Enable agent mode (default: `True`)
-- **`agent.init_args.model_name_or_path`**: HuggingFace model identifier or path (e.g., `Qwen/Qwen2.5-3B-Instruct`)
-- **`agent.init_args.template`**: Chat template name (e.g., `qwen2.5`, `qwen2.5-vl`)
-- **`agent.init_args.agent_type`**: Agent type - `hf`, `react`, `code`, `gui`, etc.
-- **`agent.init_args.tools`**: List of tools available to the agent (e.g., `[calculator]`, `[google_search,answer]`)
-- **`agent.init_args.reward_name`**: Name of the reward function to use (e.g., `math_reward_string_equal`, `qa_f1_reward`)
-- **`agent.init_args.backend`**: Backend for agent execution - `async_verl` (recommended) or others
-- **`agent.max_turns`**: Maximum number of interaction turns per episode
-- **`agent.num_chains`**: Number of parallel interaction chains per sample
-- **`agent.max_tokens_per_turn`**: Max tokens to generate per turn.
+- **`agent.init_config.model_name_or_path`**: HuggingFace model identifier or path (e.g., `Qwen/Qwen2.5-3B-Instruct`)
+- **`agent.init_config.template`**: Chat template name (e.g., `qwen2.5`, `qwen2.5-vl`)
+- **`agent.init_config.agent_type`**: Agent type - `hf`, `react`, `code`, `gui`, etc.
+- **`agent.init_config.tools`**: List of tools available to the agent (e.g., `[calculator]`, `[google_search,answer]`)
+- **`agent.init_config.reward_name`**: Name of the reward function to use (e.g., `math_equal_reward_tool`, `qa_f1_reward`)
+- **`agent.init_config.backend_config.backend`**: Backend for agent execution - `async_verl` (recommended) or others
+- **`agent.run_config.max_turns`**: Maximum number of interaction turns per episode
+- **`agent.run_config.num_chains`**: Number of parallel interaction chains per sample
+- **`agent.run_config.max_concurrent_chains`**: Maximum concurrent running chains (`null` means no extra cap)
+- **`agent.run_config.generation_config.max_tokens`**: Max tokens to generate per turn
+- **`agent.run_config.generation_config.temperature`**: Sampling temperature used during rollout generation
+- **`agent.run_config.context_config.resource_backend`**: Resource backend for tool/reward resources (e.g., `local`, `ray`)
 
 ### Algorithm Configuration
 
@@ -123,14 +126,17 @@ python -m agentfly.cli train \
     data.train_files="./data/rlhf/math/gsm8k_train.json" \
     data.val_files="./data/rlhf/math/gsm8k_test.json" \
     data.train_batch_size=64 \
-    agent.agent_type=hf \
-    agent.tools="[calculator]" \
-    agent.template=qwen2.5 \
-    agent.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
-    agent.max_turns=3 \
-    agent.reward_name="math_reward_string_equal" \
-    agent.num_chains=8 \
     agent.use_agent=True \
+    agent.init_config.agent_type=hf \
+    agent.init_config.tools="[calculator]" \
+    agent.init_config.template=qwen2.5 \
+    agent.init_config.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
+    agent.init_config.reward_name="math_equal_reward_tool" \
+    agent.init_config.backend_config.backend=async_verl \
+    agent.run_config.max_turns=3 \
+    agent.run_config.num_chains=8 \
+    agent.run_config.generation_config.max_tokens=256 \
+    agent.run_config.context_config.resource_backend=local \
     actor_rollout_ref.actor.optim.lr=5e-7 \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-3B-Instruct \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
@@ -166,13 +172,16 @@ python -m agentfly.cli train \
     data.val_files="./data/rlhf/qa/dev_random_500.json" \
     data.train_batch_size=128 \
     data.val_batch_size=512 \
-    agent.agent_type=react \
-    agent.tools="[google_search,answer]" \
-    agent.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
-    agent.max_turns=4 \
-    agent.reward_name="qa_f1_reward" \
-    agent.num_chains=1 \
     agent.use_agent=True \
+    agent.init_config.agent_type=react \
+    agent.init_config.tools="[google_search,answer]" \
+    agent.init_config.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
+    agent.init_config.reward_name="qa_f1_reward" \
+    agent.init_config.backend_config.backend=async_verl \
+    agent.run_config.max_turns=4 \
+    agent.run_config.num_chains=1 \
+    agent.run_config.generation_config.max_tokens=512 \
+    agent.run_config.context_config.resource_backend=local \
     actor_rollout_ref.actor.optim.lr=5e-7 \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-3B-Instruct \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \
@@ -209,13 +218,16 @@ python -m agentfly.cli train \
     data.train_files="./data/rlhf/code/train.json" \
     data.val_files="./data/rlhf/code/val.json" \
     data.train_batch_size=64 \
-    agent.agent_type=code \
-    agent.tools="[python_executor]" \
-    agent.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
-    agent.max_turns=5 \
-    agent.reward_name="code_reward" \
-    agent.num_chains=4 \
     agent.use_agent=True \
+    agent.init_config.agent_type=code \
+    agent.init_config.tools="[python_executor]" \
+    agent.init_config.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
+    agent.init_config.reward_name="code_reward" \
+    agent.init_config.backend_config.backend=async_verl \
+    agent.run_config.max_turns=5 \
+    agent.run_config.num_chains=4 \
+    agent.run_config.generation_config.max_tokens=512 \
+    agent.run_config.context_config.resource_backend=local \
     actor_rollout_ref.actor.optim.lr=4e-7 \
     actor_rollout_ref.model.path=Qwen/Qwen2.5-3B-Instruct \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \

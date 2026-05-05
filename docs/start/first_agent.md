@@ -3,31 +3,18 @@
 A simplest agent can be build by initializing the agent instance with tools. The following shows a small example to build an agent using Qwen2.5.
 
 ```python
-from agentfly.agents import HFAgent
-from agentfly.tools import calculator
-agent = HFAgent(
-    model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
-    tools=[calculator],
-    template="qwen2.5",
-    backend="async_vllm",
-)
+--8<-- "tests/docs/start/quick_example.py:agent_init"
 ```
 
 Then, we can use the agent to do the task (or, say *rollout* in reinforcement learning scenario). The main interface is `run` method, which is fully asynchronous. You may use `asyncio.run` or `await` for the method.
 
 ```python
-messages = [{"role": "user", "content": "What is the result of 1 + 1?"}]
-await agent.run(
-    messages=messages,
-    max_turns=3,
-    num_chains=1
-)
+--8<-- "tests/docs/start/quick_example.py:agent_run"
 ```
 Here, `max_turns` specifies the maximal number of rounds that the agent can iteract with the environment. `num_chains` specifies how many chains/trajectories the agent will run for a single query. After the running, we can obtain the results by getting its trajectories.
 
 ```python
-trajectories = agent.trajectories
-print(trajectories)
+--8<-- "tests/docs/start/quick_example.py:agent_trajectories"
 ```
 
 It is in ShareGPT/OpenAI's input messages, and will look like something to this:

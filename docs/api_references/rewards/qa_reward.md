@@ -8,53 +8,15 @@ QA reward functions evaluate agent performance on question answering tasks using
     options:
       show_source: true
 
-**Function Signature:**
+**Returns** a dictionary with `reward` (F1 score), `f1`, `em`, `precision`, and `recall`.
 
-```python
-def qa_f1_reward(prediction: str, golden_answer: str, trajectory: List[str]) -> dict
-```
-
-**Description:** Evaluates QA performance using F1 score and exact match metrics.
-
-**Parameters:**
-- **prediction** (str): Agent's predicted answer
-- **golden_answer** (str): Correct answer
-- **trajectory** (List[str]): Agent's conversation trajectory (unused in basic version)
-
-**Returns:**
-dict: Dictionary containing:
-- **reward** (float): F1 score (0.0 to 1.0)
-- **f1** (float): F1 score between prediction and golden answer
-- **em** (float): Exact match score (0.0 or 1.0)
-- **precision** (float): Precision score
-- **recall** (float): Recall score
-
-## qa_f1_reward_format
+## qa_f1_reward_tool
 
 ::: agentfly.rewards.qa_reward.qa_f1_reward_tool
     options:
       show_source: true
 
-**Function Signature:**
-
-```python
-def qa_f1_reward_format(prediction: str, answer: str, trajectory: List[Dict]) -> dict
-```
-
-**Description:** F1-based QA evaluation with tool usage requirement.
-
-**Parameters:**
-- **prediction** (str): Agent's predicted answer
-- **answer** (str): Correct answer
-- **trajectory** (List[Dict]): Agent's conversation trajectory
-
-**Returns:**
-dict: Dictionary containing:
-- **reward** (float): F1 score if tool used (≥2 tool calls), 0.0 otherwise
-- **f1** (float): F1 score between prediction and answer
-- **em** (float): Exact match score
-- **precision** (float): Precision score
-- **recall** (float): Recall score
+Same metrics as `qa_f1_reward` but the reward is gated on the agent having made at least one tool call (otherwise `reward` is 0.0).
 
 ## Technical Details
 
@@ -76,26 +38,18 @@ dict: Dictionary containing:
 
 **Tool Usage Detection:**
 - Counts messages with "tool" role in trajectory
-- Requires minimum 2 tool calls (including final answer)
-- Returns 0.0 reward if insufficient tool usage
+- `qa_f1_reward_tool` requires at least one tool call
 
 **Example Usage:**
 
 ```python
+from agentfly.rewards import qa_f1_reward, qa_f1_reward_tool
+
 # Basic F1 evaluation
-result = qa_f1_reward("Paris is the capital", "Paris", [])
-print(result)
-# {"reward": 0.67, "f1": 0.67, "em": 0.0, "precision": 0.5, "recall": 1.0}
+--8<-- "tests/docs/rewards/test_reward_examples.py:qa_f1_reward_basic"
 
 # With tool usage requirement
-trajectory = [
-    {"role": "assistant", "content": "I need to search for information"},
-    {"role": "tool", "content": "search results"},
-    {"role": "assistant", "content": "Based on my search, the answer is Paris"}
-]
-result = qa_f1_reward_format("Paris", "Paris", trajectory)
-print(result)
-# {"reward": 1.0, "f1": 1.0, "em": 1.0, "precision": 1.0, "recall": 1.0}
+--8<-- "tests/docs/rewards/test_reward_examples.py:qa_f1_reward_tool_with_trajectory"
 ```
 
 **Special Cases:**
@@ -108,9 +62,3 @@ print(result)
 - Information retrieval task assessment
 - Knowledge-based question answering
 - Tool-augmented QA system evaluation
-
-**Metric Interpretation:**
-- **F1 Score**: Harmonic mean of precision and recall, good overall metric
-- **Exact Match**: Strict evaluation requiring perfect answers
-- **Precision**: Relevance of prediction tokens
-- **Recall**: Coverage of ground truth tokens

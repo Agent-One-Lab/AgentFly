@@ -18,13 +18,13 @@ def _find_stockfish() -> str:
     """Find the Stockfish binary on the system."""
     # Check common paths
     common_paths = [
-        "/usr/games/stockfish",           # Ubuntu/Debian
-        "/usr/bin/stockfish",             # Linux
-        "/opt/homebrew/bin/stockfish",    # macOS (Homebrew ARM)
-        "/usr/local/bin/stockfish",       # macOS (Homebrew Intel)
+        "/usr/games/stockfish",  # Ubuntu/Debian
+        "/usr/bin/stockfish",  # Linux
+        "/opt/homebrew/bin/stockfish",  # macOS (Homebrew ARM)
+        "/usr/local/bin/stockfish",  # macOS (Homebrew Intel)
     ]
     for path in common_paths:
-        if shutil.which(path) or __import__('os').path.isfile(path):
+        if shutil.which(path) or __import__("os").path.isfile(path):
             return path
     # Try to find in PATH
     path = shutil.which("stockfish")

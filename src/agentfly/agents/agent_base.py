@@ -1,24 +1,34 @@
-import copy
 import inspect
 import json
 import logging
 import os
 from abc import ABC
+from math import lcm
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import torch
+from chat_bricks import (
+    get_template,
+    split_messages_with_assistant,
+    tokenize_conversations,
+)
 from termcolor import colored
 
-from chat_bricks import tokenize_conversations, get_template
+from ..templates import *  # noqa: F403
+from ..rewards.types import RewardResult
 from ..tools.tool_base import BaseTool
+from ..core.context import Context
+from ..core.context_config import ContextConfig
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
+from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
 from .chain.chain_base import ChainRollout
 from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
-from .llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
-from .llm_backends.backend_configs import BACKEND_CONFIGS
+from .types import RunResult, Trajectory
+from ..utils.llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
+from ..utils.llm_backends.backend_configs import BACKEND_CONFIGS
 from .utils.messages import MessagesList
 from .utils.tokenizer import create_processor, create_tokenizer
 
@@ -28,13 +38,31 @@ except ImportError:
     print("verl can not be imported.")
     pass
 
-# Try to import vLLM tool parser components
+from transformers import AutoTokenizer
+
+ChatCompletionRequest = None
+ToolParserManager = None
+VLLM_TOOL_PARSER_AVAILABLE = False
+
 try:
-    from transformers import AutoTokenizer
-    from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-    from vllm.entrypoints.openai.tool_parsers import ToolParserManager
+    # vLLM >= 0.19: ChatCompletionRequest lives under chat_completion.protocol;
+    # ToolParserManager is exposed from vllm.tool_parsers.
+    from vllm.entrypoints.openai.chat_completion.protocol import (
+        ChatCompletionRequest,
+    )
+    from vllm.tool_parsers import ToolParserManager
 
     VLLM_TOOL_PARSER_AVAILABLE = True
+except ImportError:
+    try:
+        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+        from vllm.entrypoints.openai.tool_parsers import ToolParserManager
+
+        VLLM_TOOL_PARSER_AVAILABLE = True
+    except ImportError:
+        pass
+
+if VLLM_TOOL_PARSER_AVAILABLE:
 
     def silence_tool_parsers():
         # vLLM has used both namespaces across versions
@@ -49,13 +77,101 @@ try:
 
     silence_tool_parsers()
 
-except ImportError:
-    VLLM_TOOL_PARSER_AVAILABLE = False
-    AutoTokenizer = None
-    ChatCompletionRequest = None
-    ToolParserManager = None
+logger = logging.getLogger(__name__)
 
-Logger = logging.getLogger(__name__)
+
+REWARD_DECOMPOSITION_MODES = ("last_only", "broadcast", "uniform", "geometric")
+
+
+def decompose_trajectory_reward(
+    reward: float,
+    num_segments: int,
+    mode: str = "last_only",
+    gamma: float = 0.9,
+) -> List[float]:
+    """Distribute a trajectory's outcome reward across its segments.
+
+    Modes:
+        - "last_only": [0, 0, ..., 0, R]
+              Sparse outcome — only the final segment receives the reward.
+        - "broadcast": [R, R, ..., R]
+              Each segment sees the full R. Total trajectory reward = n * R
+              (NOT conservative — inflates magnitude with segment count).
+        - "uniform":   [R/n, R/n, ..., R/n]
+              Sum-to-R, equal weight per segment. Conservative.
+        - "geometric": [R · γ^{n-1-k} · (1 − γ) / (1 − γ^n)] for k = 0..n-1
+              Sum-to-R, more weight on segments closer to the outcome.
+              γ → 1 collapses to "uniform". Conservative.
+
+    Conservative modes preserve total trajectory reward equal to R, so PPO
+    clipping ranges, KL budgets, and learning rates tuned against sparse
+    rewards continue to apply without retuning.
+
+    Args:
+        reward: trajectory outcome reward R.
+        num_segments: number of segments n in the trajectory (>= 1).
+        mode: one of REWARD_DECOMPOSITION_MODES.
+        gamma: decay rate for "geometric" mode. Ignored otherwise.
+
+    Returns:
+        List of per-segment rewards of length num_segments.
+
+    Raises:
+        ValueError: if mode is unknown or num_segments < 1.
+    """
+    if num_segments < 1:
+        raise ValueError(f"num_segments must be >= 1, got {num_segments}")
+    if mode not in REWARD_DECOMPOSITION_MODES:
+        raise ValueError(
+            f"mode must be one of {REWARD_DECOMPOSITION_MODES}, got: {mode!r}"
+        )
+
+    n = num_segments
+    if mode == "last_only":
+        return [0.0] * (n - 1) + [reward]
+    if mode == "broadcast":
+        return [reward] * n
+    if mode == "uniform":
+        per = reward / n
+        return [per] * n
+    # geometric
+    if n == 1 or gamma >= 1.0:
+        per = reward / n
+        return [per] * n
+    raw = [gamma ** (n - 1 - k) for k in range(n)]
+    total = sum(raw)
+    return [reward * (w / total) for w in raw]
+
+
+def _resolve_reward_decomposition_config() -> tuple:
+    """Resolve (mode, gamma) for trajectory reward decomposition from env vars.
+
+    Env vars:
+        REWARD_DECOMPOSITION:       one of REWARD_DECOMPOSITION_MODES.
+                                    Default: "last_only".
+        REWARD_DECOMPOSITION_GAMMA: float decay rate for "geometric" mode.
+                                    Default: 0.9.
+    """
+    env_decomp = os.getenv("REWARD_DECOMPOSITION")
+    if env_decomp is not None and env_decomp.strip() != "":
+        mode = env_decomp.strip().lower()
+        if mode not in REWARD_DECOMPOSITION_MODES:
+            raise ValueError(
+                f"REWARD_DECOMPOSITION must be one of {list(REWARD_DECOMPOSITION_MODES)}, "
+                f"got: {env_decomp!r}"
+            )
+    else:
+        mode = "last_only"
+
+    env_gamma = os.getenv("REWARD_DECOMPOSITION_GAMMA", "0.9")
+    try:
+        gamma = float(env_gamma)
+    except ValueError as exc:
+        raise ValueError(
+            f"REWARD_DECOMPOSITION_GAMMA must be a float, got: {env_gamma!r}"
+        ) from exc
+
+    return mode, gamma
 
 
 class BaseAgent(ChainRollout, ABC):
@@ -73,10 +189,9 @@ class BaseAgent(ChainRollout, ABC):
         model_name_or_path,
         template: str = None,
         system_prompt: str = None,
-        tools: List = None,
+        tools: List = [],
         max_model_len: int = None,
-        backend: str = "async_vllm",
-        backend_config: Any = None,
+        backend_config: Optional[Dict[str, Any]] = None,
         reward_fn: Callable = None,
         streaming: str = "console",
         debug: bool = False,
@@ -95,17 +210,20 @@ class BaseAgent(ChainRollout, ABC):
             system_prompt: The system prompt to use for the agent.
             tools: The tools to use for the agent.
             debug: Whether to enable debug mode.
-            backend: The backend to use for the agent.
+            backend_config: Dict specifying the backend and its parameters. Must include "backend" (e.g. "async_vllm", "client").
+                Other keys are passed as kwargs to that backend (e.g. "gpu_memory_utilization" for async_vllm).
+                Defaults to {"backend": "async_vllm"}.
             tool_parser: Optional tool parser instance from vLLM. If provided, will be used for parsing tool calls.
             tool_parser_name: Optional name of the tool parser to use (e.g., "hermes", "pythonic"). If provided and tool_parser is None, will create a parser using this name.
 
         """
+        if backend_config is None:
+            backend_config = {"backend": "async_vllm"}
         self._validate_init_args(
             model_name_or_path,
             template,
             system_prompt,
             tools,
-            backend,
             backend_config,
             reward_fn,
             streaming,
@@ -119,26 +237,16 @@ class BaseAgent(ChainRollout, ABC):
         )
 
         self.debug = debug
-        self.backend = backend
+        self.backend_config = backend_config
+        self.backend = backend_config["backend"]
         self.tools = tools
         self.max_model_len = max_model_len
-
         self.tool_names = [tool.name for tool in tools]
+
         if isinstance(system_prompt, str):
             system_prompt = system_prompt.replace("\\n", "\n")
         self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
-
-        # Handle backend configuration
-        if backend_config is None:
-            # Use default configuration for the backend
-            config_class = BACKEND_CONFIGS.get(backend)
-            if config_class:
-                self.backend_config = config_class()
-            else:
-                self.backend_config = None
-        else:
-            self.backend_config = backend_config
 
         # Create appropriate tokenizer for trajectory processing
         self.tokenizer = create_tokenizer(model_name_or_path)
@@ -158,7 +266,7 @@ class BaseAgent(ChainRollout, ABC):
         else:
             self.jinja_template = get_template(self.template).jinja_template()
 
-        self.llm_engine = self._init_llm_engine(model_name_or_path, backend)
+        self.llm_engine = self._init_llm_engine(model_name_or_path, self.backend)
 
         self.wandb_project_name = wandb_project_name
         self.wandb_run_name = wandb_run_name
@@ -184,6 +292,11 @@ class BaseAgent(ChainRollout, ABC):
             self.tool_parser = ParserCls(self.tokenizer)
 
         super().__init__()
+
+        # Result of the most recent agent.run(...) call. Populated by run();
+        # consumed by get_verl_data_proto(). None until the first run.
+        self._last_run_result: Optional["RunResult"] = None
+
         if kwargs:
             raise ValueError(f"Unused arguments for agent: {kwargs}")
 
@@ -193,7 +306,6 @@ class BaseAgent(ChainRollout, ABC):
         template,
         system_prompt,
         tools,
-        backend,
         backend_config,
         reward_fn,
         streaming,
@@ -205,14 +317,16 @@ class BaseAgent(ChainRollout, ABC):
         tool_parser,
         tool_parser_name,
     ):
+        if not isinstance(backend_config, dict) or "backend" not in backend_config:
+            raise ValueError(
+                "backend_config must be a dict with at least a 'backend' key (e.g. {'backend': 'async_vllm'})."
+            )
+        backend = backend_config["backend"]
         if backend == "client":
             assert template is None, (
                 "For client backend, we do not support chat template. Set the template when deploying the model."
             )
-        if backend == "async_vllm":
-            assert template is not None, (
-                "For async vllm backend, chat template is required."
-            )
+            
         if tool_parser is not None and tool_parser_name is not None:
             raise ValueError(
                 "Cannot specify both tool_parser and tool_parser_name. Use only one."
@@ -229,14 +343,37 @@ class BaseAgent(ChainRollout, ABC):
 
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         if isinstance(model_name_or_path, str):
-            # Extract backend-specific configuration
-            config_kwargs = {}
-            if self.backend_config:
-                config_kwargs = {
-                    k: v
-                    for k, v in self.backend_config.__dict__.items()
-                    if not k.startswith("_")
+            # Backend params: all keys in backend_config except "backend". Optionally merge with default config.
+            config_kwargs = {k: v for k, v in self.backend_config.items() if k != "backend"}
+            config_class = BACKEND_CONFIGS.get(backend)
+            if config_class:
+                try:
+                    default_instance = config_class()
+                    default_dict = {
+                        k: v
+                        for k, v in default_instance.__dict__.items()
+                        if not k.startswith("_")
+                    }
+                    default_dict.update(config_kwargs)
+                    config_kwargs = default_dict
+                except Exception:
+                    pass
+
+            # For async_vllm, prefer explicit kwargs like tensor/data parallel sizes over
+            # a default config's pre-built engine_args placeholder.
+            if backend == "async_vllm":
+                explicit_async_vllm_keys = {
+                    "tensor_parallel_size",
+                    "data_parallel_size",
+                    "pipeline_parallel_size",
+                    "max_model_len",
+                    "gpu_memory_utilization",
+                    "dtype",
+                    "quantization",
+                    "trust_remote_code",
                 }
+                if any(k in self.backend_config for k in explicit_async_vllm_keys):
+                    config_kwargs.pop("engine_args", None)
 
             if backend == "async_vllm":
                 llm_engine = AsyncVLLMBackend(
@@ -250,9 +387,8 @@ class BaseAgent(ChainRollout, ABC):
                     **config_kwargs,
                 )
             elif backend == "client":
-                llm_engine = ClientBackend(
-                    model_name_or_path, self.template, **config_kwargs
-                )
+                
+                llm_engine = ClientBackend(model_name_or_path, **config_kwargs)
             else:
                 raise ValueError(f"Backend {backend} is not supported.")
         else:
@@ -270,9 +406,17 @@ class BaseAgent(ChainRollout, ABC):
             List of preprocessed messages.
         """
         messages_list = MessagesList.from_data(messages)
+        tools = [tool.schema for tool in self.tools]
+        if self.system_prompt and "{tools}" in self.system_prompt:
+            system_prompt = self.system_prompt.replace(
+                "{tools}", json.dumps(tools, indent=4)
+            )
+        else:
+            system_prompt = self.system_prompt
+
         for messages in messages_list:
-            if self.system_prompt:
-                messages.set_system_prompt(self.system_prompt, enforce=False)
+            if system_prompt:
+                messages.set_system_prompt(system_prompt, enforce=False)
 
         return messages_list.to_list()
 
@@ -305,17 +449,27 @@ class BaseAgent(ChainRollout, ABC):
         messages: Union[List[dict], np.ndarray, Dict],
         max_turns: int,
         generation_config: Optional[Dict[str, Any]] = {},
+        context_config: Optional[ContextConfig] = None,
         **kwargs,
-    ):
-        """
-        This is the main interface for running the agent. It is a wrapper of different
-        rollout methods, which must be asynchronous. Currently, we only support chain-based rollout.
+    ) -> RunResult:
+        """Run the agent on a batch of messages and return the rollout result.
+
+        This is the main interface for running the agent. It is a wrapper of
+        different rollout methods, which must be asynchronous. Currently we
+        only support chain-based rollout.
+
         Args:
             messages: List of messages to generate responses for.
             max_turns: The maximum number of turns to generate.
             generation_config: The generation configuration.
-            **kwargs: Additional keyword arguments for generation.
+            context_config: Optional settings for :class:`~agentfly.core.context.Context` (resource backend).
+            **kwargs: Additional keyword arguments for generation (passed to ``run_async``).
 
+        Returns:
+            :class:`~agentfly.agents.types.RunResult` containing the trajectories
+            produced by this run. The same result is also cached on the agent so
+            that :meth:`get_verl_data_proto` can be called afterwards without
+            re-running.
         """
         processed_messages = self._preprocess_messages(messages)
         self._preprocess_backends()
@@ -324,10 +478,15 @@ class BaseAgent(ChainRollout, ABC):
             processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
+            context_config=context_config,
             **kwargs,
         )
 
         self._postprocess_backends()
+
+        trajectories = self.postprocess_trajectories(self.get_trajectories())
+        self._last_run_result = RunResult(trajectories=trajectories)
+        return self._last_run_result
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", (
@@ -382,85 +541,95 @@ class BaseAgent(ChainRollout, ABC):
     def timing_data(self):
         return self.timer.timing_data
 
-    @property
-    def trajectories(self):
-        """Get the trajectories of the agent."""
-        trajectories = self.get_messages()
+    def postprocess_trajectories(self, trajectories: List[Trajectory]) -> List[Trajectory]:
+        """Hook for subclasses to post-process trajectories before they're
+        wrapped in a :class:`RunResult`. Default implementation is identity.
+        """
         return trajectories
+
+    def _require_last_run(self) -> RunResult:
+        """Return the cached :class:`RunResult` from the most recent
+        :meth:`run` call, raising a clear error if ``run`` hasn't been called yet."""
+        if self._last_run_result is None:
+            raise RuntimeError(
+                "agent.run(...) has not been called yet; no RunResult is available. "
+                "Call `result = await agent.run(...)` first."
+            )
+        return self._last_run_result
 
     def tokenize_trajectories(
         self,
+        messages_list,
         template=None,
         tokenizer=None,
+        processor=None,
         return_reward_mask: bool = False,
         concatenate_mm_inputs: bool = True,
+        train_on_last_turn: bool = False,
     ):
-        if tokenizer is None:
-            tokenizer = self.tokenizer
 
-        trajectories = self.trajectories
-        messages_list = []
-        other_info_list = []
-        for trajectory in trajectories:
-            messages = trajectory["messages"]
-            messages_list.append(messages)
-            info = {}
-            for key, value in trajectory.items():
-                if key != "messages":
-                    info[key] = value
-
-            last_response = None
-
-            for i in range(len(messages) - 1, -1, -1):
-                message = messages[i]
-                if message["role"] == "assistant":
-                    last_message = message
-                    last_response = last_message["content"][0]["text"]
-                    break
-
-            info["last_response"] = last_response
-            other_info_list.append(info)
+        # TODO: we will remove this argument in the future
+        train_on_last_turn = False
 
         inputs = tokenize_conversations(
             messages_list,
             tokenizer=tokenizer,
             template=template or self.template,
-            processor=self.processor,
+            processor=processor or self.processor,
             max_length=self.max_model_len,
             return_reward_mask=return_reward_mask,
             add_generation_prompt=True,
             concatenate_mm_inputs=concatenate_mm_inputs,
             ignore_tool_calls=True,
+            train_on_last_turn_only=train_on_last_turn,
         )
         position_ids = torch.clip(
             torch.cumsum(inputs["attention_mask"], dim=-1) - 1, min=0, max=None
         )
         inputs["position_ids"] = position_ids
 
-        assert inputs["input_ids"].shape[0] == len(other_info_list)
-
-        return inputs, other_info_list
+        return inputs
 
     def extract_final_response(self, messages: List[Dict[str, Any]]) -> str:
-        last_message_content = messages[-1]["content"][0]["text"]
-        last_message_role = messages[-1]["role"]
-        # First try extracting the response if it is returned from a tool
-        if last_message_role == "assistant":
-            return last_message_content
-        elif last_message_role == "tool":
-            return last_message_content
-        else:
-            raise ValueError(
-                f"The last message role must be assistant or tool, but got {last_message_role}"
-            )
+        """
+        Extract the final response text from a trajectory.
 
-    def parse(self, responses: List[str]) -> List[Dict]:
+        We scan messages in reverse order and take the last assistant/tool
+        message as the final response.
+        """
+        for msg in reversed(messages):
+            last_message_role = msg.get("role")
+            if last_message_role not in ("assistant", "tool"):
+                continue
+            content = msg.get("content") or []
+            if (
+                isinstance(content, list)
+                and content
+                and isinstance(content[0], dict)
+                and content[0].get("type") == "text"
+            ):
+                return content[0].get("text", "")
+            # Fallback: stringify first content part if structure is unexpected
+            if isinstance(content, list) and content:
+                return str(content[0])
+
+        raise ValueError(
+            "No assistant or tool message found in trajectory when extracting final response."
+        )
+
+    def parse(
+        self,
+        responses: List[str],
+        context: Optional[Context] = None,
+        **kwargs,
+    ) -> List[Dict]:
         """
         This method is used to define the interaction logic of the agent. It can be used to parse the tool call from the response.
         If tool_parser is provided, it will use the vLLM tool parser by default. Otherwise, subclasses should override this method.
 
         Args:
             responses: List of responses to parse.
+            context: Optional rollout context carrying trajectory and metadata.
             **args: Additional arguments for parsing.
 
         Returns:
@@ -492,6 +661,17 @@ class BaseAgent(ChainRollout, ABC):
         """
         # If tool_parser is available, use it
         if self.tool_parser is not None:
+            if self.tools is None or len(self.tools) == 0:
+                return [
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": response}],
+                        "tool_calls": [],
+                        "loss": True,
+                        "status": "terminal",
+                    }
+                    for response in responses
+                ]
             return self._parse_with_tool_parser(responses)
         else:
             # If no tool_parser, raise NotImplementedError to force subclasses to implement
@@ -526,7 +706,7 @@ class BaseAgent(ChainRollout, ABC):
                 if isinstance(schema, dict):
                     tool_schemas.append(schema)
                 else:
-                    Logger.warning(
+                    logger.warning(
                         f"Tool {getattr(tool, 'name', 'unknown')} has invalid schema format: {type(schema)}"
                     )
                     continue
@@ -579,7 +759,7 @@ class BaseAgent(ChainRollout, ABC):
                             )
                         except (json.JSONDecodeError, TypeError):
                             # Invalid JSON, skip this tool call
-                            # Logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
+                            # logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
                             continue
                     elif isinstance(tool_call, dict):
                         # Fallback: handle dictionary format (for compatibility)
@@ -613,7 +793,7 @@ class BaseAgent(ChainRollout, ABC):
                                     if isinstance(func_info, dict)
                                     else getattr(func_info, "name", "unknown")
                                 )
-                                Logger.warning(
+                                logger.warning(
                                     f"Invalid JSON in tool call arguments for {tool_name}: {arguments_str}"
                                 )
                                 continue
@@ -640,26 +820,6 @@ class BaseAgent(ChainRollout, ABC):
 
         return new_messages_list
 
-    @property
-    def rewards(self):
-        messages_list = []
-        # answers = []
-        reward_values = []
-        other_values = defaultdict(list)
-        for trajectory in self.trajectories:
-            messages = trajectory["messages"]
-            messages_list.append(messages)
-            reward_value_or_dict = trajectory["reward"]
-
-            if isinstance(reward_value_or_dict, dict):
-                reward_values.append(reward_value_or_dict["reward"])
-                for key, value in reward_value_or_dict.items():
-                    if key != "reward":
-                        other_values[key].append(value)
-            else:
-                reward_values.append(reward_value_or_dict)
-
-        return reward_values, other_values
 
     def print_messages(self, index: int = 0):
         messages = self.get_messages()
@@ -690,12 +850,104 @@ class BaseAgent(ChainRollout, ABC):
                         )
             print(text)
 
-    def get_verl_data_proto(self):
-        inputs, other_info_list = self.tokenize_trajectories(
-            return_reward_mask=True, concatenate_mm_inputs=False
+    def get_verl_data_proto(
+        self,
+        train_on_last_turn: bool = False,
+        world_size: int = 1,
+        pad_to_multiple_of: Optional[int] = None,
+    ):
+        run_result = self._require_last_run()
+        trajectories = run_result.trajectories
+        segments_list = []
+        other_info_list = []
+        for batch_idx, trajectory in enumerate(trajectories):
+            trajectory_segments = trajectory.segments
+            for segment_idx, segment in enumerate(trajectory_segments):
+                segments_list.append(segment)
+                # Per-segment metadata: everything about the trajectory
+                # except segments themselves, plus segment indexing.
+                info = trajectory.model_dump(exclude={"segments"})
+                info["batch_idx"] = batch_idx
+                info["segment_idx"] = segment_idx
+                other_info_list.append(info)
+
+        inputs = self.tokenize_trajectories(
+            messages_list=segments_list,
+            tokenizer=self.tokenizer,
+            processor=self.processor,
+            return_reward_mask=True,
+            concatenate_mm_inputs=False,
+            train_on_last_turn=train_on_last_turn,
         )
+
+        reward_values = run_result.rewards
+        other_values = defaultdict(list)
+        for k, v in run_result.reward_extras.items():
+            other_values[k] = list(v)
+
+        # Expand trajectory reward to segment level. See docstring of
+        # `decompose_trajectory_reward` for the available modes.
+        decomposition_mode, decomposition_gamma = _resolve_reward_decomposition_config()
+        reward_values_segment: List[float] = []
+        for trajectory in trajectories:
+            n = trajectory.num_segments
+            if n <= 0:
+                continue
+            reward_values_segment.extend(
+                decompose_trajectory_reward(
+                    reward=trajectory.reward,
+                    num_segments=n,
+                    mode=decomposition_mode,
+                    gamma=decomposition_gamma,
+                )
+            )
+        num_trajectories = len(trajectories)
+        other_values_segment = {}
+        for key, values in other_values.items():
+            # When reward is scalar (not dict), that trajectory never appends to other_values[key],
+            # so values may be shorter than num_trajectories. Pad to match.
+            if len(values) < num_trajectories:
+                values = list(values) + [0.0] * (num_trajectories - len(values))
+            other_values_segment[key] = []
+            for traj_idx, trajectory in enumerate(trajectories):
+                n = trajectory.num_segments
+                val = values[traj_idx]
+                other_values_segment[key].extend([val] * n)
+        reward_values = reward_values_segment
+        other_values = other_values_segment
+
+        # Number of segments per trajectory (one integer per trajectory).
+        repeat_times = [t.num_segments for t in trajectories]
+
+        align = pad_to_multiple_of
+        if align and align > 1:
+            n = inputs["input_ids"].shape[0]
+            pad_size = (align - n % align) % align
+            for k, v in inputs.items():
+                if k == "action_mask" and isinstance(v, torch.Tensor) and not v.is_nested:
+                    inputs[k] = pad_tensor_batch_dim_with_zeros(v, align)
+                else:
+                    inputs[k] = pad_tensor_to_rank_size(v, align)
+            if pad_size > 0:
+                # Pad other_info_list with copies of the last element (matches last-row repeat in pad_tensor_to_rank_size)
+                other_info_list = other_info_list + [other_info_list[-1]] * pad_size
+                # Pad reward_values and other_values to match the padded inputs
+                reward_values = reward_values + [reward_values[-1]] * pad_size
+                other_values = {
+                    k: v + [v[-1]] * pad_size for k, v in other_values.items()
+                }
+                # Add pad_size to the last trajectory's segment count
+                repeat_times[-1] += pad_size
+
         group_ids_list = [info["group_id"] for info in other_info_list]
+        segment_index_list = [info["segment_idx"] for info in other_info_list]
+        batch_index_list = [info["batch_idx"] for info in other_info_list]
+        discarded_segment_list = [bool(info.get("discarded", False)) for info in other_info_list]
         group_ids = np.array(group_ids_list, dtype=object)
+        segment_index = np.array(segment_index_list, dtype=np.int32)
+        batch_index = np.array(batch_index_list, dtype=np.int32)
+
+
         batch_size = len(group_ids_list)
         unique_group_ids = []
         seen_group_ids = set()
@@ -703,8 +955,21 @@ class BaseAgent(ChainRollout, ABC):
             if group_id not in seen_group_ids:
                 unique_group_ids.append(group_id)
                 seen_group_ids.add(group_id)
-        # Do evaluation here
-        reward_values, other_values = self.rewards
+
+        # For discarded trajectories, mask out all response tokens for every segment row.
+        if discarded_segment_list:
+            discarded_tensor = torch.tensor(
+                discarded_segment_list, dtype=torch.bool, device=inputs["attention_mask"].device
+            ).unsqueeze(dim=-1)
+            if "action_mask" in inputs:
+                inputs["action_mask"] = inputs["action_mask"] * (~discarded_tensor).to(
+                    dtype=inputs["action_mask"].dtype
+                )
+            if "reward_mask" in inputs:
+                inputs["reward_mask"] = inputs["reward_mask"] * (~discarded_tensor).to(
+                    dtype=inputs["reward_mask"].dtype
+                )
+
         inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(
             reward_values, dtype=torch.float32
         ).unsqueeze(dim=-1)  # BS x L
@@ -722,7 +987,7 @@ class BaseAgent(ChainRollout, ABC):
             elif len(aligned_values) == 1 and batch_size > 1:
                 aligned_values = aligned_values * batch_size
             if len(aligned_values) != batch_size:
-                self.logger.warning(
+                logger.warning(
                     f"Adjusting rm_{key} length from {len(aligned_values)} to {batch_size} to match batch size."
                 )
                 if len(aligned_values) < batch_size:
@@ -732,12 +997,17 @@ class BaseAgent(ChainRollout, ABC):
                 else:
                     aligned_values = aligned_values[:batch_size]
             inputs[f"rm_{key}"] = np.array(aligned_values)
+        
         # We handle the group id in the agent side, to be compatible with GRPO
         inputs["uid"] = group_ids
-
+        inputs["segment_idx"] = segment_index
+        inputs["batch_idx"] = batch_index
+        
         if "mm_inputs" in inputs:
             mm_inputs = inputs.pop("mm_inputs")
             inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
-        batch = DataProto.from_single_dict(inputs, meta_info={"use_agent": True})
+        batch = DataProto.from_single_dict(
+            inputs, meta_info={"use_agent": True, "repeat_times": repeat_times}
+        )
 
         return batch

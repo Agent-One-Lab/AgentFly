@@ -3,21 +3,18 @@ import inspect
 import json
 import logging
 from typing import Any, Callable, List, Optional
-
-from ..envs.env_base import BaseEnv
-from ..envs.manager.env_manager import EnvironmentManager
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
+from .. import TOOL_ERROR_AS_OBSERVATION
 
 logger = logging.getLogger(__name__)
 
 
 class BaseTool:
     """
-    Universal tool wrapper that can handle both stateful and non-stateful tools.
+    Universal tool wrapper for both sync and async tools.
 
-    - For stateful tools: manages environments and pools
-
-    - For non-stateful tools: works like a simple wrapper
+    Tools can access rollout context (rollout_id, group_id, metadata) and resources
+    via the Context parameter, which is automatically injected when requested.
 
     Usage patterns:
 
@@ -64,16 +61,13 @@ class BaseTool:
     memory-efficient and semantically correct since all instances of a tool type
     should have the same metadata.
 
-    Call signature for stateful tools:
+    3. Tools with Context (for resource access):
 
     ```python
-    tool(action=..., id=...)
-    ```
-
-    Call signature for non-stateful tools:
-
-    ```python
-    tool(action=...)
+    @tool(name="grep_search")
+    async def grep_search(pattern: str, path: str = ".", context: "Context"):
+        container = await context.acquire_resource(image_id=..., scope="rollout")
+        return container.run_cmd(f"grep -r {pattern} {path}")
     ```
     """
 
@@ -84,16 +78,7 @@ class BaseTool:
     args: dict | None = None
     max_length: int = 2048
     status: str = "success"
-    env_cls: type[BaseEnv] | None = None
-    env_kwargs: dict = {}
-    pool_size: int = -1  # -1 means no pool
-    is_stateful: bool = False
     auto_register: bool = True
-
-    # Class-level environment state (shared across all instances of the same tool class)
-    _envs: dict[str, BaseEnv] = {}
-    _locks: dict[str, asyncio.Lock] = {}
-    _initialized: bool = False
 
     # ========== Initialization ==========
     def __init__(
@@ -127,15 +112,13 @@ class BaseTool:
             self.is_method = False
             self.instance = None
 
-        cls.is_stateful = cls.env_cls is not None
-
         # Use __dict__ to avoid triggering __getattr__ in metaclass
         if "_is_async_call" not in cls.__dict__:
             user_func_is_async = (
                 self.user_func is not None
                 and inspect.iscoroutinefunction(self.user_func)
             )
-            cls._is_async_call = cls.is_stateful or user_func_is_async
+            cls._is_async_call = user_func_is_async
 
         # Auto-register the tool instance by default
         if cls.auto_register:
@@ -206,16 +189,15 @@ class BaseTool:
     # ========== Execution ==========
     @property
     def parallel_size(self):
-        if self.is_stateful:
-            return self.pool_size
         # We assume/require all tools to be asyncronousable
-        return 10, 000
+        return 10_000
 
     def _validate_call_args(self, kwargs):
         # TODO: raise error, return error message, or filter the invalid arguments, make it configurable. Currently, we just return the error message.
+        # Context is injected by the rollout and is not in schema
+        injected_params = ("context",)
         for arg in kwargs:
-            if arg not in self.args and not (arg == "id" and self.is_stateful):
-                # raise ValueError(f"""Invalid argument "{arg}" for tool {self.name}.""")
+            if arg not in self.args and arg not in injected_params:
                 result = f"""Invalid argument "{arg}" for tool {self.name}."""
                 return result
         return None
@@ -228,30 +210,37 @@ class BaseTool:
             )
 
     def _execute_user_function_sync(self, **kwargs):
-        """Execute the user function synchronously. Catches user function errors and converts them to strings."""
+        """Execute the user function synchronously.
+
+        On error: returns str(e) if ``TOOL_ERROR_AS_OBSERVATION`` is True,
+        otherwise re-raises.
+        """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
             if self.instance is None:
                 raise ValueError(f"Instance not set for method tool {self.name}")
 
-        # Execute user function and catch errors, converting them to strings
         try:
             if self.is_method:
                 return self.user_func(self.instance, **kwargs)
             else:
                 return self.user_func(**kwargs)
         except Exception as e:
-            # Convert user function execution errors to strings
-            return str(e)
+            if TOOL_ERROR_AS_OBSERVATION:
+                return str(e)
+            raise
 
     async def _execute_user_function_async(self, **kwargs):
-        """Execute the user function, handling both sync and async functions. Catches user function errors and converts them to strings."""
+        """Execute the user function, handling both sync and async functions.
+
+        On error: returns str(e) if ``agentfly.TOOL_ERROR_AS_OBSERVATION`` is True,
+        otherwise re-raises.
+        """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
             if self.instance is None:
                 raise ValueError(f"Instance not set for method tool {self.name}")
 
-        # Execute user function and catch errors, converting them to strings
         try:
             if self.is_method:
                 if inspect.iscoroutinefunction(self.user_func):
@@ -264,29 +253,17 @@ class BaseTool:
                 else:
                     return self.user_func(**kwargs)
         except Exception as e:
-            # Convert user function execution errors to strings
-            return str(e)
-
-    async def _execute_stateful_tool(self, id: str, **kwargs):
-        """Execute a stateful tool with environment management."""
-        cls = type(self)
-        await cls._initialize_envs()
-        env = await cls._acquire_env(id)
-
-        async with cls._locks[id]:
-            assert kwargs.get("env", None) is None, (
-                "env is not allowed to be passed to stateful tools"
-            )
-            kwargs["env"] = env
-            return await self._execute_user_function_async(**kwargs)
+            if TOOL_ERROR_AS_OBSERVATION:
+                return str(e)
+            raise
 
     def __call__(self, **kwargs):
         """
         Call the tool with the given arguments.
         Args:
-            **kwargs: The arguments to call the tool with. The arguments should be in the schema of the tool and must be specified with arg=value. For stateful tools, the id is also required for isolation.
+            **kwargs: The arguments to call the tool with. The arguments should be in the schema of the tool and must be specified with arg=value.
         Returns:
-            dict or coroutine: The result of the tool call. Returns a coroutine if the tool is async (stateful or has async user function), otherwise returns the result directly.
+            dict or coroutine: The result of the tool call. Returns a coroutine if the tool is async, otherwise returns the result directly.
             The result is a dict with the following keys:
                 - "name": The name of the tool.
                 - "arguments": The arguments used to call the tool.
@@ -303,7 +280,7 @@ class BaseTool:
             return self._call_sync(**kwargs)
 
     def _call_sync(self, **kwargs):
-        """Internal sync implementation of __call__ for non-stateful, non-async tools."""
+        """Internal sync implementation of __call__ for sync tools."""
         self._check_function_set()
 
         # Check arguments before calling the tool
@@ -311,7 +288,7 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (errors from user function are already converted to strings)
+        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
         result = self._execute_user_function_sync(**kwargs)
 
         # Format and return result
@@ -326,128 +303,28 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (errors from user function are already converted to strings)
-        if not self.is_stateful:
-            # For non-stateful tools, directly execute the function
-            result = await self._execute_user_function_async(**kwargs)
-        else:
-            # For stateful tools, handle environment management
-            id = kwargs.pop("id", None)
-            if id is None:
-                result = "Error: 'id' parameter is required for stateful tools"
-            else:
-                result = await self._execute_stateful_tool(id, **kwargs)
+        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
+        result = await self._execute_user_function_async(**kwargs)
 
         # Format and return result
         return self._format_result(result, kwargs)
 
     def _format_result(self, result, kwargs):
-        """Format the result into the standard tool response format."""
-        # Result must be a string or a dict
-        if isinstance(result, str):
-            if self.max_length is not None:
-                result = result[: self.max_length]
-            result_dict = {
-                "name": self.name,
-                "arguments": kwargs,
-                "observation": result,
-                "status": self.status,
-                "info": {},
-            }
-            return result_dict
-        elif isinstance(result, dict):
-            # result should be like {"observation": "a string", "reward": 1.0}
-            assert "observation" in result, (
-                f"observation is required for {self.name} if tool call returns a dict"
-            )
-            if self.max_length is not None:
-                result["observation"] = result["observation"][: self.max_length]
-            observation = result.pop("observation")
-            info = result
-            result_dict = {
-                "name": self.name,
-                "arguments": kwargs,
-                "observation": observation,
-                "status": self.status,
-                "info": info,
-            }
-            if "image" in result:
-                result_dict["image"] = result["image"]
-            return result_dict
-        else:
-            raise ValueError(
-                f"Got invalid result: {type(result)} when calling {self.name} with arguments {kwargs}. The result should be a string or a dict containing 'observation' as a key."
-            )
+        """Format the result into the standard tool response dict.
 
-    # ========== Environment Management ==========
-    @classmethod
-    async def _initialize_envs(cls):
-        """Lazy initialization of the environment pool."""
-        if cls.is_stateful and not cls._initialized:
-            await EnvironmentManager.start(
-                cls.env_cls, size=cls.pool_size, env_kwargs=cls.env_kwargs
-            )
-            cls._initialized = True
-
-    @classmethod
-    def used_env_size(cls):
-        """Get the number of used environments."""
-        if cls.is_stateful:
-            return len(cls._envs)
-        return 0
-
-    @classmethod
-    def ids(cls):
-        """Get the IDs of all active environments (for stateful tools only)."""
-        return list(cls._envs.keys()) if cls.is_stateful else []
-
-    @classmethod
-    async def _acquire_env(cls, id: str):
-        """Acquire an environment from existing environments or the pool."""
-        env = cls._envs.get(id)
-        if env is None:
-            if not cls.is_stateful:
-                return None
-            env = await EnvironmentManager.acquire(cls.env_cls, id=id)
-            cls._envs[id] = env
-            cls._locks[id] = asyncio.Lock()
-        return env
-
-    @classmethod
-    async def release(cls, id, success=True):
+        Normalization is delegated to :meth:`ToolResult.from_raw`; the legacy
+        dict shape is reproduced via :meth:`ToolResult.to_dict` so existing
+        downstream consumers keep working.
         """
-        Release a specific environment.
-        Release means we take the occupied env back, and reset it, put it back to the pool if there is one, or close it if there is no pool.
-        """
-        if not cls.is_stateful or id not in cls._envs:
-            return
+        from .types import ToolResult
 
-        env = cls._envs.pop(id)
-        cls._locks.pop(id)
-        await EnvironmentManager.release(env, id=id)
-
-    @classmethod
-    async def set_env(cls, id, env_args=None):
-        """Reset a specific environment."""
-        if not cls.is_stateful:
-            return
-        await cls._initialize_envs()
-        if id in cls._envs:
-            env = cls._envs[id]
-            await EnvironmentManager.reset(env, env_args=env_args)
-        else:
-            env = await cls._acquire_env(id)
-            await EnvironmentManager.reset(env, env_args=env_args)
-            return
-
-    @classmethod
-    async def release_all(cls):
-        """Release all environments."""
-        if not cls.is_stateful:
-            return
-
-        env_ids = list(cls._envs.keys())
-        await asyncio.gather(*[cls.release(env_id, success=True) for env_id in env_ids])
+        return ToolResult.from_raw(
+            result,
+            name=self.name,
+            arguments=kwargs,
+            status=self.status,
+            max_length=self.max_length,
+        ).to_dict()
 
     # ========== Registration ==========
     @classmethod
@@ -496,14 +373,37 @@ class BaseTool:
         return f"<Tool name={self.name!r}, description={self.description!r}, schema={self.schema!r}>"
 
 
+def _tool_accepts_context(tool_obj: Any) -> bool:
+    """Check if the tool's function accepts a context parameter."""
+    func = None
+    if hasattr(tool_obj, "user_func") and tool_obj.user_func is not None:
+        func = tool_obj.user_func
+    elif hasattr(tool_obj, "_func") and tool_obj._func is not None:
+        func = tool_obj._func  # Decorator-based: func stored on class
+    if func is not None:
+        sig = inspect.signature(func)
+        return "context" in sig.parameters
+    return False
+
+
 async def submit_tool_call(
     tool_name: str,
     tool_input: str,
-    id: str = None,
-    allowed_tool_names: List[str] = None,
+    context: Optional[Any] = None,
+    allowed_tool_names: Optional[List[str]] = None,
 ) -> dict:
     """
     Submit a tool call to the environment.
+
+    Args:
+        tool_name: Name of the tool to call.
+        tool_input: JSON string or dict of tool arguments.
+        context: Optional Context instance for rollout-scoped data and resources.
+                 Injected into tools that accept a `context` parameter.
+        allowed_tool_names: Optional list of allowed tool names.
+
+    Returns:
+        dict: Tool result with keys like observation, status, etc.
     """
     from .registry import TOOL_REGISTRY
 
@@ -516,27 +416,18 @@ async def submit_tool_call(
 
     tool_obj = TOOL_REGISTRY.get(tool_name, None)
     assert tool_obj is not None, f"Tool {tool_name} not found"
-    if tool_obj.is_stateful:
-        assert id is not None, "ID is required for stateful tools"
-    else:
-        # warnings.warn(f"ID {id} is not used for non-stateful tool {tool_name}")
-        pass
 
     if isinstance(tool_input, str):
-        """First make sure the input is a valid JSON object"""
         try:
             tool_input_json = json.loads(tool_input)
         except json.JSONDecodeError:
             tool_input_json = None
-        # If the loaded input is not a dict, it means the input is not a valid JSON object
         if not isinstance(tool_input_json, dict):
             tool_input_json = None
 
     elif isinstance(tool_input, dict):
         tool_input_json = tool_input
     else:
-        # raise ValueError(f"Invalid tool input: {tool_input}")
-        # The input is not string or dict, we take it as invalid input
         tool_input_json = None
 
     if tool_input_json is None:
@@ -544,18 +435,16 @@ async def submit_tool_call(
         tool_input_json = {"tool_input": tool_input}
         tool_obj = TOOL_REGISTRY["invalid_input_tool"]
 
-    # Add id to the input for stateful tools
-    if id is not None and tool_obj.is_stateful:
-        tool_input_json["id"] = id
+    # Inject Context if the tool accepts it
+    if context is not None and _tool_accepts_context(tool_obj):
+        tool_input_json["context"] = context
 
     # Call tool_obj without await first to check if it returns a coroutine
     result = tool_obj(**tool_input_json)
 
     # Check if result is a coroutine and await it if needed
     if inspect.iscoroutine(result):
-        # We're already in an async function, so we can directly await the coroutine
         result = await result
-    # If result is not a coroutine, it's already the final value, use it directly
 
     return result
 
@@ -564,6 +453,7 @@ if __name__ == "__main__":
     # Example 1: Decorator-based tool (existing pattern)
     from .decorator import tool
 
+    # --8<-- [start:addition_tool_example]
     @tool(name="AdditionTool", description="Adds two numbers.")
     def add(a, b: int = 1):
         """
@@ -577,6 +467,7 @@ if __name__ == "__main__":
             int: The sum of a and b.
         """
         return a + b
+    # --8<-- [end:addition_tool_example]
 
     @tool(description="Concatenates two strings.")
     def concat(s1, s2):
@@ -587,6 +478,7 @@ if __name__ == "__main__":
 
     # Example 2: Inheritance-based tool (new pattern)
     # Metadata can be defined as class attributes
+    # --8<-- [start:api_tool_example]
     class APITool(BaseTool):
         """
         Example of an inheritance-based tool that stores API credentials.
@@ -613,6 +505,7 @@ if __name__ == "__main__":
             """
             # Use self.api_key here
             return f"Result for '{query}' using API key: {self.api_key[:5]}..."
+    # --8<-- [end:api_tool_example]
 
     # Tool is automatically registered on initialization
     api_tool = APITool(api_key="secret_key_12345")

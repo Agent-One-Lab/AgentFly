@@ -39,7 +39,7 @@ class TestImageTools(unittest.TestCase):
         self.agent = ImageEditingAgent(
             model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
             template="qwen2.5-vl",
-            backend="client",
+            backend_config={"backend": "client"},
         )
         self.init_image_id = self.agent._store_image(self.test_image)
 

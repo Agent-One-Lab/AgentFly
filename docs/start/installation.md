@@ -1,5 +1,18 @@
 # Installation
 
+## Requirements
+
+| | |
+|---|---|
+| **OS** | Linux only — enroot is Linux-only; Debian/Ubuntu and RHEL/CentOS/Fedora are both supported (install commands below). |
+| **Python** | 3.12.x — `pyproject.toml` enforces `>=3.12,<3.13`. Newer or older versions will fail to install. |
+| **GPU** | NVIDIA GPU(s) with CUDA. Required by vLLM and the verl trainer. The shipped `train_*.sh` scripts target 1 to 8 GPUs (`trainer.n_gpus_per_node=1` for `train_example.sh`, up to `=8` for the bigger tasks); per-GPU VRAM scales with model size (Qwen 3B fits comfortably on a single 80 GB card; 32B benefits from multi-GPU). |
+| **Sudo** | Needed once, to install **enroot** (used by `code_interpreter`, `alfworld`, `webshop`, `scienceworld`, and any container-backed tool). Skip if you only need the lighter tools (`calculator`, retrieval API, etc.). |
+| **Disk** | A few hundred GB headroom recommended: HuggingFace model weights, enroot images under `$XDG_CACHE_HOME/AgentFly/enroot/`, and (for retrieval tasks) the Wikipedia corpus + FAISS index downloaded into `$XDG_CACHE_HOME/AgentFly/data/search/` (~30 GB). |
+| **Conda** | The reference setup uses conda (`bash install.sh` assumes it). Other environment managers work but are not the documented path. |
+
+If you only want to **run** agents — no RL training, no container-backed tools — `pip install -e .` alone is enough. The `[verl]` extras and the enroot install are training- and environment-specific.
+
 **Install With Script**
 
 To install dependencies, run the following script in conda environment. We default to use python3.12.

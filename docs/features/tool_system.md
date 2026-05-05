@@ -33,28 +33,11 @@ async def custom_tool(arg1, arg2):
     return observation
 ```
 
-2. Inheriting from the `BaseTool` class. The tool execution interface is the call method of the class.
+2. Inheriting from the `BaseTool` class. The tool execution interface is the `call` method of the class.
 ```python
 from agentfly.tools import BaseTool
-class APITool(BaseTool)
-    name="api_tool"
-    description="This is a tool that uses API key"
 
-    def __init__(self, api_key):
-        self.api_key = api_key
-
-    def call(self, query):
-        """
-        This is a tool that uses API key
-
-        Args:
-            query (str): query to use for the tool
-
-        Returns:
-            observation: observation string
-        """
-
-        return f"Call with query {query} and key {self.api_key}"
+--8<-- "src/agentfly/tools/tool_base.py:api_tool_example"
 ```
 
 
@@ -82,44 +65,28 @@ class CustomAgent(BaseAgent):
 
 
 ## Non-Stateful & Stateful Tool
-We define two types of tools:
 
-1. Non-Stateful Tool does not keep environment states. For such tool, we can simply write a function and decorate it with `@tool`.
+We define two types of tools.
 
-    ```python
-    @tool(name="AdditionTool", description="Adds two numbers.")
-        def add(a, b: int = 1):
-            """
-            Adds two numbers.
+### 1. Non-Stateful Tool
 
-            Args:
-                a (int): The first number.
-                b (int): The second number which should be a non-negative integer.
+Non-stateful tools don't keep environment state. Just write a function and decorate it with `@tool`:
 
-            Returns:
-                int: The sum of a and b.
-            """
-            return a + b
-    ```
+```python
+--8<-- "src/agentfly/tools/tool_base.py:addition_tool_example"
+```
 
-2. Stateful Tool keeps the environmental states. In definition, we need to specify an environment class (`env_cls`), and the pool size. The resource system will initialize the number of pool size environment instances. When calling the tool, it will require an instance from the central resource system, and will later release it back to the pool. Inside the tool, we can use the environment by calling the `step` method, which is generally the interface to interact with environment. For example, for `PythonSandboxEnv`, the `step` method accepts a code string, executing it and return anything on stdout or stderr.
+### 2. Stateful Tool
 
-    ```python
-    @tool(env_cls=PythonSandboxEnv, name="code_interpreter", description="Run the code in docker container and return the output from stdout or stderr", stateful=True, pool_size=16)
-    async def code_interpreter(code: str, env: PythonSandboxEnv):
-        """
-        Run the code in docker container and return the output from stdout or stderr
-        Args:
-            code (str): The code to run.
-        Returns:
-            str: The output from stdout or stderr
-        """
-        try:
-            obs = await env.step(code)
-            return obs
-        except Exception as e:
-            return f"Error: {str(e)}\n{traceback.format_exc()}"
-    ```
+Stateful tools keep environmental state across turns or actions. In the new design, **stateful tools acquire resources directly via `Context` and `ResourceSpec`** instead of specifying `env_cls` on the decorator. The resource engine manages pooling and reuse; tools just request the resource they need and call its `step`-like interface.
+
+```python
+from agentfly.core import Context
+from agentfly.envs.python_env import PythonSandboxSpec
+from agentfly.tools import tool
+
+--8<-- "src/agentfly/tools/src/code/tools.py:code_interpreter_example"
+```
 
 ## Tool Calling
 
@@ -130,9 +97,29 @@ Tool call are defined to be asynchronous for efficiency. Use `async` to define t
     A tool can also be defined to be synchronous in AgentFly. Although it might be slow for training.
 
 ### Isolation
-When calling the tool, if it is a stateful tool, we need to specify an `id` argument for environment isolation. Calling with different `id`s are ensured to make use of different environment instances, while same `id` will use the same environment. A call with a new `id` will consume an environment instance in the pool, until it is released. **If there is no instance inside the pool, new call will be stuck until instances are released back to the pool.**
 
-```python
-result = await code_interpreter("print('Hello World')", id="12345")
-await code_interpreter.release(id="12345")
-```
+For stateful tools, **isolation and sharing are handled by `Context` and `ResourceEngine`**, rather than by passing an explicit `id` into the tool:
+
+- `Context.acquire_resource(spec=..., scope="rollout" | "global", backend="local")` uses a stable resource id (by default the rollout id) so that multiple tool calls in the same rollout share the same resource instance when they use the same `spec` and `scope`.
+- Different rollouts automatically get different resource instances; you do not need to manually manage ids or release handles inside the tool.
+- The underlying `ResourceSpec` (e.g., `max_global_num`) and engine configuration control **pool size and scaling**, rather than `pool_size` on the decorator.
+
+This design lets tools focus on logic (`env.step(action)`) while the engine manages isolation, pooling, and reuse behind the scenes.
+
+## Tool Return Values
+
+A `@tool` function returns either a `str` (used directly as the observation the LLM sees) or a `dict`. If it returns a dict, the dict must include an `observation: str` key; an optional `image` key is extracted to its own field for multi-modal tools, and any other keys are forwarded as extra info alongside the observation.
+
+Internally, the framework normalizes both shapes into a typed `ToolResult` at the boundary (`agentfly.tools.BaseTool._format_result`), exposing `.observation: str`, `.image: Optional[str]`, `.info: Dict[str, Any]`, plus `.name` and `.arguments`. You don't need to construct `ToolResult` yourself — the conversion is automatic. The chain code receives the typed form (or the legacy dict shape via `ToolResult.to_dict()` during the migration window).
+
+## Tool Calling Formats
+
+In practice, the **format** used for tool calls can significantly affect the stability of agentic RL:
+
+- Many base models struggle to reliably emit deeply nested **JSON** when arguments contain code or long texts, which can break parsing mid-training.
+- XML-style wrappers (e.g. `<search>...</search>`) have shown more stable behavior for search-style tools in our experiments (similar to the Search-R1 setting).
+
+AgentFly’s tool system is **format-agnostic** at the framework level—the parsing is implemented in the agent / template layer (e.g. `HFAgent`, `SearchR1Agent`). When designing new agents and templates for RL:
+
+- Prefer **simple, robust formats** (XML-style tags or shallow JSON) for tool calls.
+- Make sure the parsing logic is tolerant to minor generation noise (truncation, extra text) so that rollouts remain usable throughout long training runs.

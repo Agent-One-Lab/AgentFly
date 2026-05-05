@@ -61,18 +61,18 @@ The traditional approach loads models locally:
 
 ```python
 from agentfly.agents import ImageEditingAgent
-from agentfly.agents.llm_backends import AsyncVLLMConfig
 
-# Create an agent with asynchronous vllm backend
-agent = ImageEditingAgent(
-    model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
-    template="qwen2.5-vl-system-tool",
-    backend="async_vllm",
-    backend_config=AsyncVLLMConfig(
-        pipeline_parallel_size=4,
-        gpu_memory_utilization=0.5
-    ),
-    streaming="console"
+--8<-- "tests/unit/agents/test_image_agent/test_image_agent_backends.py:async_vllm_backend"
+```
+
+You may also pass an `AsyncVLLMConfig` dataclass instead of the dict:
+
+```python
+from agentfly.utils.llm_backends import AsyncVLLMConfig
+
+backend_config = AsyncVLLMConfig(
+    pipeline_parallel_size=4,
+    gpu_memory_utilization=0.5,
 )
 ```
 
@@ -87,35 +87,17 @@ python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct
 
 ```python
 from agentfly.agents import ImageEditingAgent
-from agentfly.agents.llm_backends import ClientConfig
 
-# Create an agent with client backend for local server
-agent = ImageEditingAgent(
-    model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
-    backend="client",
-    backend_config=ClientConfig(
-        base_url="http://0.0.0.0:8000/v1",
-    ),
-    streaming="console"
-)
+--8<-- "tests/unit/agents/test_image_agent/test_image_agent_backends.py:client_backend"
 ```
 
 #### Using OpenAI Backend (Cloud)
 
 ```python
+import os
 from agentfly.agents import ImageEditingAgent
-from agentfly.agents.llm_backends import ClientConfig
 
-# Create an agent with OpenAI backend
-agent = ImageEditingAgent(
-    model_name_or_path="gpt-5-mini",
-    backend="client",
-    backend_config=ClientConfig(
-        base_url="https://api.openai.com/v1",
-        api_key="your-openai-api-key",
-    ),
-    streaming="console"
-)
+--8<-- "tests/unit/agents/test_image_agent/test_image_agent_backends.py:openai_backend"
 ```
 
 ### Available Tools
@@ -130,37 +112,9 @@ The ImageEditingAgent contains four tools:
 ### Running the Agent
 
 ```python
-# Prepare your messages with images
-messages_list = [
-    {
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg"
-                    },
-                    {
-                        "type": "text",
-                        "text": "Find what animal is in the image, then inpaint it with a cat."
-                    }
-                ]
-            }
-        ]
-    }
-]
+--8<-- "tests/unit/agents/test_image_agent/test_image_agent.py:messages_list"
 
-# Run the agent
-await agent.run(
-    messages=messages_list,
-    max_turns=4,
-    num_chains=1,
-    enable_streaming=True
-)
-
-# Print the conversation
-agent.print_messages(index=0)
+--8<-- "tests/unit/agents/test_image_agent/test_image_agent.py:agent_run_print"
 ```
 
 ## Streaming Support
@@ -174,7 +128,6 @@ The ImageEditingAgent supports real-time streaming of responses and tool executi
 agent = ImageEditingAgent(
     model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
     template="qwen2.5-vl-system-tool",
-    backend="async_vllm",
     backend_config=AsyncVLLMConfig(
         pipeline_parallel_size=4,
         gpu_memory_utilization=0.5
@@ -200,7 +153,7 @@ await agent.run(
 The AsyncVLLM backend is optimized for local inference with GPU acceleration:
 
 ```python
-from agentfly.agents.llm_backends import AsyncVLLMConfig
+from agentfly.utils.llm_backends import AsyncVLLMConfig
 
 backend_config = AsyncVLLMConfig(
     pipeline_parallel_size=4,        # Number of pipeline parallel stages
@@ -216,7 +169,7 @@ backend_config = AsyncVLLMConfig(
 The Client backend connects to external API servers:
 
 ```python
-from agentfly.agents.llm_backends import ClientConfig
+from agentfly.utils.llm_backends import ClientConfig
 
 # For local server
 backend_config = ClientConfig(
@@ -342,7 +295,7 @@ Here's a complete example showing how to use the ImageEditingAgent with differen
 ```python
 import asyncio
 from agentfly.agents import ImageEditingAgent
-from agentfly.agents.llm_backends import AsyncVLLMConfig, ClientConfig
+from agentfly.utils.llm_backends import AsyncVLLMConfig, ClientConfig
 
 async def main():
     # Choose your backend configuration
@@ -350,7 +303,6 @@ async def main():
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend="async_vllm",
         backend_config=AsyncVLLMConfig(
             pipeline_parallel_size=4,
             gpu_memory_utilization=0.5

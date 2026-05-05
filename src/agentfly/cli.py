@@ -1,6 +1,8 @@
 import sys
 from importlib import import_module
 
+from .templates import *  # noqa: F403
+
 
 def main():
     """
@@ -12,7 +14,9 @@ def main():
         print("Usage: agentfly <command> [args...]")
         print("\nAvailable commands:")
         print("  train    - Run the PPO training script with Hydra arguments.")
-        print("  deploy   - Deploy a service (placeholder).")
+        print("  deploy   - Print a vLLM serve command for local inference.")
+        print("  swebench - Run an SWE-Bench-style agent over a JSON dataset.")
+        print("  search   - Start the dense-retriever HTTP server.")
         sys.exit(0)
 
     command = sys.argv[1]
@@ -26,6 +30,14 @@ def main():
         target_module.main()
     elif command == "deploy":
         target_module = import_module(".utils.deploy", package="agentfly")
+        sys.argv = [target_module.__file__] + sys.argv[2:]
+        target_module.main()
+    elif command == "search":
+        target_module = import_module(".tools.src.search.retriever_server", package="agentfly")
+        sys.argv = [target_module.__file__] + sys.argv[2:]
+        target_module.main()
+    elif command == "swebench":
+        target_module = import_module(".utils.swebench", package="agentfly")
         sys.argv = [target_module.__file__] + sys.argv[2:]
         target_module.main()
     else:

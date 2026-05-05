@@ -10,16 +10,31 @@ from typing import Dict, List
 import click
 
 from ..agents import HFAgent
-from ..agents.llm_backends.backend_configs import ClientConfig
 
 
-def gather_responses(trajectories: List[Dict]):
+def gather_responses(trajectories):
+    """Extract (id, response_text) for each trajectory.
+
+    Reads the chain UUID and the last message of the last segment. ``id``
+    falls back to the dataset-row ``id`` field (e.g. HotpotQA) if present.
+    """
     responses = []
     for trajectory in trajectories:
+        last_segment = trajectory.segments[-1] if trajectory.segments else []
+        last_msg = last_segment[-1] if last_segment else {}
+        content = last_msg.get("content")
+        if isinstance(content, list):
+            text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
+            response_text = "".join(text_parts)
+        elif isinstance(content, str):
+            response_text = content
+        else:
+            response_text = ""
+
         responses.append(
             {
-                "id": trajectory["id"],
-                "response": trajectory["messages"][-1]["content"][0]["text"],
+                "id": trajectory.chain_id or trajectory.metadata.get("id"),
+                "response": response_text,
             }
         )
 
@@ -31,6 +46,12 @@ def gather_responses(trajectories: List[Dict]):
 @click.option("--api_key", type=str, default="EMPTY")
 @click.option("--max_turns", type=int, required=True)
 @click.option("--num_chains", type=int, default=1, required=True)
+@click.option(
+    "--max_concurrent_chains",
+    type=int,
+    default=None,
+    help="Concurrent chain cap; omit uses default (64). Use 0 for unlimited.",
+)
 @click.option("--data_file", type=str, required=True)
 @click.option("--output_dir", type=str, required=True)
 def main(
@@ -38,6 +59,7 @@ def main(
     api_key: str,
     max_turns: int,
     num_chains: int,
+    max_concurrent_chains: int,
     data_file: str,
     output_dir: str,
 ):
@@ -48,21 +70,22 @@ def main(
         agent = HFAgent(
             model_name_or_path=model_name_or_path,
             tools=[],
-            backend="client",
-            backend_config=ClientConfig(
-                base_url="http://0.0.0.0:8000/v1",
-                api_key=api_key,
-                max_new_tokens=30720,
-                timeout=2400,
-            ),
+            backend_config={
+                "backend": "client",
+                "base_url": "http://0.0.0.0:8000/v1",
+                "api_key": api_key,
+                "max_tokens": 30720,
+                "timeout": 2400,
+            },
             local_cache_dir="test_cache",
         )
-        await agent.run(
+        result = await agent.run(
             messages=messages,
             num_chains=num_chains,
+            max_concurrent_chains=max_concurrent_chains,
             max_turns=max_turns,
         )
-        responses = gather_responses(agent.trajectories)
+        responses = gather_responses(result.trajectories)
 
         os.makedirs(output_dir, exist_ok=True)
         with open(

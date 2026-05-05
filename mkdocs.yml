@@ -75,7 +75,11 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path:
+        - .
+      check_paths: true
+      dedent_subsections: true
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.tasklist:
@@ -99,11 +103,17 @@ nav:
     - start/first_agent.md
     - start/first_tool_reward.md
     - start/first_training.md
+    - start/data_preparation.md
+    - start/hydra_config.md
+    - start/cli.md
+    - start/build_your_own_task.md
   - Features & Concepts:
+    - features/system_architecture.md
     - features/agent_rollout.md
     - features/tool_system.md
+    - features/tool_for_class_method.md
     - features/reward_system.md
-    - features/environments.md
+    - features/resources.md
   - API Reference:
     - api_references/index.md
     - Agents:
@@ -119,19 +129,19 @@ nav:
       - api_references/rewards/index.md
       - api_references/rewards/reward.md
       - api_references/rewards/predefined_rewards.md
-    - Environments:
-      - api_references/environments/index.md
-      - api_references/environments/environment.md
-      - api_references/environments/predefined_envs.md
-    - Chat Template:
-      - api_references/chat_template/index.md
-      - api_references/chat_template/template.md
-      - api_references/chat_template/chat.md
+    - Resources:
+      - api_references/resources/index.md
+      - api_references/resources/resources.md
+      - api_references/resources/resource_engine.md
+      - api_references/resources/predefined_envs.md
     - Training:
       - api_references/training/index.md
       - api_references/training/training.md
   - Examples:
     - examples/predefined_training_examples.md
+    - examples/image_agent.md
+    - examples/swe.md
+    - examples/simuscene.md
 
 extra:
   social:

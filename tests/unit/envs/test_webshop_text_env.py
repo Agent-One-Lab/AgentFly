@@ -1,5 +1,5 @@
 import pytest
-from agentfly.envs import WebAgentTextEnv
+from agentfly.envs import WebShopSpec
 
 STANDARD_BUTTONS = [
     "buy Now",
@@ -33,64 +33,64 @@ STANDARD_BUTTONS = [
 
 
 @pytest.mark.asyncio
-async def test_env_full_shopping_flow():
-    env = WebAgentTextEnv()
-    await env.start()
-    await env.reset(env_args={"question": "Buy serta executive chair"})
-    # Start on homepage and search for shoes
-    actions = env.get_available_actions()
-    assert actions["has_search_bar"] is True
-    observation = await env.step("search[serta executive]")
+async def test_env_full_shopping_flow(local_runner):
+    env = await local_runner.start_resource(WebShopSpec)
+    try:
+        await env.reset(env_args={"question": "Buy serta executive chair"})
+        # Start on homepage and search for shoes
+        actions = env.get_available_actions()
+        assert actions["has_search_bar"] is True
+        observation = await env.step("search[serta executive]")
 
-    # Click first product
-    actions = env.get_available_actions()
-    assert len(actions["clickables"]) > 0
-    product_list = [
-        button.lower()
-        for button in actions["clickables"]
-        if button.lower() not in STANDARD_BUTTONS
-    ]
-    first_product = product_list[0]
-    observation = await env.step(f"click[{first_product}]")
-    current_page = env.state["url"].split("/")[1]
-    assert current_page == "item_page"
+        # Click first product
+        actions = env.get_available_actions()
+        assert len(actions["clickables"]) > 0
+        product_list = [
+            button.lower()
+            for button in actions["clickables"]
+            if button.lower() not in STANDARD_BUTTONS
+        ]
+        first_product = product_list[0]
+        observation = await env.step(f"click[{first_product}]")
+        current_page = env.state["url"].split("/")[1]
+        assert current_page == "item_page"
 
-    # Click through product pages
-    observation = await env.step("click[description]")
-    current_page = env.state["url"].split("/")[1]
-    current_sub_page = env.state["url"].split("/")[-2]
-    assert current_page == "item_sub_page"
-    assert current_sub_page.lower() == "description"
-    observation = await env.step("click[features]")
-    current_page = env.state["url"].split("/")[1]
-    current_sub_page = env.state["url"].split("/")[-2]
-    assert current_page == "item_sub_page"
-    assert current_sub_page.lower() == "features"
-    observation = await env.step("click[reviews]")
-    current_page = env.state["url"].split("/")[1]
-    current_sub_page = env.state["url"].split("/")[-2]
-    assert current_page == "item_sub_page"
-    assert current_sub_page.lower() == "reviews"
+        # Click through product pages
+        observation = await env.step("click[description]")
+        current_page = env.state["url"].split("/")[1]
+        current_sub_page = env.state["url"].split("/")[-2]
+        assert current_page == "item_sub_page"
+        assert current_sub_page.lower() == "description"
+        observation = await env.step("click[features]")
+        current_page = env.state["url"].split("/")[1]
+        current_sub_page = env.state["url"].split("/")[-2]
+        assert current_page == "item_sub_page"
+        assert current_sub_page.lower() == "features"
+        observation = await env.step("click[reviews]")
+        current_page = env.state["url"].split("/")[1]
+        current_sub_page = env.state["url"].split("/")[-2]
+        assert current_page == "item_sub_page"
+        assert current_sub_page.lower() == "reviews"
 
-    # Select two product attributes, skipped for now due to most of the product not having options
-    # actions = env.get_available_actions()
-    # print(observation)
-    # observation = await env.step(f'click[black magic]')
-    # options = literal_eval(env.state['url'].split('/')[-1])
-    # assert len(options) == 1
-    # actions = env.get_available_actions()
-    # observation = await env.step(f'click[1.37 pound (pack of 1)]')
-    # options = literal_eval(env.state['url'].split('/')[-1])
-    # assert len(options) == 2
+        # Select two product attributes, skipped for now due to most of the product not having options
+        # actions = env.get_available_actions()
+        # print(observation)
+        # observation = await env.step(f'click[black magic]')
+        # options = literal_eval(env.state['url'].split('/')[-1])
+        # assert len(options) == 1
+        # actions = env.get_available_actions()
+        # observation = await env.step(f'click[1.37 pound (pack of 1)]')
+        # options = literal_eval(env.state['url'].split('/')[-1])
+        # assert len(options) == 2
 
-    # Complete purchase
-    observation = await env.step("click[buy now]")
-    current_page = env.state["url"].split("/")[1]
-    assert current_page == "done"
-    assert "observation" in observation
-    assert "reward" in observation
-
-    await env.aclose()
+        # Complete purchase
+        observation = await env.step("click[buy now]")
+        current_page = env.state["url"].split("/")[1]
+        assert current_page == "done"
+        assert "observation" in observation
+        assert "reward" in observation
+    finally:
+        await local_runner.end_resource(env)
 
 
 # @pytest.mark.asyncio
