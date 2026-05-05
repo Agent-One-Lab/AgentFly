@@ -87,14 +87,14 @@ async def main():
         template="qwen2.5",
         backend_config={"backend": "async_vllm"},
     )
-    await agent.run(
+    result = await agent.run(
         messages=messages,
         max_turns=3,
         num_chains=1,
     )
 
-    trajectories = agent.trajectories
-    print(trajectories)
+    print(result.trajectories)
+    print(result.rewards)
 
 asyncio.run(main())
 ```
