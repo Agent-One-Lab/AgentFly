@@ -25,10 +25,11 @@ def _coerce_context_config(raw: Optional[Any]) -> ContextConfig:
 
 
 def _spec_key(spec: BaseResourceSpec) -> str:
-    """Stable hashable key for a spec (category + image or model)."""
+    """Stable hashable key for a spec (category + image / model / env_cls)."""
     image = getattr(spec, "image", None)
     model_name_or_path = getattr(spec, "model_name_or_path", None)
-    return f"{spec.category}:{image or model_name_or_path or 'default'}"
+    env_cls_path = getattr(spec, "env_cls_path", None)
+    return f"{spec.category}:{image or model_name_or_path or env_cls_path or 'default'}"
 
 
 class Context:

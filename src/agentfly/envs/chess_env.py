@@ -11,7 +11,14 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import chess
 import chess.engine
 
+from ..resources import LocalEnvResourceSpec
 from .env_base import BaseEnv
+
+
+ChessPuzzleSpec = LocalEnvResourceSpec(
+    env_cls_path="agentfly.envs.chess_env.ChessPuzzleEnv",
+    max_global_num=8,
+)
 
 
 def _find_stockfish() -> str:

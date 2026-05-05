@@ -77,6 +77,23 @@ class APIModelResourceSpec(BaseResourceSpec):
     request_timeout: Optional[float] = None
 
 
+@dataclass
+class LocalEnvResourceSpec(BaseResourceSpec):
+    """In-process local Python env (no container, no remote process).
+
+    The runner imports ``env_cls_path`` (a dotted path to a :class:`BaseEnv`
+    subclass), instantiates it with ``init_kwargs``, calls ``start``, and
+    wraps it in a :class:`LocalEnvResource` so it satisfies the
+    :class:`BaseResource` contract. Attribute access on the wrapper
+    delegates to the underlying env, so callers can use the env directly
+    (``env.step(...)``, ``env.is_solved``, ...).
+    """
+
+    category: Literal["local_env"] = "local_env"
+    env_cls_path: str = ""
+    init_kwargs: Dict[str, Any] = field(default_factory=dict)
+
+
 
 class ResourceStatus(str, Enum):
     """Execution / lifecycle status of a resource."""

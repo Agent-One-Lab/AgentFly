@@ -11,6 +11,7 @@ from .types import (
     BaseResourceSpec,
     ContainerCategory,
     ContainerResourceSpec,
+    LocalEnvResourceSpec,
     ResourceStatus,
     VLLMModelResourceSpec,
 )
@@ -27,6 +28,7 @@ from .containers import (
     RayEnrootContainerActor,
     create_ray_container_resource,
 )
+from .local_env_resource import LocalEnvResource
 from .models import APIModelResource, VLLMModelResource
 from .engine import ResourceEngine
 
@@ -36,6 +38,7 @@ __all__ = [
     "BaseResourceSpec",
     "ContainerCategory",
     "ContainerResourceSpec",
+    "LocalEnvResourceSpec",
     "VLLMModelResourceSpec",
     "APIModelResourceSpec",
     "BaseRunner",
@@ -44,6 +47,7 @@ __all__ = [
     "CloudRunner",
     "K8sRunner",
     "ContainerResource",
+    "LocalEnvResource",
     "VLLMModelResource",
     "APIModelResource",
     "ResourceEngine",

@@ -23,7 +23,8 @@ def _pool_key(spec: BaseResourceSpec, backend: str) -> str:
     """Stable key for (spec, backend). Use '|' so backend can be parsed."""
     image = getattr(spec, "image", None)
     model_name_or_path = getattr(spec, "model_name_or_path", None)
-    spec_key = f"{spec.category}:{image or model_name_or_path or 'default'}"
+    env_cls_path = getattr(spec, "env_cls_path", None)
+    spec_key = f"{spec.category}:{image or model_name_or_path or env_cls_path or 'default'}"
     key = f"{spec_key}|{backend}"
     if backend == "ray":
         # Same image with different Ray placement options must not share a pool entry.

@@ -14,11 +14,13 @@ import logging
 from enroot import from_env, random_name
 from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
 from .containers import ContainerResource, create_ray_container_resource
+from .local_env_resource import LocalEnvResource
 from .models import APIModelResource, VLLMModelResource
 from .types import (
     APIModelResourceSpec,
     BaseResource,
     ContainerResourceSpec,
+    LocalEnvResourceSpec,
     ResourceStatus,
     BaseResourceSpec,
     VLLMModelResourceSpec,
@@ -172,6 +174,8 @@ class LocalRunner(BaseRunner):
             return await self._start_vllm(spec, resource_id, timeout=timeout)
         if spec.category == "api_model":
             return await self._start_api_model(spec, resource_id, timeout=timeout)
+        if spec.category == "local_env":
+            return await self._start_local_env(spec, resource_id, timeout=timeout)
         raise ValueError(f"LocalRunner does not support resource category: {spec.category}")
 
     async def _start_container(
@@ -217,6 +221,29 @@ class LocalRunner(BaseRunner):
             resource_id=resource_id,
             startup_timeout=startup_timeout,
         )
+        await resource.start()
+        return resource
+
+    async def _start_local_env(
+        self,
+        spec: LocalEnvResourceSpec,
+        resource_id: Optional[str],
+        timeout: Optional[float] = None,
+    ) -> BaseResource:
+        if not spec.env_cls_path:
+            raise ValueError("LocalEnvResourceSpec requires env_cls_path.")
+        module_path, _, cls_name = spec.env_cls_path.rpartition(".")
+        if not module_path:
+            raise ValueError(
+                f"env_cls_path must be a fully qualified dotted path, got: {spec.env_cls_path!r}"
+            )
+        import importlib
+
+        module = importlib.import_module(module_path)
+        env_cls = getattr(module, cls_name)
+        env = env_cls(**spec.init_kwargs)
+        rid = resource_id or random_name(prefix="local_env")
+        resource = LocalEnvResource(env=env, resource_id=rid, spec=spec)
         await resource.start()
         return resource
 
