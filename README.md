@@ -39,6 +39,8 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 ## News
 
+**4/2026 SWE and SimuScene**: Added SWE-Bench style (R2E-Gym) tasks and [SimuScene](https://arxiv.org/abs/2602.10840) training.
+
 **3/2026 Resource System**: Added a resource system for better environment and container management, and integrated SWE like tasks training.
 
 **12/2025 Method-Based Tool**: Support using `@tool` for a class method
