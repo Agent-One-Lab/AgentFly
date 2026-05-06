@@ -12,25 +12,6 @@ STANDARD_BUTTONS = [
     "attributes",
 ]
 
-# @pytest.mark.asyncio
-# async def test_env_initialization():
-#     env = WebAgentTextEnv()
-#     assert env.image == "rifoag/webshop-simulator-env:latest"
-#     assert env.runtime == "runc"
-#     assert env.cpu == 2
-#     assert env.mem == "2g"
-#     assert env.host_ip == "127.0.0.1"
-#     assert env.observation_mode == 'text'
-
-# @pytest.mark.asyncio
-# async def test_env_start_and_close():
-#     env = WebAgentTextEnv()
-#     await env.start()
-#     assert env._client is not None
-#     await env.reset()
-#     await env.close()
-#     assert env._client is None
-
 
 @pytest.mark.asyncio
 async def test_env_full_shopping_flow(local_runner):
