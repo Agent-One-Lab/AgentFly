@@ -63,13 +63,13 @@ sleep 10
 model=Qwen/Qwen3.5-4B
 lr=4e-7
 max_model_len=102400
-max_new_tokens_per_turn=4096
+max_new_tokens_per_turn=2048
 val_batch_size=512
 train_batch_size=8
 num_chains=8
 max_concurrent_chains=48
 mini_batch_size=$((train_batch_size * num_chains))
-sequence_parallel_size=4
+sequence_parallel_size=8
 kl_coef=0.001
 train_dataset="./data/rlhf/os/r2e-gym-lite.json"
 eval_dataset="./data/rlhf/os/r2e-gym-lite.json"
@@ -102,7 +102,12 @@ total_training_steps=300
 lr_warmup_steps_ratio=0.01
 project_name="Resource"
 
-experiment_name="swe_r2e_gym_tools_${base_model_name}_${adv_estimator}_valueposition-${SSPO_MULTITURN_VALUE_POSITION}"
+# lora settings
+lora_rank=32
+lora_alpha=64
+lora_target_modules="all-linear"
+
+experiment_name="swe_r2e_gym_tools_${base_model_name}_${adv_estimator}_valueposition-${SSPO_MULTITURN_VALUE_POSITION}_lora_${lora_rank}"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
@@ -125,6 +130,13 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.model.lora_rank=$lora_rank \
+    actor_rollout_ref.model.lora_alpha=$lora_alpha \
+    actor_rollout_ref.model.lora.rank=$lora_rank \
+    actor_rollout_ref.model.lora.alpha=$lora_alpha \
+    actor_rollout_ref.model.use_fused_kernel=True \
+    actor_rollout_ref.model.target_modules=$lora_target_modules \
+    actor_rollout_ref.model.lora.merge=True \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=$sequence_parallel_size \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
@@ -134,9 +146,9 @@ python -m agentfly.cli train \
     actor_rollout_ref.actor.kl_loss_type=$kl_loss_type \
     actor_rollout_ref.actor.entropy_coeff=$entropy_coeff \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.model.enable_activation_offload=True \
-    actor_rollout_ref.actor.fsdp_config.param_offload=True \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.model.enable_activation_offload=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=vllm \
