@@ -16,7 +16,7 @@ jobs:
         python-version: ["3.12"]
         test-file:
           - tests/unit/envs/ --ignore=tests/unit/envs/test_scienceworld_env.py --ignore=tests/unit/envs/test_webshop_text_env.py
-          - tests/unit/rewards/ --ignore=tests/unit/rewards/swe/
+          - tests/unit/rewards/ --ignore=tests/unit/rewards/swe/ --ignore=tests/unit/rewards/test_webshop_reward.py
           - tests/unit/tools/ --ignore=tests/unit/tools/test_webshop_tool.py --ignore=tests/unit/tools/test_scienceworld_tool.py
           - tests/unit/resources/
           - tests/unit/foundations/
