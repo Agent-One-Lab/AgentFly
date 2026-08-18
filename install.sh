@@ -2,6 +2,9 @@
 
 # AgentFly Installation Script
 # This script handles the complete installation of AgentFly and its dependencies
+# using uv (https://docs.astral.sh/uv/). uv creates and manages a project-local
+# virtual environment (.venv), pins Python 3.12, and installs from the committed
+# uv.lock for a reproducible environment.
 
 set -e  # Exit on any error
 
@@ -41,6 +44,22 @@ check_sudo() {
     else
         return 1
     fi
+}
+
+# Function to install uv
+install_uv() {
+    print_status "Installing uv (https://astral.sh/uv)..."
+    if command_exists curl; then
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+    elif command_exists wget; then
+        wget -qO- https://astral.sh/uv/install.sh | sh
+    else
+        print_error "Neither curl nor wget found. Install uv manually: https://docs.astral.sh/uv/getting-started/installation/"
+        return 1
+    fi
+    # The official installer drops uv in ~/.local/bin (or $XDG_BIN_HOME).
+    export PATH="$HOME/.local/bin:$PATH"
+    command_exists uv
 }
 
 # Function to install enroot
@@ -121,104 +140,12 @@ install_enroot() {
     fi
 }
 
-# Function to check conda and create agentfly environment
-setup_conda_environment() {
-    if ! command_exists conda; then
-        print_error "conda not found. Please install conda first."
-        exit 1
-    fi
-
-    print_success "conda found"
-
-    # Check if agentfly environment already exists
-    if conda env list | grep -q "agentfly"; then
-        print_status "agentfly environment already exists, activating it..."
-        conda activate agentfly
-        if [ $? -eq 0 ]; then
-            print_success "agentfly environment activated"
-            INSTALLATION_STATUS+=("conda environment activation: SUCCESS")
-        else
-            print_error "Failed to activate existing agentfly environment"
-            INSTALLATION_STATUS+=("conda environment activation: FAILED")
-            return 1
-        fi
-    else
-        print_status "Creating new conda environment 'agentfly' with Python 3.12..."
-        conda create -n agentfly python=3.12 -y
-        if [ $? -eq 0 ]; then
-            print_success "agentfly environment created successfully!"
-            INSTALLATION_STATUS+=("conda environment creation: SUCCESS")
-        else
-            print_error "Failed to create agentfly environment"
-            INSTALLATION_STATUS+=("conda environment creation: FAILED")
-            return 1
-        fi
-
-        print_status "Activating agentfly environment..."
-        conda activate agentfly
-        if [ $? -eq 0 ]; then
-            print_success "agentfly environment activated"
-            INSTALLATION_STATUS+=("conda environment activation: SUCCESS")
-        else
-            print_error "Failed to activate agentfly environment"
-            INSTALLATION_STATUS+=("conda environment activation: FAILED")
-            return 1
-        fi
-    fi
-}
-
-# Function to install redis-server via conda
-install_redis() {
-    print_status "Installing redis-server via conda..."
-
-    # Ensure conda is in PATH
-    if command_exists conda; then
-        conda install -y conda-forge::redis-server==7.4.0
-        if [ $? -eq 0 ]; then
-            print_success "redis-server installed successfully!"
-            return 0
-        else
-            print_error "Failed to install redis-server"
-            return 1
-        fi
-    else
-        print_error "conda not found. Please install conda first or install redis-server manually."
-        return 1
-    fi
-}
-
 # Main installation function
 main() {
     echo "=========================================="
     echo "    AgentFly Installation Script"
     echo "=========================================="
     echo ""
-
-    # Check Python version (will be checked again after conda environment setup)
-    print_status "Checking Python version..."
-    if command_exists python3; then
-        PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-        print_status "Found Python version: $PYTHON_VERSION"
-        INSTALLATION_STATUS+=("Python availability: SUCCESS")
-    else
-        print_error "Python 3 not found. Please install Python 3.12.x first."
-        INSTALLATION_STATUS+=("Python availability: FAILED")
-        exit 1
-    fi
-
-    # Check pip
-    print_status "Checking pip..."
-    if command_exists pip3; then
-        print_success "pip3 found"
-        INSTALLATION_STATUS+=("pip availability: SUCCESS")
-    elif command_exists pip; then
-        print_success "pip found"
-        INSTALLATION_STATUS+=("pip availability: SUCCESS")
-    else
-        print_error "pip not found. Please install pip first."
-        INSTALLATION_STATUS+=("pip availability: FAILED")
-        exit 1
-    fi
 
     # Check git
     print_status "Checking git..."
@@ -231,47 +158,58 @@ main() {
         exit 1
     fi
 
-    # Initialize git submodules
-    print_status "Initializing git submodules..."
+    # Check out the verl submodule (imported through the src/agentfly/verl
+    # symlink) ONLY if it has not been checked out yet. If it is already present,
+    # leave it untouched so local changes in verl/ are never clobbered by a
+    # re-run of this script. A leading '-' in `git submodule status` marks an
+    # uninitialized submodule.
+    print_status "Checking verl submodule..."
     if [ -d ".git" ]; then
-        git submodule init
-        if [ $? -eq 0 ]; then
-            git submodule update
-            if [ $? -eq 0 ]; then
-                print_success "Git submodules initialized successfully!"
-                INSTALLATION_STATUS+=("Git submodules: SUCCESS")
+        if git submodule status verl 2>/dev/null | grep -q '^-'; then
+            print_status "verl submodule not initialized; checking it out..."
+            if git submodule update --init verl; then
+                print_success "verl submodule checked out!"
+                INSTALLATION_STATUS+=("verl submodule: SUCCESS")
             else
-                print_error "Failed to update git submodules"
-                INSTALLATION_STATUS+=("Git submodules: FAILED")
+                print_error "Failed to check out verl submodule"
+                INSTALLATION_STATUS+=("verl submodule: FAILED")
             fi
         else
-            print_error "Failed to init git submodules"
-            INSTALLATION_STATUS+=("Git submodules: FAILED")
+            print_success "verl submodule already present; leaving it untouched"
+            INSTALLATION_STATUS+=("verl submodule: SKIPPED (already present)")
         fi
     else
-        print_warning "Not in a git repository. Skipping submodule initialization."
-        INSTALLATION_STATUS+=("Git submodules: SKIPPED (not git repo)")
+        print_warning "Not in a git repository. Skipping submodule checkout."
+        INSTALLATION_STATUS+=("verl submodule: SKIPPED (not git repo)")
     fi
 
-    # Install Python dependencies
-    print_status "Installing basic Python dependencies, this may take a while..."
-    pip install -e . > /dev/null
-    if [ $? -eq 0 ]; then
-        print_success "Basic dependencies installed successfully!"
-        INSTALLATION_STATUS+=("Basic Python dependencies: SUCCESS")
+    # Check uv (installs Python 3.12 + all dependencies from uv.lock)
+    print_status "Checking uv..."
+    if command_exists uv; then
+        print_success "uv found ($(uv --version))"
+        INSTALLATION_STATUS+=("uv availability: SUCCESS")
     else
-        print_error "Failed to install basic dependencies"
-        INSTALLATION_STATUS+=("Basic Python dependencies: FAILED")
+        print_warning "uv not found. Installing it..."
+        if install_uv; then
+            print_success "uv installed ($(uv --version))"
+            INSTALLATION_STATUS+=("uv installation: SUCCESS")
+        else
+            print_error "Failed to install uv. Install it manually: https://docs.astral.sh/uv/getting-started/installation/"
+            INSTALLATION_STATUS+=("uv installation: FAILED")
+            exit 1
+        fi
     fi
 
-    print_status "Installing VERL dependencies..."
-    pip install -e '.[verl]' --no-build-isolation > /dev/null
-    if [ $? -eq 0 ]; then
-        print_success "VERL dependencies installed successfully!"
-        INSTALLATION_STATUS+=("VERL dependencies: SUCCESS")
+    # Install AgentFly + training (verl) dependencies into a project-local .venv.
+    # uv provisions Python 3.12, resolves from uv.lock, and builds liger-kernel
+    # without build isolation (configured in pyproject.toml [tool.uv]).
+    print_status "Installing AgentFly and training dependencies (this may take a while)..."
+    if uv sync --extra verl; then
+        print_success "AgentFly (with verl extras) installed successfully!"
+        INSTALLATION_STATUS+=("AgentFly dependencies: SUCCESS")
     else
-        print_error "Failed to install VERL dependencies"
-        INSTALLATION_STATUS+=("VERL dependencies: FAILED")
+        print_error "Failed to install AgentFly dependencies"
+        INSTALLATION_STATUS+=("AgentFly dependencies: FAILED")
     fi
 
     # Check and install enroot if needed
@@ -298,25 +236,6 @@ main() {
         fi
     fi
 
-    # Check conda availability
-    print_status "Checking conda availability..."
-    if command_exists conda; then
-        print_success "conda found"
-        INSTALLATION_STATUS+=("conda availability: SUCCESS")
-    else
-        print_error "conda not found. Please install conda first."
-        INSTALLATION_STATUS+=("conda availability: FAILED")
-        exit 1
-    fi
-
-    # Install redis-server (assuming we're already in a conda environment)
-    print_status "Installing redis-server via conda..."
-    if install_redis; then
-        INSTALLATION_STATUS+=("redis-server installation: SUCCESS")
-    else
-        INSTALLATION_STATUS+=("redis-server installation: FAILED")
-    fi
-
     # Final checks and summary
     echo ""
     echo "=========================================="
@@ -325,25 +244,33 @@ main() {
 
     print_status "Checking installed components..."
 
-    if command_exists python3; then
-        PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-        if [[ "$PYTHON_VERSION" =~ ^3\.12\. ]]; then
-            print_success "✓ Python 3.12.x ($PYTHON_VERSION)"
-            INSTALLATION_STATUS+=("Python 3.12.x verification: SUCCESS")
-        else
-            print_error "✗ Python version $PYTHON_VERSION does not meet requirements (need 3.10.x)"
-            INSTALLATION_STATUS+=("Python 3.12.x verification: FAILED")
-        fi
+    if command_exists uv; then
+        print_success "✓ uv ($(uv --version))"
+        INSTALLATION_STATUS+=("uv verification: SUCCESS")
     else
-        print_error "✗ Python 3 not found"
-        INSTALLATION_STATUS+=("Python 3.12.x verification: FAILED")
+        print_error "✗ uv not found"
+        INSTALLATION_STATUS+=("uv verification: FAILED")
     fi
 
-    if [ -d "src/AgentFly.egg-info" ]; then
-        print_success "✓ AgentFly package"
+    if [ -x ".venv/bin/python" ]; then
+        VENV_PYTHON_VERSION=$(.venv/bin/python --version 2>&1 | awk '{print $2}')
+        if [[ "$VENV_PYTHON_VERSION" =~ ^3\.12\. ]]; then
+            print_success "✓ .venv Python 3.12.x ($VENV_PYTHON_VERSION)"
+            INSTALLATION_STATUS+=(".venv Python 3.12.x verification: SUCCESS")
+        else
+            print_warning "✗ .venv Python is $VENV_PYTHON_VERSION (expected 3.12.x)"
+            INSTALLATION_STATUS+=(".venv Python 3.12.x verification: FAILED")
+        fi
+    else
+        print_error "✗ .venv not found"
+        INSTALLATION_STATUS+=(".venv verification: FAILED")
+    fi
+
+    if [ -x ".venv/bin/python" ] && .venv/bin/python -c "import agentfly" >/dev/null 2>&1; then
+        print_success "✓ agentfly importable"
         INSTALLATION_STATUS+=("AgentFly package verification: SUCCESS")
     else
-        print_error "✗ AgentFly package not found"
+        print_error "✗ agentfly not importable"
         INSTALLATION_STATUS+=("AgentFly package verification: FAILED")
     fi
 
@@ -353,26 +280,6 @@ main() {
     else
         print_warning "✗ enroot (not installed - some tools may not work)"
         INSTALLATION_STATUS+=("enroot verification: FAILED")
-    fi
-
-    if command_exists conda; then
-        print_success "✓ conda"
-        INSTALLATION_STATUS+=("conda verification: SUCCESS")
-    else
-        print_error "✗ conda not found"
-        INSTALLATION_STATUS+=("conda verification: FAILED")
-    fi
-
-    # Skip agentfly environment check - assuming we're already in a conda environment
-    print_success "✓ conda environment (assuming active)"
-    INSTALLATION_STATUS+=("conda environment verification: SKIPPED (assumed active)")
-
-    if command_exists redis-server; then
-        print_success "✓ redis-server"
-        INSTALLATION_STATUS+=("redis-server verification: SUCCESS")
-    else
-        print_error "✗ redis-server not found"
-        INSTALLATION_STATUS+=("redis-server verification: FAILED")
     fi
 
     echo ""
@@ -419,9 +326,10 @@ main() {
 
     echo ""
     print_status "Next steps:"
-    echo "  1. If you just installed enroot, you may need to restart your terminal"
-    echo "  2. Check the documentation at: https://agentfly.readthedocs.io/"
-    echo "  3. Try running an example: cd verl && bash examples/run_agents/run_code_agent.sh"
+    echo "  1. Activate the environment:  source .venv/bin/activate   (or prefix commands with 'uv run')"
+    echo "  2. If you just installed enroot, you may need to restart your terminal"
+    echo "  3. Redis-backed tools (e.g. search) need a redis-server on your PATH; install it separately if you use them"
+    echo "  4. Check the documentation at: https://agent-one-lab.github.io/AgentFly"
     echo ""
 }
 

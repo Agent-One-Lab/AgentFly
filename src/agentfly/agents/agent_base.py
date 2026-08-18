@@ -11,7 +11,6 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import numpy as np
 import torch
 from chat_bricks import (
-    get_template,
     split_messages_with_assistant,
     tokenize_conversations,
 )
@@ -20,17 +19,22 @@ from termcolor import colored
 from ..templates import *  # noqa: F403
 from ..rewards.types import RewardResult
 from ..tools.tool_base import BaseTool
+from ..tools.src.skills import Skill
 from ..core.context import Context
 from ..core.context_config import ContextConfig
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
 from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
-from .chain.chain_base import ChainRollout
-from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
+from .rollout.chain import ChainRollout
 from .types import RunResult, Trajectory
 from ..utils.llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
 from ..utils.llm_backends.backend_configs import BACKEND_CONFIGS
 from .utils.messages import MessagesList
-from .utils.tokenizer import create_processor, create_tokenizer
+from .utils.tokenizer import create_processor, create_tokenizer, get_jinja_template
+from .utils.tool_parser import (
+    ChatCompletionRequest,
+    VLLM_TOOL_PARSER_AVAILABLE,
+    create_tool_parser,
+)
 
 try:
     from ..verl.protocol import DataProto
@@ -39,43 +43,6 @@ except ImportError:
     pass
 
 from transformers import AutoTokenizer
-
-ChatCompletionRequest = None
-ToolParserManager = None
-VLLM_TOOL_PARSER_AVAILABLE = False
-
-try:
-    # vLLM >= 0.19: ChatCompletionRequest lives under chat_completion.protocol;
-    # ToolParserManager is exposed from vllm.tool_parsers.
-    from vllm.entrypoints.openai.chat_completion.protocol import (
-        ChatCompletionRequest,
-    )
-    from vllm.tool_parsers import ToolParserManager
-
-    VLLM_TOOL_PARSER_AVAILABLE = True
-except ImportError:
-    try:
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-        from vllm.entrypoints.openai.tool_parsers import ToolParserManager
-
-        VLLM_TOOL_PARSER_AVAILABLE = True
-    except ImportError:
-        pass
-
-if VLLM_TOOL_PARSER_AVAILABLE:
-
-    def silence_tool_parsers():
-        # vLLM has used both namespaces across versions
-        prefixes = [
-            "vllm.tool_parsers",
-            "vllm.entrypoints.openai.tool_parsers",
-        ]
-        for p in prefixes:
-            lg = logging.getLogger(p)
-            lg.setLevel(logging.CRITICAL + 1)
-            lg.propagate = False  # don't bubble to root handlers
-
-    silence_tool_parsers()
 
 logger = logging.getLogger(__name__)
 
@@ -190,10 +157,10 @@ class BaseAgent(ChainRollout, ABC):
         template: str = None,
         system_prompt: str = None,
         tools: List = [],
+        skills: List = [],
         max_model_len: int = None,
         backend_config: Optional[Dict[str, Any]] = None,
         reward_fn: Callable = None,
-        streaming: str = "console",
         debug: bool = False,
         monitors: List[str] = ["wandb"],
         wandb_project_name: str = None,
@@ -201,6 +168,8 @@ class BaseAgent(ChainRollout, ABC):
         local_cache_dir: str = None,
         tool_parser: Optional[Any] = None,
         tool_parser_name: Optional[str] = None,
+        default_tool_call_source: str = "parser",
+        invalid_tool_call_as_observation: bool = True,
         **kwargs,  # To pass other unused arguments
     ):
         """
@@ -209,14 +178,34 @@ class BaseAgent(ChainRollout, ABC):
             template: The template to use for the agent.
             system_prompt: The system prompt to use for the agent.
             tools: The tools to use for the agent.
+            skills: Optional list of ``Skill`` objects (or skill names) to advertise to the model in the system
+                prompt's ``<available_skills>`` section. The skill content (SKILL.md body, scripts, references)
+                is loaded on demand via the ``load_skill`` tool — only ``name`` + ``description`` are surfaced here.
             debug: Whether to enable debug mode.
             backend_config: Dict specifying the backend and its parameters. Must include "backend" (e.g. "async_vllm", "client").
                 Other keys are passed as kwargs to that backend (e.g. "gpu_memory_utilization" for async_vllm).
                 Defaults to {"backend": "async_vllm"}.
             tool_parser: Optional tool parser instance from vLLM. If provided, will be used for parsing tool calls.
             tool_parser_name: Optional name of the tool parser to use (e.g., "hermes", "pythonic"). If provided and tool_parser is None, will create a parser using this name.
+            default_tool_call_source: Which tool calls to use when both are available. ``"parser"`` (default) re-parses
+                the response text with the agent's own tool parser (falling back to backend-provided tool calls only
+                when no parser is set); ``"backend"`` prefers tool calls already parsed by the inference backend
+                (e.g. an OpenAI-compatible server with ``--enable-auto-tool-choice``), falling back to the local
+                parser per response when the backend provided none.
+            invalid_tool_call_as_observation: Policy for an *invalid tool call* — one the model formed with the
+                wrong shape: an unknown/hallucinated tool name, arguments that are not a JSON object, or unknown
+                argument names. ``True`` (default) feeds the model a ``status="error"`` observation with an
+                informative hint (which tools are available / which arguments are expected) so the chain continues
+                and the model can recover on the next turn; ``False`` raises ``InvalidToolCallError`` (fail-fast),
+                aborting the rollout on the first invalid call. This is deliberately distinct from an error raised
+                *inside* a tool's body while it runs — that is a runtime tool error, governed separately by the
+                ``TOOL_ERROR_AS_OBSERVATION`` env policy.
 
         """
+        if default_tool_call_source not in ("parser", "backend"):
+            raise ValueError(
+                f"default_tool_call_source must be 'parser' or 'backend', got: {default_tool_call_source!r}"
+            )
         if backend_config is None:
             backend_config = {"backend": "async_vllm"}
         self._validate_init_args(
@@ -226,7 +215,6 @@ class BaseAgent(ChainRollout, ABC):
             tools,
             backend_config,
             reward_fn,
-            streaming,
             debug,
             monitors,
             wandb_project_name,
@@ -241,7 +229,11 @@ class BaseAgent(ChainRollout, ABC):
         self.backend = backend_config["backend"]
         self.tools = tools
         self.max_model_len = max_model_len
+        self.default_tool_call_source = default_tool_call_source
+        self.invalid_tool_call_as_observation = invalid_tool_call_as_observation
         self.tool_names = [tool.name for tool in tools]
+        self.skills = self._normalize_skills(skills)
+        self.skill_names = [s.name for s in self.skills]
 
         if isinstance(system_prompt, str):
             system_prompt = system_prompt.replace("\\n", "\n")
@@ -264,7 +256,7 @@ class BaseAgent(ChainRollout, ABC):
         if self.template is None:
             self.jinja_template = None
         else:
-            self.jinja_template = get_template(self.template).jinja_template()
+            self.jinja_template = get_jinja_template(self.template)
 
         self.llm_engine = self._init_llm_engine(model_name_or_path, self.backend)
 
@@ -274,22 +266,10 @@ class BaseAgent(ChainRollout, ABC):
         self.local_run_cache_dir = None
         self._initialize_monitor(monitors)
 
-        self.streaming_manager = StreamingManager()
-        if streaming == "console":
-            self.streaming_manager.add_observer(ConsoleStreamObserver())
-        else:
-            # TODO: Support other streaming modes
-            raise ValueError(f"Streaming mode {streaming} is not supported.")
-
         # Initialize tool parser
         self.tool_parser = tool_parser
         if self.tool_parser is None and tool_parser_name is not None:
-            if not VLLM_TOOL_PARSER_AVAILABLE:
-                raise ImportError(
-                    "vLLM tool parser is not available. Please install vllm to use tool_parser_name."
-                )
-            ParserCls = ToolParserManager.get_tool_parser(tool_parser_name)
-            self.tool_parser = ParserCls(self.tokenizer)
+            self.tool_parser = create_tool_parser(tool_parser_name, self.tokenizer)
 
         super().__init__()
 
@@ -308,7 +288,6 @@ class BaseAgent(ChainRollout, ABC):
         tools,
         backend_config,
         reward_fn,
-        streaming,
         debug,
         monitors,
         wandb_project_name,
@@ -407,18 +386,65 @@ class BaseAgent(ChainRollout, ABC):
         """
         messages_list = MessagesList.from_data(messages)
         tools = [tool.schema for tool in self.tools]
-        if self.system_prompt and "{tools}" in self.system_prompt:
-            system_prompt = self.system_prompt.replace(
-                "{tools}", json.dumps(tools, indent=4)
-            )
-        else:
-            system_prompt = self.system_prompt
+        system_prompt = self.system_prompt
+        if system_prompt:
+            if "{tools}" in system_prompt:
+                system_prompt = system_prompt.replace(
+                    "{tools}", json.dumps(tools, indent=4)
+                )
+            # Skills ride in the system message content (not the chat template's
+            # ``chat_template_kwargs``) so hosted models (OpenAI/Gemini) advertise
+            # them the same way local vLLM does. ``{skills}`` expands to the full
+            # block or "" — no dangling header when the agent has no skills.
+            if "{skills}" in system_prompt:
+                system_prompt = system_prompt.replace(
+                    "{skills}", self._render_skills_block()
+                )
 
         for messages in messages_list:
             if system_prompt:
                 messages.set_system_prompt(system_prompt, enforce=False)
 
         return messages_list.to_list()
+
+    @staticmethod
+    def _normalize_skills(skills) -> List["Skill"]:
+        """Accept ``Skill`` objects or skill names (str); resolve names to ``Skill``."""
+        if not skills:
+            return []
+        normalized: List[Skill] = []
+        for item in skills:
+            if isinstance(item, Skill):
+                normalized.append(item)
+            elif isinstance(item, str):
+                from ..tools.src.skills import load_skills
+                normalized.extend(load_skills([item]))
+            else:
+                raise TypeError(
+                    f"skills entries must be Skill or str, got {type(item).__name__}"
+                )
+        return normalized
+
+    def _render_skills_block(self) -> str:
+        """Render the agent's skills for the system-prompt ``{skills}`` slot.
+
+        Returns the full ``<available_skills>`` block (lead-in + one entry per
+        skill) when the agent has skills, or an empty string when it has none —
+        so the ``{skills}`` slot leaves no dangling header for a skill-less agent.
+        Only ``name`` + ``description`` are surfaced here; the SKILL.md body,
+        scripts, and references are loaded on demand via the ``load_skill`` tool.
+        """
+        if not self.skills:
+            return ""
+        entries = "\n".join(
+            f"<skill>\n<name>{s.name}</name>\n"
+            f"<description>{s.description}</description>\n</skill>"
+            for s in self.skills
+        )
+        return (
+            "You have the following available skills:\n"
+            f"<available_skills>\n{entries}\n</available_skills>"
+        )
 
     def _preprocess_backends(self):
         self.llm_engine.preprocess()
@@ -513,30 +539,6 @@ class BaseAgent(ChainRollout, ABC):
         """
         return await self.llm_engine.generate_async(messages_list_or_inputs, **kwargs)
 
-    async def generate_streaming(
-        self, messages_list_or_inputs: List[List[Dict]], **kwargs
-    ):
-        """
-        Generate responses with streaming support. This method yields response chunks as they are generated.
-
-        Args:
-            messages_list_or_inputs: List of messages to generate responses for.
-            **args: Additional arguments for generation.
-
-        Yields:
-            str: Response chunks as they are generated.
-        """
-        if hasattr(self.llm_engine, "generate_streaming"):
-            async for chunk in self.llm_engine.generate_streaming(
-                messages_list_or_inputs, **kwargs
-            ):
-                yield chunk
-        else:
-            # Fallback to non-streaming generation
-            responses = await self.generate_async(messages_list_or_inputs, **kwargs)
-            for response in responses:
-                yield response
-
     @property
     def timing_data(self):
         return self.timer.timing_data
@@ -621,6 +623,7 @@ class BaseAgent(ChainRollout, ABC):
         self,
         responses: List[str],
         context: Optional[Context] = None,
+        tool_calls: Optional[List] = None,
         **kwargs,
     ) -> List[Dict]:
         """
@@ -659,7 +662,14 @@ class BaseAgent(ChainRollout, ABC):
         ]
         ```
         """
-        # If tool_parser is available, use it
+        if tool_calls is not None and not any(tool_calls):
+            tool_calls = None
+
+        # ``default_tool_call_source`` decides whether the local parser or the
+        # backend-provided tool calls take precedence when both are available.
+        prefer_backend = getattr(self, "default_tool_call_source", "parser") == "backend"
+
+        # If a local tool parser is available, use it.
         if self.tool_parser is not None:
             if self.tools is None or len(self.tools) == 0:
                 return [
@@ -672,22 +682,107 @@ class BaseAgent(ChainRollout, ABC):
                     }
                     for response in responses
                 ]
-            return self._parse_with_tool_parser(responses)
+            # When the parser is preferred (default), ignore backend tool calls and
+            # re-parse the text; when the backend is preferred, pass them through so
+            # ``_parse_with_tool_parser`` uses them (falling back to the parser per response).
+            return self._parse_with_tool_parser(
+                responses,
+                backend_tool_calls=tool_calls if prefer_backend else None,
+            )
+        elif tool_calls is not None or self.backend == "client":
+            # No local parser: tool calls (if any) come from the backend itself, e.g. an
+            # OpenAI-compatible server with --enable-auto-tool-choice. A response with no
+            # tool call is a valid terminal text turn, not a parsing failure — so the client
+            # backend never needs a local parser, even when this turn produced no tool call.
+            def _calls_for(i: int):
+                if tool_calls is None or i >= len(tool_calls):
+                    return None
+                return tool_calls[i]
+
+            return [
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": response}],
+                    "tool_calls": self._format_tool_calls(_calls_for(i)),
+                    "loss": True,
+                    "status": "continue" if _calls_for(i) else "terminal",
+                }
+                for i, response in enumerate(responses)
+            ]
         else:
-            # If no tool_parser, raise NotImplementedError to force subclasses to implement
+            # No parser, and the backend does not parse tool calls for us (e.g. async_vllm /
+            # verl return raw text only). The subclass must implement parsing or provide one.
             raise NotImplementedError(
                 "parse method must be implemented by subclass or tool_parser must be provided. "
                 "Either override this method or provide tool_parser/tool_parser_name in __init__."
             )
 
-    def _parse_with_tool_parser(self, responses: List[str]) -> List[Dict]:
+    def _format_tool_calls(self, raw_tool_calls: Optional[List]) -> List[Dict]:
+        """Normalize tool calls (vLLM ToolCall objects or OpenAI-style dicts) to our format.
+
+        Accepts either vLLM ``ToolCall`` objects (from the local tool parser) or plain
+        dicts (from an OpenAI-compatible backend). Tool calls whose ``arguments`` are not
+        valid JSON are dropped.
         """
-        Parse responses using vLLM tool parser.
+        formatted: List[Dict] = []
+        for tool_call in raw_tool_calls or []:
+            # vLLM ToolCall object with .function.name / .function.arguments
+            if hasattr(tool_call, "function") and hasattr(tool_call.function, "name"):
+                name = tool_call.function.name
+                arguments_str = tool_call.function.arguments
+                call_id = getattr(tool_call, "id", None)
+                call_type = getattr(tool_call, "type", "function")
+            elif isinstance(tool_call, dict) and "function" in tool_call:
+                func_info = tool_call["function"]
+                if isinstance(func_info, dict):
+                    name = func_info.get("name", "")
+                    arguments_str = func_info.get("arguments", "")
+                else:
+                    name = getattr(func_info, "name", "")
+                    arguments_str = getattr(func_info, "arguments", "")
+                call_id = tool_call.get("id", None)
+                call_type = tool_call.get("type", "function")
+            else:
+                continue
+
+            # Validate that arguments is a valid JSON string before accepting the call.
+            try:
+                json.loads(arguments_str)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(
+                    f"Invalid JSON in tool call arguments for {name}: {arguments_str}"
+                )
+                continue
+
+            formatted.append(
+                {
+                    "id": call_id,
+                    "type": call_type,
+                    "function": {"name": name, "arguments": arguments_str},
+                }
+            )
+        return formatted
+
+    def _parse_with_tool_parser(
+        self,
+        responses: List[str],
+        backend_tool_calls: Optional[List] = None,
+    ) -> List[Dict]:
+        """
+        Build assistant messages, preferring tool calls already parsed by the backend.
+
+        When the inference backend (e.g. an OpenAI-compatible server started with
+        ``--enable-auto-tool-choice``) parses tool calls itself, it strips the tool-call
+        markup out of ``content`` and returns structured ``tool_calls``. In that case we
+        must use those directly: re-running the local vLLM parser on the stripped text
+        would find nothing. Only when the backend did not provide tool calls for a given
+        response do we fall back to parsing the raw text with ``self.tool_parser``.
 
         Args:
             responses: List of response strings to parse.
-            tools: List of tool objects.
-            **args: Additional arguments.
+            backend_tool_calls: Optional per-response tool calls from the backend, aligned
+                to ``responses``. Each entry is a list of OpenAI-style tool-call dicts, or
+                ``None`` when the backend did not parse any for that response.
 
         Returns:
             List of assistant messages with tool_calls.
@@ -712,91 +807,39 @@ class BaseAgent(ChainRollout, ABC):
                     continue
 
         new_messages_list = []
-        for response in responses:
-            # Create a ChatCompletionRequest for the parser
-            # We use a minimal request structure
-            req_dict = {
-                "messages": [
-                    {"role": "user", "content": "dummy"}
-                ],  # Dummy message, not used for parsing
-                "tool_choice": "auto",
-            }
-            if tool_schemas:
-                req_dict["tools"] = tool_schemas
+        for i, response in enumerate(responses):
+            backend_calls = (
+                backend_tool_calls[i]
+                if backend_tool_calls is not None and i < len(backend_tool_calls)
+                else None
+            )
 
-            req = ChatCompletionRequest(**req_dict)
+            if backend_calls:
+                # Backend already parsed tool calls and stripped them from the text;
+                # trust those instead of re-parsing the stripped response.
+                formatted_tool_calls = self._format_tool_calls(backend_calls)
+                info_status = None
+            else:
+                # Create a ChatCompletionRequest for the parser
+                # We use a minimal request structure
+                req_dict = {
+                    "messages": [
+                        {"role": "user", "content": "dummy"}
+                    ],  # Dummy message, not used for parsing
+                    "tool_choice": "auto",
+                }
+                if tool_schemas:
+                    req_dict["tools"] = tool_schemas
 
-            # Adjust request (some parsers may modify it)
-            req = self.tool_parser.adjust_request(req)
+                req = ChatCompletionRequest(**req_dict)
 
-            # Extract tool calls from the response
-            info = self.tool_parser.extract_tool_calls(response, req)
+                # Adjust request (some parsers may modify it)
+                req = self.tool_parser.adjust_request(req)
 
-            # Format tool calls to match our expected format
-            formatted_tool_calls = []
-            if info.tool_calls:
-                for tool_call in info.tool_calls:
-                    # tool_call is a vLLM ToolCall object with attributes: id, type, function
-                    # function is a FunctionCall object with attributes: name, arguments
-                    if hasattr(tool_call, "function") and hasattr(
-                        tool_call.function, "name"
-                    ):
-                        # Handle ToolCall object from vLLM
-                        arguments_str = tool_call.function.arguments
-                        # Validate that arguments is a valid JSON string
-                        try:
-                            json.loads(arguments_str)
-                            # If valid JSON, append the tool call
-                            formatted_tool_calls.append(
-                                {
-                                    "id": getattr(tool_call, "id", None),
-                                    "type": getattr(tool_call, "type", "function"),
-                                    "function": {
-                                        "name": tool_call.function.name,
-                                        "arguments": arguments_str,  # Already a JSON string
-                                    },
-                                }
-                            )
-                        except (json.JSONDecodeError, TypeError):
-                            # Invalid JSON, skip this tool call
-                            # logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
-                            continue
-                    elif isinstance(tool_call, dict):
-                        # Fallback: handle dictionary format (for compatibility)
-                        if "function" in tool_call:
-                            func_info = tool_call["function"]
-                            arguments_str = (
-                                func_info.get("arguments", "")
-                                if isinstance(func_info, dict)
-                                else getattr(func_info, "arguments", "")
-                            )
-                            # Validate that arguments is a valid JSON string
-                            try:
-                                json.loads(arguments_str)
-                                # If valid JSON, append the tool call
-                                formatted_tool_calls.append(
-                                    {
-                                        "id": tool_call.get("id", None),
-                                        "type": "function",
-                                        "function": {
-                                            "name": func_info.get("name", "")
-                                            if isinstance(func_info, dict)
-                                            else getattr(func_info, "name", ""),
-                                            "arguments": arguments_str,
-                                        },
-                                    }
-                                )
-                            except (json.JSONDecodeError, TypeError):
-                                # Invalid JSON, skip this tool call
-                                tool_name = (
-                                    func_info.get("name", "")
-                                    if isinstance(func_info, dict)
-                                    else getattr(func_info, "name", "unknown")
-                                )
-                                logger.warning(
-                                    f"Invalid JSON in tool call arguments for {tool_name}: {arguments_str}"
-                                )
-                                continue
+                # Extract tool calls from the response
+                info = self.tool_parser.extract_tool_calls(response, req)
+                formatted_tool_calls = self._format_tool_calls(info.tool_calls)
+                info_status = getattr(info, "status", None)
 
             # Use the full response text (not the text after removing tool calls)
             content_text = response
@@ -809,8 +852,8 @@ class BaseAgent(ChainRollout, ABC):
             }
 
             # Add status if available
-            if hasattr(info, "status"):
-                message["status"] = info.status
+            if info_status is not None:
+                message["status"] = info_status
             elif len(formatted_tool_calls) > 0:
                 message["status"] = "continue"
             else:

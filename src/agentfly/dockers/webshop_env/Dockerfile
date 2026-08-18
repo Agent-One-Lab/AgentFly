@@ -1,9 +1,8 @@
-FROM ubuntu:latest
+FROM ubuntu:24.04
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies including Java
+# System deps (Java 21 for pyserini/Lucene)
 RUN apt-get update && apt-get install -y \
     openjdk-21-jdk \
     wget \
@@ -12,60 +11,60 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Minoconda
-RUN mkdir -p ~/miniconda3
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda3/miniconda.sh
-RUN bash ~/miniconda3/miniconda.sh -b -u -p ~/miniconda3
-RUN rm ~/miniconda3/miniconda.sh
-
-# Add Miniconda to PATH
+# Miniconda + Python 3.10
+RUN mkdir -p /root/miniconda3 && \
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /root/miniconda3/miniconda.sh && \
+    bash /root/miniconda3/miniconda.sh -b -u -p /root/miniconda3 && \
+    rm /root/miniconda3/miniconda.sh
 ENV PATH="/root/miniconda3/bin:$PATH"
-RUN ~/miniconda3/bin/conda install -y python=3.10
-SHELL ["/bin/bash", "-c"]
-RUN ~/miniconda3/bin/conda init --all
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+RUN conda install -y python=3.10
 
-# # Install Python dependencies
+# Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Download spaCy model, TODO: may need to change to en_core_web_lg
 RUN python -m spacy download en_core_web_sm
 
-# Download dataset
-RUN mkdir -p /app/data && \
-    cd /app/data && \
-    # Download items_human_ins
-    gdown https://drive.google.com/uc?id=14Kb5SPBk_jfdLZ_CDBNitW98QLDlKR5O && \
-    mkdir -p /app/data/full && \
-    cd /app/data/full && \
-    # gdown https://drive.google.com/uc?id=1EgHdxQ_YxqIQlvvq5iKlCrkEKR6-j0Ib -O items_shuffle_1000.json && \
-    # gdown https://drive.google.com/uc?id=1IduG0xl544V_A_jv3tHXC0kyFi7PnyBu -O items_ins_v2_1000.json && \
-    # TODO: change to full data after all testing
-    gdown https://drive.google.com/uc?id=1A2whVgOO0euk5O13n2iYDM0bQRkkRduB && \
-    gdown https://drive.google.com/uc?id=1s2j6NgHljiZzQNL3veZaAiyW_qDEgBNi && \
-    ls -l
+# pyserini's encoder module instantiates openai.OpenAI() at import time and needs a
+# key present (WebShop never uses OpenAI — it's Lucene/BM25 only). A dummy key lets the
+# import succeed, both during the build-time index step and at server startup.
+ENV OPENAI_API_KEY=dummy
 
-RUN cd /app
-# Copy application code and necessary directories
-COPY indexes/ /app/indexes/
+# ---- Data (pre-staged in the build context under data/{full,small}; no gdown, which
+#      is dead for the canonical Drive IDs). See README for how to stage. ----
+ARG DATASET=full
+COPY data/${DATASET} /app/data/${DATASET}
+COPY data/items_human_ins.json /app/data/
+
+# ---- App code ----
+COPY engine.py goal.py normalize.py utils.py webshop_simulator_server.py build_index.py ./
 COPY static/ /app/static/
 COPY templates/ /app/templates/
-COPY engine.py .
-COPY goal.py .
-COPY normalize.py .
-COPY utils.py .
-COPY webshop_simulator_server.py .
 
-# Create and set permissions for temporary directories
+# ---- Build the Lucene index at build time (baked into the image; no runtime rebuild).
+#      The index must match the catalog: DATASET=small -> ~1,000 docs, full -> ~1.18M. ----
+RUN WEBSHOP_DATASET=${DATASET} python build_index.py && \
+    python -m pyserini.index.lucene \
+      --collection JsonCollection \
+      --input /app/resources \
+      --index /app/indexes \
+      --generator DefaultLuceneDocumentGenerator \
+      --threads 16 \
+      --storePositions --storeDocvectors --storeRaw && \
+    rm -rf /app/resources
+
+# ---- Runtime config: server reads these to pick catalog + goal type ----
+#      full -> human goals; small -> synthetic goals (aligned to verl-agent).
+ARG HUMAN_GOALS=1
+ENV WEBSHOP_DATASET=${DATASET}
+ENV WEBSHOP_HUMAN_GOALS=${HUMAN_GOALS}
+
 RUN mkdir -p /tmp /var/tmp /usr/tmp && \
     chmod 1777 /tmp /var/tmp /usr/tmp && \
-    chown -R nobody:nogroup /tmp /var/tmp /usr/tmp && \
     chmod -R 777 /app
 
-# Expose the port the app runs on
 EXPOSE 3000
-
 COPY start.sh /app
 RUN chmod +x /app/start.sh
-# Command to run the application
 ENTRYPOINT ["/app/start.sh"]

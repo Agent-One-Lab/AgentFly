@@ -12,6 +12,8 @@ import os
 import unittest
 import asyncio
 
+import pytest
+
 # Import the agent class
 from agentfly.agents import ImageEditingAgent
 from agentfly.utils.vision import open_image_from_any
@@ -43,6 +45,7 @@ class TestImageTools(unittest.TestCase):
         )
         self.init_image_id = self.agent._store_image(self.test_image)
 
+    @pytest.mark.gpu
     def test_auto_inpaint_image_tool(self):
         """Test auto inpainting tool"""
         print("test_auto_inpaint_image_tool")

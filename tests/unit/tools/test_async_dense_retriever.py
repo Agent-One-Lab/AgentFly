@@ -197,8 +197,8 @@ MOCK_CORPUS_DATA = [
 
 #     with patch.object(async_module, 'GLOBAL_RETRIEVER', None), \
 #          patch.object(sync_module, 'GLOBAL_RETRIEVER', None), \
-#          patch.object(async_module, 'AGENT_DATA_DIR', '.'), \
-#          patch.object(sync_module, 'AGENT_DATA_DIR', '.'), \
+#          patch.object(async_module, 'AF_DATA_DIR', '.'), \
+#          patch.object(sync_module, 'AF_DATA_DIR', '.'), \
 #          patch.object(async_module, 'DenseRetriever') as mock_async_retriever, \
 #          patch.object(sync_module, 'DenseRetriever') as mock_sync_retriever:
 
@@ -247,7 +247,7 @@ MOCK_CORPUS_DATA = [
 #     import agents.tools.src.search.async_dense_retriever as async_module
 
 #     with patch.object(async_module, 'GLOBAL_RETRIEVER', None), \
-#          patch.object(async_module, 'AGENT_DATA_DIR', '.'), \
+#          patch.object(async_module, 'AF_DATA_DIR', '.'), \
 #          patch.object(async_module, 'DenseRetriever') as mock_retriever:
 
 #         mock_instance = MagicMock()
@@ -359,7 +359,7 @@ MOCK_CORPUS_DATA = [
 #         with patch(
 #             'agents.tools.src.search.async_dense_retriever.DenseRetriever',
 #             side_effect=FileNotFoundError("Cannot find corpus or index files")
-#         ), patch.object(async_module, 'AGENT_DATA_DIR', '/non/existent/path'):
+#         ), patch.object(async_module, 'AF_DATA_DIR', '/non/existent/path'):
 #             # This should now raise an error during GLOBAL_RETRIEVER creation
 #             with pytest.raises(FileNotFoundError):
 #                 await async_dense_retrieve(query="test query")

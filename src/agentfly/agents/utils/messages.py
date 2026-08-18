@@ -182,6 +182,48 @@ class Messages:
         out["messages"] = list(self._data["messages"])
         return out
 
+    def set_first_user_content(self, text: str) -> None:
+        """Replace the content of the first user turn with ``text``.
+
+        Used when the instruction should come from the environment (its single source
+        of truth) rather than a baked dataset field — e.g. WebShop, where the agent must
+        read the instruction from the server's ``goals[task_id]`` so it always matches
+        the goal it is graded on.
+        """
+        assert isinstance(text, str), "First user content must be a string."
+        for turn in self._data["messages"]:
+            if turn.get("role") == "user":
+                turn["content"] = [{"type": "text", "text": text}]
+                return
+        raise MessagesValidationError("No user turn to set content on.")
+
+    def append_first_user_content(self, text: str) -> None:
+        """Append ``text`` to the first user turn (blank-line separated).
+
+        Used when the environment contributes an initial observation that should
+        follow the dataset instruction rather than replace it — e.g. ALFWorld,
+        where the goal comes from the dataset question but the initial room
+        observation and admissible actions come from ``env.reset()``.
+        """
+        assert isinstance(text, str), "Appended user content must be a string."
+        for turn in self._data["messages"]:
+            if turn.get("role") == "user":
+                content = turn.get("content")
+                if isinstance(content, list):
+                    existing = "\n".join(
+                        c.get("text", "")
+                        for c in content
+                        if isinstance(c, dict) and c.get("type") == "text"
+                    ).strip()
+                elif isinstance(content, str):
+                    existing = content.strip()
+                else:
+                    existing = ""
+                combined = f"{existing}\n\n{text}" if existing else text
+                turn["content"] = [{"type": "text", "text": combined}]
+                return
+        raise MessagesValidationError("No user turn to append content on.")
+
     def set_system_prompt(self, system_prompt: str, enforce: bool = True) -> None:
         assert isinstance(system_prompt, str), "System prompt must be a string."
 

@@ -1,7 +1,7 @@
 site_name: AgentFly
 site_description: Training scalable LLM agents with RL (multi-turn, asynchronous tools/rewards, multimodal)
 site_author: AgentFly Team
-site_url: https://agent-one-lab.github.io/AgentFly
+site_url: https://agentfly.readthedocs.io/
 
 repo_name: Agent-One-Lab/AgentFly
 repo_url: https://github.com/Agent-One-Lab/AgentFly
@@ -92,8 +92,8 @@ markdown_extensions:
   - toc:
       permalink: true
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
-      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.superfences
 
 nav:
@@ -106,6 +106,7 @@ nav:
     - start/data_preparation.md
     - start/hydra_config.md
     - start/cli.md
+    - start/configuration.md
     - start/build_your_own_task.md
   - Features & Concepts:
     - features/system_architecture.md

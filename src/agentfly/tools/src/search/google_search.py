@@ -7,11 +7,11 @@ import httpx
 import timeout_decorator
 import yaml
 
-from ....__init__ import AGENT_CONFIG_DIR
+from ....__init__ import AF_CONFIG_DIR
 from ....envs.redis_env import RedisEnv
 from ...decorator import tool
 
-config_path = os.path.join(AGENT_CONFIG_DIR, "search.yaml")
+config_path = os.path.join(AF_CONFIG_DIR, "search.yaml")
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
     SERPER_API_KEY = config["SERPER_API_KEY"]

@@ -57,11 +57,11 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 ## Installation
 **Option 1**: One-line Installation:
 ```
-bash install.sh # Assume conda with python3.12.x
+bash install.sh # Installs uv if missing, then builds a project .venv (Python 3.12)
 ```
 **Option 2**: Customized Installation
 
-Please refer to [installation.md](docs/start/installation.md) for custmoized installation.
+Please refer to [installation.md](docs/start/installation.md) for customized installation.
 
 ## Tasks
 

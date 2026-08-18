@@ -18,7 +18,6 @@ async def test_image_editing():
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
         backend_config={"backend": "async_vllm"},
-        streaming="console",  # 实时显示处理过程
     )
 
     # 2. 准备测试用例
@@ -70,7 +69,6 @@ async def test_image_editing():
                 messages=messages_list,
                 max_turns=4,  # 最多4步完成任务
                 num_chains=1,
-                enable_streaming=True,
             )
 
             # 打印结果
@@ -135,7 +133,6 @@ async def test_specific_function():
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
 
     # 测试1: 物体检测并替换
@@ -160,7 +157,7 @@ async def test_specific_function():
         }
     ]
 
-    await agent.run(messages=messages, max_turns=3, num_chains=1, enable_streaming=True)
+    await agent.run(messages=messages, max_turns=3, num_chains=1)
 
     # 显示结果
     agent.print_messages(index=0)
@@ -177,7 +174,6 @@ async def interactive_test():
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
 
     while True:
@@ -208,7 +204,7 @@ async def interactive_test():
         try:
             print("\n⏳ 处理中...")
             await agent.run(
-                messages=messages_list, max_turns=4, num_chains=1, enable_streaming=True
+                messages=messages_list, max_turns=4, num_chains=1
             )
 
             print("\n✅ 处理完成！")

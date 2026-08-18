@@ -164,7 +164,7 @@ class TestTrajectoryReservedKeysLogic:
 
     These don't import the chain (which has heavy deps) — they just confirm
     that the field names we map into match the Trajectory schema, so the
-    chain-side code in chain_base.py won't silently drift.
+    chain-side code in rollout/chain.py won't silently drift.
     """
 
     def test_typed_field_names_match_chain_info_keys(self):

@@ -10,5 +10,4 @@ Complete API reference for AgentFly components.
 - [Tools](tools/index.md) - Tool system and predefined tools
 - [Rewards](rewards/index.md) - Reward functions
 - [Resources](resources/index.md) - Resource interfaces and implementations
-- [Chat Template](chat_template/index.md) - Chat template system
 - [Training](training/index.md) - Training agents with reinforcement learning

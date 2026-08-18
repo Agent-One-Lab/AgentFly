@@ -21,10 +21,23 @@ skip_glob = ["*/verl/*"]
 # Disable import checking - let isort handle it
 ignore = ["I"]
 
+[tool.uv]
+# The CUDA / vLLM stack ships Linux-x86_64 wheels only; restrict lock resolution
+# to that platform so `uv lock` doesn't try (and fail) to solve for macOS/Windows.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# liger-kernel and flash-attn (in the `verl` extra) build against an
+# already-installed torch; they must skip build isolation. Only relevant when
+# `--extra verl` is requested.
+no-build-isolation-package = ["liger-kernel", "flash-attn"]
+# vllm 0.19.0 leaves xgrammar unpinned; xgrammar 0.2.4+ dropped the cp312
+# linux-x86_64 wheel (and ships no sdist), so uv's "install the highest" pick
+# fails on Python 3.12. Hold the known-good version the reference env runs.
+constraint-dependencies = ["xgrammar==0.2.2"]
+
 
 [project]
 name = "AgentFly"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent reinforcement learning framework."
 readme = "README.md"
 requires-python = ">=3.12,<3.13" # Python 3.12.x
@@ -55,13 +68,22 @@ dependencies = [
     "chess",
 ]
 
+[project.scripts]
+agentfly = "agentfly.cli:main"
+
 [project.optional-dependencies]
 verl = [
     "accelerate",
     "codetiming",
-    "datasets",
+    # 2.14.x still uses pyarrow's removed PyExtensionType; 2.16+ dropped it.
+    # Pin to the version the reference env runs (matches known-good pyarrow).
+    "datasets==2.19.0",
     "dill",
-    "flash-attn",
+    # Required by the verl trainer (models load with attn_implementation=
+    # "flash_attention_2"). Was never declared before — the conda env had it
+    # manually. Pinned to the version the reference env runs. Builds against the
+    # installed torch (see no-build-isolation-package in [tool.uv]).
+    "flash-attn==2.8.3",
     "hydra-core",
     "liger-kernel",
     "numpy",
@@ -84,6 +106,10 @@ dev = [
     "pytest-asyncio",
     "pre-commit",
 ]
+# Cloud-sandbox container engine (AF_CONTAINER_ENGINE=daytona).
+daytona = [
+    "daytona>=0.199",
+]
 docs = [
     "mkdocs",
     "mkdocs-material",
@@ -94,6 +120,3 @@ docs = [
     "mkdocs-git-revision-date-localized-plugin",
     "mkdocs-git-authors-plugin",
 ]
-
-[tool.uv.extra-build-dependencies]
-flash-attn = ["torch"]

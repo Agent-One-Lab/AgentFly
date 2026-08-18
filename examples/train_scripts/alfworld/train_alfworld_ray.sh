@@ -26,15 +26,18 @@ model=Qwen/Qwen2.5-3B-Instruct
 lr=1e-6
 length=512  # Increased for longer episodes
 val_batch_size=256
-train_batch_size=64
+train_batch_size=32
 num_chains=8  # More chains for better exploration
 mini_batch_size=$((train_batch_size * num_chains))
 
 max_new_tokens_per_turn=256
 max_model_len=8192
 kl_coef=0.01
-train_dataset="./data/rlhf/alfworld/alfworld_train_tasks_flat.json"
-eval_dataset="./data/rlhf/alfworld/alfworld_val_tasks.json"
+# Full official ALFWorld splits (3553 train / 134 valid_unseen), matching verl-agent.
+# Regenerate with: python examples/data_preprocess/prepare_alfworld.py --out-dir data/rlhf/alfworld
+# Swap eval to alfworld_valid_seen_tasks.json (140) for the in-distribution eval.
+train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
+eval_dataset="./data/rlhf/alfworld/alfworld_valid_unseen_tasks.json"
 tools="[alfworld_step]"
 reward_name="alfworld_episode_reward"
 # adv_estimator=reinforce_plus_plus
@@ -55,26 +58,7 @@ ALFWorld tasks fall into six categories. Recognize your task type from the goal 
 - Cool & Place (e.g., put a cool bottle on the countertop): find the object, pick it up, go to a fridge, cool it there, then place it at the target receptacle.
 - Pick Two & Place (e.g., put two pencils in the drawer): find one instance, place it at the target; then find a second instance, place it there too.
 
-AVAILABLE ACTIONS (objects and receptacles are referred to by class name plus an ID, e.g., mug 1, countertop 2):
-
-Navigation & sensing:
-- go to [receptacle]: move to a receptacle (e.g., go to countertop 1). Only one receptacle at a time.
-- look: describe the current location and what is visible.
-- examine [object/receptacle]: look more closely at an object or receptacle to get detailed information.
-- inventory: list what you are currently carrying.
-
-Object manipulation:
-- take [object] from [receptacle]: pick up an object from a receptacle (you must already be at that receptacle).
-- put [object] in/on [receptacle]: place a held object into or onto a receptacle.
-- open [receptacle]: open a closed receptacle (e.g., drawer, cabinet, fridge, microwave, safe) to see and access its contents.
-- close [receptacle]: close an open receptacle.
-
-Task-specific interactions:
-- use [object]: use a device such as a desklamp (required for Examine in Light tasks; turn on the lamp while holding the target object).
-- heat [object] with [receptacle]: heat a held object using a microwave (you must be at the microwave).
-- cool [object] with [receptacle]: cool a held object using a fridge (you must be at the fridge).
-- clean [object] with [receptacle]: clean a held object using a sinkbasin (you must be at the sinkbasin).
-- toggle [object]: toggle a device on or off.
+Each observation lists the valid actions for the current state under 'Admissible actions:'. Always choose your next action from that list — any command not on it will fail with 'Nothing happens'. Objects and receptacles are referred to by class name plus an ID (e.g., mug 1, countertop 2).
 
 Remember that you must put your action inside <action> and </action> tags."
 
@@ -82,7 +66,7 @@ entropy_coeff=0.01  # Higher entropy for exploration
 kl_loss_type=mse
 agent_type=action
 template="action-agent"
-max_turns=10
+max_turns=50
 total_training_steps=200
 project_name="Open"
 
@@ -134,4 +118,4 @@ python3 -m agentfly.cli train \
     trainer.save_freq=50 \
     trainer.test_freq=25 \
     trainer.total_training_steps=$total_training_steps \
-    trainer.val_before_train=False
+    trainer.val_before_train=True

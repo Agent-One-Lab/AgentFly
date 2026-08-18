@@ -46,7 +46,7 @@ docs = await asyncdense_retrieve("How does photosynthesis work?")
 - E5-base-v2 embeddings (768-dim)
 - FAISS Flat index for similarity search
 - Returns top-3 most relevant documents
-- Automatic corpus and model loading from AGENT_DATA_DIR
+- Automatic corpus and model loading from AF_DATA_DIR
 
 ### dense_retrieve
 
@@ -87,7 +87,7 @@ print(result["observation"])
 - E5-base-v2 embeddings (768-dim)
 - FAISS Flat index for similarity search
 - Returns top-3 most relevant documents
-- Automatic corpus and model loading from AGENT_DATA_DIR
+- Automatic corpus and model loading from AF_DATA_DIR
 
 ## Technical Details
 

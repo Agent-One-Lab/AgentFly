@@ -144,7 +144,6 @@ async def _run_agent_async(
         backend_config=backend_config,
         reward_fn=reward_fn,
         monitors=[],
-        streaming="console",
     )
 
     if agent_kind == "bash":

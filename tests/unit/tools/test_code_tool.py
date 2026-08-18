@@ -14,7 +14,7 @@ async def test_code_run():
     context = Context(rollout_id="demo")
     result = await code_interpreter(code='print("A print test")', context=context)
     print(result)
-    await context.release_resource(scope="rollout")
+    await context.end_resource(scope="global")
     print("done")
 
 
@@ -23,7 +23,7 @@ async def test_code_hang():
     context = Context(rollout_id="demo")
     result = await code_interpreter(code="while True:\n  pass", context=context)
     print(result)
-    await context.release_resource(scope="rollout")
+    await context.end_resource(scope="global")
     print("done")
 
 
@@ -43,5 +43,9 @@ async def test_code_hang():
 async def test_double_release():
     context = Context(rollout_id="x")
     await code_interpreter(code="print('hi')", context=context)
+    # release is a no-op for the rollout scope (code_interpreter acquires
+    # scope="global"); calling it twice must simply not raise.
     await context.release_resource(scope="rollout")
     await context.release_resource(scope="rollout")  # must return instantly (no-op)
+    # actually tear the global sandbox down so no container is leaked.
+    await context.end_resource(scope="global")

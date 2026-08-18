@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List, Optional
 from ...core.context import Context
 from ..agent_base import BaseAgent
-from ..chain.structures import Node
+from ..rollout.structures import Node
 
 # Matches both <action>...</action> and <summarize>...</summarize> blocks.
 TOOL_TAG_PATTERN = re.compile(
@@ -109,6 +109,50 @@ class ActionAgent(BaseAgent):
         super().__init__(
             model_name_or_path, tool_parser_name=tool_parser_name, tools=tools, **kwargs
         )
+
+    # Action tools whose initial observation must come from the env at rollout start.
+    _WEBSHOP_TOOLS = frozenset({"webshop_browser_action", "webshop_browser"})
+    _ALFWORLD_TOOLS = frozenset({"alfworld_step"})
+
+    async def prepare_first_node(self, context: Context, node: Node) -> None:
+        """Seed the first user turn from the env at rollout start, where the env is the
+        source of truth. No-op for tasks that don't need it.
+
+        - WebShop: reset with ``task_id`` and *replace* the first user turn with the
+          server's ``goals[task_id]`` instruction (the goal lives only in the env),
+          matching verl-agent's env-as-source-of-truth.
+        - ALFWorld: reset with ``task_id`` and *append* the initial room observation +
+          admissible actions to the first user turn, so the model's first action is
+          informed rather than blind (the goal already comes from the dataset question).
+          Resetting here also means the first ``alfworld_step`` steps from this state
+          instead of triggering its own reset.
+        """
+        if self.action_tool_name in self._WEBSHOP_TOOLS:
+            await self._prepare_webshop_first_node(context, node)
+        elif self.action_tool_name in self._ALFWORLD_TOOLS:
+            await self._prepare_alfworld_first_node(context, node)
+
+    async def _prepare_webshop_first_node(self, context: Context, node: Node) -> None:
+        from ...envs.webshop_text_env import WebShopSpec
+
+        env = await context.acquire_resource(
+            spec=WebShopSpec, scope="global", backend="local"
+        )
+        await env.reset(env_args=context.metadata)
+        node.messages.set_first_user_content(env.get_instruction_text())
+
+    async def _prepare_alfworld_first_node(self, context: Context, node: Node) -> None:
+        from ...envs.alfworld_env import ALFWorldSpec
+        from ...tools.src.alfworld.tools import format_observation
+
+        env = await context.acquire_resource(
+            spec=ALFWorldSpec, scope="global", backend="local"
+        )
+        meta = context.metadata or {}
+        env_args = {"task_id": meta["task_id"]} if "task_id" in meta else None
+        obs, info = await env.reset(env_args=env_args, split=meta.get("split", "train"))
+        commands = info.get("admissible_commands") if info else None
+        node.messages.append_first_user_content(format_observation(obs, commands))
 
     @staticmethod
     def _count_assistant_turns(turns: List[Dict[str, Any]]) -> int:

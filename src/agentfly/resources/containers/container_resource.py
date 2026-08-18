@@ -1,7 +1,9 @@
 """
 Container resource.
 
-ContainerResource wraps an enroot Container (local placement). Command execution and lifecycle are unified here.
+ContainerResource wraps a container handle (enroot OR docker — any object
+exposing reload/status/exec_run[_async]/kill[_async]). Command execution
+and lifecycle are unified here, independent of the backend engine.
 """
 
 from __future__ import annotations
@@ -9,11 +11,18 @@ from __future__ import annotations
 import asyncio
 import base64
 import shlex
-from typing import Any, Optional
-
-from enroot.errors import TimeoutError as EnrootTimeoutError
+from typing import Any, Optional, Tuple
 
 from ..types import BaseResource, ContainerResourceSpec, ResourceStatus
+
+# Treat the engine's own timeout type as a timeout when present, but don't
+# hard-depend on enroot — the docker backend raises asyncio.TimeoutError.
+_TIMEOUT_EXCS: Tuple[type, ...] = (asyncio.TimeoutError,)
+try:  # pragma: no cover - enroot may be absent in some deployments
+    from enroot.errors import TimeoutError as _EnrootTimeoutError
+    _TIMEOUT_EXCS = (asyncio.TimeoutError, _EnrootTimeoutError)
+except Exception:  # noqa: BLE001
+    pass
 
 
 class ContainerResource(BaseResource):
@@ -133,7 +142,7 @@ class ContainerResource(BaseResource):
                 result = await asyncio.to_thread(
                     self._container.exec_run, exec_args, **kwargs
                 )
-        except EnrootTimeoutError as e:
+        except _TIMEOUT_EXCS as e:
             if timeout is not None:
                 raise asyncio.TimeoutError(
                     f"Command timed out after {timeout} seconds: {cmd}"
@@ -144,3 +153,23 @@ class ContainerResource(BaseResource):
         if isinstance(output, bytes):
             return output.decode("utf-8", errors="replace")
         return output if output is not None else ""
+
+    async def copy_in(self, local_path: str, container_path: str,
+                      timeout: Optional[float] = 300) -> None:
+        """Copy a local file/dir into the container (contents, for a dir).
+
+        Distinct name from the backend handle's ``copy_to`` on purpose: a
+        DockerContainer is its OWN handle, so a same-named method here would be
+        shadowed by the sync handle ``copy_to``. Delegates to the handle's
+        ``copy_to`` (enroot + docker both provide it), preferring an async
+        variant. Used for copy-on-demand staging of tool helpers + skills.
+        """
+        handle = self._container
+        # enroot's put_archive (unlike docker's) does NOT create the destination
+        # dir before untarring, so tar fails with "Cannot open: No such file or
+        # directory". Mirror DockerContainer.put_archive and mkdir -p it first.
+        await self.run_cmd(f"mkdir -p {shlex.quote(container_path)}", timeout=60)
+        if hasattr(handle, "copy_to_async"):
+            await handle.copy_to_async(local_path, container_path, timeout)
+        else:
+            await asyncio.to_thread(handle.copy_to, local_path, container_path)

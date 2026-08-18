@@ -104,10 +104,46 @@ class Context:
                 raise ValueError(
                     "Either id+spec or image_id in metadata must be provided"
                 )
+            # Engine-specific placement/build fields ride along in metadata so
+            # a caller can select and configure the backend per rollout without
+            # constructing a spec itself. ``docker_host`` pins the docker
+            # daemon; ``dockerfile``/``build_context``/``snapshot`` carry the
+            # image DEFINITION that cloud engines (daytona) build server-side,
+            # having no local daemon or registry to receive a pre-built tag.
             spec = ContainerResourceSpec(
                 category="container",
                 image=image_id,
+                docker_host=self.metadata.get("docker_host"),
+                container_engine=self.metadata.get("container_engine"),
+                dockerfile=self.metadata.get("dockerfile"),
+                build_context=self.metadata.get("build_context"),
+                snapshot=self.metadata.get("snapshot"),
+                mount=self.metadata.get("mount"),
+                environment=self.metadata.get("environment"),
             )
+
+        else:
+            # Tools build their OWN container spec (shell/file/skills all do),
+            # so they never take the branch above. Enrich any container spec
+            # with the rollout-level fields from metadata, because HOW the
+            # container is materialized is a property of the rollout, not of
+            # whichever tool happens to touch it first:
+            #   * engine + image definition — a cloud engine has no local
+            #     daemon, so without these the tool's bare `image` is treated
+            #     as a registry ref and the pull fails;
+            #   * mounts — the FIRST acquire creates the container, so seeding
+            #     declared by the caller must be merged in or it is simply lost
+            #     (the tool's own mounts still win on key collision).
+            if getattr(spec, "category", None) == "container":
+                for field in ("container_engine", "dockerfile", "build_context",
+                              "snapshot"):
+                    if getattr(spec, field, None) is None:
+                        value = self.metadata.get(field)
+                        if value is not None:
+                            setattr(spec, field, value)
+                meta_mount = self.metadata.get("mount")
+                if meta_mount:
+                    spec.mount = {**meta_mount, **(spec.mount or {})}
 
         resource_id = id or self.rollout_id
         spec_key = _spec_key(spec)

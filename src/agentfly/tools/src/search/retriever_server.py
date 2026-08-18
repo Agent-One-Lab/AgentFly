@@ -16,14 +16,14 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .... import AGENT_CACHE_DIR
+from .... import AF_CACHE_DIR
 from .async_dense_retriever import DenseRetriever
 
 logger = logging.getLogger(__name__)
 
 # Config from env (same defaults as async_dense_retrieve tool)
-DEFAULT_CORPUS = os.path.join(AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl")
-DEFAULT_INDEX = os.path.join(AGENT_CACHE_DIR, "data", "search", "e5_Flat.index")
+DEFAULT_CORPUS = os.path.join(AF_CACHE_DIR, "data", "search", "wiki-18.jsonl")
+DEFAULT_INDEX = os.path.join(AF_CACHE_DIR, "data", "search", "e5_Flat.index")
 
 app = FastAPI(title="Dense Retriever API", version="1.0")
 retriever: DenseRetriever | None = None

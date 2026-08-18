@@ -60,16 +60,16 @@ GLOBAL_RETRIEVER = None
     max_length=4096,
 )
 async def dense_retrieve(query: str):
-    global AGENT_CACHE_DIR
+    global AF_CACHE_DIR
     if not query.startswith("query:"):
         query = "query: " + query
     global GLOBAL_RETRIEVER
     if GLOBAL_RETRIEVER is None:
         GLOBAL_RETRIEVER = DenseRetriever(
             corpus_file=os.path.join(
-                AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl"
+                AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"
             ),
-            index_file=os.path.join(AGENT_CACHE_DIR, "data", "search", "e5_Flat.index"),
+            index_file=os.path.join(AF_CACHE_DIR, "data", "search", "e5_Flat.index"),
         )
     doc_list = await GLOBAL_RETRIEVER.search(query, 3)
     doc_list = doc_list[0]

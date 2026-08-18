@@ -1,6 +1,7 @@
 """
-File operation tools: module is mounted at INSTALL_PATH in the container;
-each tool acquires the container and runs file_manager.py with the corresponding tool name and params.
+File operation tools: the module is copied (on demand, once per rollout) to
+INSTALL_PATH in the container; each tool acquires the container and runs
+file_manager.py with the corresponding tool name and params.
 """
 
 import asyncio
@@ -8,12 +9,18 @@ import json
 import os
 from typing import Optional
 
+from .... import AF_CONTAINER_TOOLS_DIR
 from ....core import Context
 from ....resources import ContainerResourceSpec
 from ...decorator import tool
 
-# Path inside the container where the file module is mounted
-INSTALL_PATH = "/usr/local/bin"
+# Path inside the container where the file module is mounted. Lives under the
+# single agentfly container home (AF_CONTAINER_TOOLS_DIR = $AF_CONTAINER_HOME/
+# tools) alongside skills + other tool helpers. A dedicated dir (NOT
+# /usr/local/bin) so the read-only bind mount can't shadow image binaries —
+# e.g. python:slim keeps python3/pip in /usr/local/bin, and mounting over it
+# makes `python3` vanish.
+INSTALL_PATH = os.path.join(AF_CONTAINER_TOOLS_DIR, "file")
 # Host path to this module (for mount source)
 FILE_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -25,7 +32,8 @@ def _escape_shell_json(payload: str) -> str:
 
 async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
     """
-    Acquire container with file module mounted at INSTALL_PATH, run file_manager.py with tool name and params.
+    Acquire the rollout container, copy-on-demand the file module to INSTALL_PATH
+    (once per rollout), then run file_manager.py with the tool name and params.
     """
     image_id = context.metadata.get("image_id")
     if not image_id:
@@ -34,9 +42,16 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
     spec = ContainerResourceSpec(
         category="container",
         image=image_id,
-        mount={FILE_MODULE_DIR: f"{INSTALL_PATH}:ro,rbind"},
+        docker_host=context.metadata.get("docker_host"),
     )
     container = await context.acquire_resource(id=rollout_id, spec=spec)
+    # Copy-on-demand: stage the file module into the container the first time a
+    # file tool runs this rollout (no bind mount — works for skills from any
+    # host root too, and avoids the "mounts fixed at first acquire" constraint).
+    staged = context.metadata.setdefault("_staged_paths", set())
+    if INSTALL_PATH not in staged:
+        await container.copy_in(FILE_MODULE_DIR, INSTALL_PATH)
+        staged.add(INSTALL_PATH)
     payload = json.dumps({"tool": tool_name, "params": params})
     escaped = _escape_shell_json(payload)
     # Many SWE images only provide ``python3``; merge stderr so failures are visible on stdout.

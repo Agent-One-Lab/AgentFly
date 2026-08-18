@@ -386,11 +386,21 @@ def _tool_accepts_context(tool_obj: Any) -> bool:
     return False
 
 
+class InvalidToolCallError(Exception):
+    """Raised for an *invalid tool call* — one the model formed with the wrong shape
+    (unknown tool name / non-JSON args / unknown argument names) — when
+    ``invalid_call_as_observation`` is False (fail-fast mode).
+
+    Distinct from an exception raised *inside* a tool's body while it runs: that is a
+    runtime tool error, handled by the ``TOOL_ERROR_AS_OBSERVATION`` policy instead."""
+
+
 async def submit_tool_call(
     tool_name: str,
     tool_input: str,
     context: Optional[Any] = None,
     allowed_tool_names: Optional[List[str]] = None,
+    invalid_call_as_observation: bool = True,
 ) -> dict:
     """
     Submit a tool call to the environment.
@@ -401,18 +411,43 @@ async def submit_tool_call(
         context: Optional Context instance for rollout-scoped data and resources.
                  Injected into tools that accept a `context` parameter.
         allowed_tool_names: Optional list of allowed tool names.
+        invalid_call_as_observation: Policy for an *invalid tool call* — one the model
+            formed with the wrong shape: unknown tool name, arguments that aren't a JSON
+            object, or unknown argument names. ``True`` (default) returns a
+            ``status="error"`` result whose ``observation`` is an informative hint, so
+            the model can read it and recover on the next turn. ``False`` raises
+            :class:`InvalidToolCallError` (fail-fast). This governs the tool-call *shape*
+            only; exceptions raised *inside* a tool's body are handled separately by the
+            ``TOOL_ERROR_AS_OBSERVATION`` policy in :meth:`BaseTool._execute_user_function`.
 
     Returns:
         dict: Tool result with keys like observation, status, etc.
     """
     from .registry import TOOL_REGISTRY
+    from .types import ToolResult
 
     if allowed_tool_names is None:
         allowed_tool_names = list(TOOL_REGISTRY.keys())
 
+    def invalid_call(observation: str, arguments: dict) -> dict:
+        """Apply the invalid-tool-call policy: hint-as-observation, or fail-fast."""
+        if not invalid_call_as_observation:
+            raise InvalidToolCallError(observation)
+        return ToolResult(
+            name=tool_name,
+            arguments=arguments,
+            observation=observation,
+            status="error",
+        ).to_dict()
+
+    # 1. Hallucinated tool: the model named a tool that does not exist. Report the
+    # real name and list what is actually available, so the hint is actionable.
     if tool_name not in allowed_tool_names:
-        tool_name = "hallucination_tool"
-        tool_input = {"tool_name": str(tool_name)}
+        return invalid_call(
+            f'Tool "{tool_name}" does not exist. '
+            f"Available tools: {', '.join(allowed_tool_names)}.",
+            tool_input if isinstance(tool_input, dict) else {"raw": tool_input},
+        )
 
     tool_obj = TOOL_REGISTRY.get(tool_name, None)
     assert tool_obj is not None, f"Tool {tool_name} not found"
@@ -430,10 +465,27 @@ async def submit_tool_call(
     else:
         tool_input_json = None
 
+    tool_args = getattr(tool_obj, "args", None) or {}
+
+    # 2. Arguments were not a JSON object we can splat as kwargs. Show what came in
+    # and the argument names the tool expects.
     if tool_input_json is None:
-        tool_name = "invalid_input_tool"
-        tool_input_json = {"tool_input": tool_input}
-        tool_obj = TOOL_REGISTRY["invalid_input_tool"]
+        expected = ", ".join(tool_args.keys()) or "(none)"
+        return invalid_call(
+            f'Arguments for tool "{tool_name}" must be a JSON object. '
+            f"Received: {tool_input!r}. Expected arguments: {expected}.",
+            {"raw": tool_input},
+        )
+
+    # 3. Unknown argument names (arguments the tool's schema does not declare).
+    unknown = [k for k in tool_input_json if k not in tool_args]
+    if unknown:
+        expected = ", ".join(tool_args.keys()) or "(none)"
+        return invalid_call(
+            f'Unknown argument(s) {", ".join(unknown)} for tool "{tool_name}". '
+            f"Expected arguments: {expected}.",
+            dict(tool_input_json),
+        )
 
     # Inject Context if the tool accepts it
     if context is not None and _tool_accepts_context(tool_obj):

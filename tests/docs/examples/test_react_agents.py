@@ -19,7 +19,6 @@ async def test_code_agent():
         reward_fn=math_equal_reward,
         template="qwen2.5-no-system-tool",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
     run_result = await agent.run(
         messages=[
@@ -36,7 +35,6 @@ async def test_code_agent():
         ],
         max_turns=4,
         num_chains=1,
-        enable_streaming=True,
     )
     print(f"Trajectories: {run_result.trajectories}")
     print(f"Rewards: {run_result.rewards}")
@@ -50,7 +48,6 @@ async def test_react_vqa_agent():
         tools=[answer_qa],
         template="qwen2.5-vl",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
     run_result = await agent.run(
         messages=[
@@ -67,7 +64,6 @@ async def test_react_vqa_agent():
         ],
         max_turns=4,
         num_chains=1,
-        enable_streaming=True,
     )
     print(run_result.trajectories)
 
@@ -80,7 +76,6 @@ async def test_react_vqa_retrieval_agent():
         tools=[async_dense_retrieve, answer_qa],
         template="qwen2.5-vl",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
     run_result = await agent.run(
         messages=[
@@ -100,7 +95,6 @@ async def test_react_vqa_retrieval_agent():
         ],
         max_turns=4,
         num_chains=1,
-        enable_streaming=True,
     )
     print(run_result.trajectories)
 
@@ -114,7 +108,6 @@ async def test_react_scienceworld_agent():
         reward_fn=scienceworld_reward,
         template="qwen2.5-no-system-tool",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
     run_result = await agent.run(
         messages={
@@ -130,7 +123,6 @@ async def test_react_scienceworld_agent():
         },
         max_turns=12,
         num_chains=1,
-        enable_streaming=True,
     )
     print(f"Trajectories: {run_result.trajectories}")
     print(f"Rewards: {run_result.rewards}")
@@ -145,7 +137,6 @@ async def test_react_webshop_agent():
         reward_fn=webshop_reward,
         template="qwen2.5-no-system-tool",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
     run_result = await agent.run(
         messages={
@@ -170,7 +161,6 @@ async def test_react_webshop_agent():
         },
         max_turns=12,
         num_chains=1,
-        enable_streaming=True,
     )
     print(f"Trajectories: {run_result.trajectories}")
     print(f"Rewards: {run_result.rewards}")

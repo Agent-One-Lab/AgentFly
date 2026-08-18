@@ -11,7 +11,7 @@ import torch
 from torch import Tensor
 from transformers import AutoModel, AutoTokenizer
 
-from .... import AGENT_CACHE_DIR
+from .... import AF_CACHE_DIR
 from ...decorator import tool
 from .faiss_indexer import Indexer
 
@@ -178,9 +178,9 @@ async def async_dense_retrieve(query: str):
     if GLOBAL_RETRIEVER is None:
         GLOBAL_RETRIEVER = DenseRetriever(
             corpus_file=os.path.join(
-                AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl"
+                AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"
             ),
-            index_file=os.path.join(AGENT_CACHE_DIR, "data", "search", "e5_Flat.index"),
+            index_file=os.path.join(AF_CACHE_DIR, "data", "search", "e5_Flat.index"),
         )
 
     # Simplified call

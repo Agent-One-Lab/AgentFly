@@ -9,7 +9,6 @@ async def test_image_agent():
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
         backend_config={"backend": "async_vllm"},
-        streaming="console",
     )
     # --8<-- [start:messages_list]
     messages_list = [
@@ -37,7 +36,6 @@ async def test_image_agent():
         messages=messages_list,
         max_turns=4,
         num_chains=1,
-        enable_streaming=True,
     )
     agent.print_messages(index=0)
     # --8<-- [end:agent_run_print]

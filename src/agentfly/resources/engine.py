@@ -26,6 +26,11 @@ def _pool_key(spec: BaseResourceSpec, backend: str) -> str:
     env_cls_path = getattr(spec, "env_cls_path", None)
     spec_key = f"{spec.category}:{image or model_name_or_path or env_cls_path or 'default'}"
     key = f"{spec_key}|{backend}"
+    # Explicit placement partitions the pool: a container pinned to one host must
+    # not be handed to a task that wants a different host.
+    docker_host = getattr(spec, "docker_host", None)
+    if docker_host:
+        key = f"{key}|dh={docker_host}"
     if backend == "ray":
         # Same image with different Ray placement options must not share a pool entry.
         ropts = getattr(spec, "ray_actor_options", None)

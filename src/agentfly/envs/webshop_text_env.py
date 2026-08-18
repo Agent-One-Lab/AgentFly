@@ -1,4 +1,5 @@
 import asyncio
+import os
 import random
 import re
 import string
@@ -24,14 +25,20 @@ ACTION_TO_TEMPLATE = {
     "Attributes": "attributes_page.html",
 }
 
+# WebShop simulator image. Default is the full 1.18M-catalog + human-goals benchmark
+# with a correctly-sized Lucene index (`webshop-env:full`). Set WEBSHOP_IMAGE to
+# `reasonwang/webshop-env:small` for the 1,000-catalog + synthetic-goals variant that
+# is aligned to verl-agent/RAGEN for framework comparison. (The old
+# `rifoag/webshop-simulator-env:latest` shipped a 1,000-doc index over the full
+# catalog -> 0% training-goal coverage; do not use it.)
 WebShopSpec = ContainerResourceSpec(
     category="webshop",
-    image="rifoag/webshop-simulator-env:latest",
+    image=os.environ.get("WEBSHOP_IMAGE", "reasonwang/webshop-env:full"),
     ports={"3000/tcp": None},
     container_port=3000,
     start_timeout=180.0,
     host_ip="127.0.0.1",
-    max_global_num=8,
+    max_global_num=64,
 )
 
 

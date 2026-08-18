@@ -103,6 +103,144 @@ async def _start_enroot_container(
     return resource
 
 
+def _resolve_container_engine(spec: ContainerResourceSpec) -> str:
+    """Pick the container engine for a container spec.
+
+    Order: spec.container_engine -> AF_CONTAINER_ENGINE env -> "enroot".
+    Recognized: "enroot", "docker", "daytona", "sqs".
+    """
+    import os
+    engine = getattr(spec, "container_engine", None)
+    if engine:
+        return str(engine).strip().lower()
+    return os.environ.get("AF_CONTAINER_ENGINE", "enroot").strip().lower()
+
+
+async def _start_docker_container(
+    spec: ContainerResourceSpec,
+    resource_id: Optional[str],
+    timeout: Optional[float] = None,
+    *,
+    containers_registry: Dict[str, Any],
+    runner_label: str = "DockerRunner",
+) -> BaseResource:
+    """Create + start a docker container resource.
+
+    ``DockerContainer`` is itself a :class:`ContainerResource`, so it is returned
+    directly — no separate wrapper. Only the generic ``container`` category is
+    supported on docker; the enroot-specific env categories
+    (python_env/scienceworld/...) remain enroot-only.
+    """
+    from .containers.docker_container import start_docker_container
+
+    if spec.category != "container":
+        raise ValueError(
+            f"docker engine supports only the 'container' category, "
+            f"got {spec.category!r}"
+        )
+    name = resource_id or random_name(prefix="res")
+    image = spec.image or "ubuntu:22.04"
+    timeout_sec = 1800.0 if timeout is None else timeout
+    resource = await asyncio.to_thread(
+        start_docker_container,
+        image,
+        name,
+        spec.environment or {},
+        spec.mount or {},
+        spec.ports,
+        getattr(spec, "workdir", None),
+        timeout_sec,
+        spec=spec,
+    )
+    containers_registry[resource.name] = resource
+    await resource.start()
+    return resource
+
+
+async def _start_daytona_container(
+    spec: ContainerResourceSpec,
+    resource_id: Optional[str],
+    timeout: Optional[float] = None,
+    *,
+    containers_registry: Dict[str, Any],
+    runner_label: str = "DaytonaRunner",
+) -> BaseResource:
+    """Create + start a Daytona cloud-sandbox container resource.
+
+    ``DaytonaContainer`` is itself a :class:`ContainerResource`, so it is
+    returned directly — no separate wrapper, mirroring the docker engine. Only
+    the generic ``container`` category is supported; the enroot-specific env
+    categories (python_env/scienceworld/...) remain enroot-only.
+
+    Unlike docker there is no ``image`` fallback default: a Daytona sandbox is
+    built from ``spec.snapshot``/``spec.dockerfile`` or an explicit image, and
+    silently booting a stray ubuntu base would waste a slow cloud build.
+    """
+    from .containers.daytona_container import start_daytona_container
+
+    if spec.category != "container":
+        raise ValueError(
+            f"daytona engine supports only the 'container' category, "
+            f"got {spec.category!r}"
+        )
+    name = resource_id or random_name(prefix="res")
+    timeout_sec = 1800.0 if timeout is None else timeout
+    resource = await asyncio.to_thread(
+        start_daytona_container,
+        spec.image,
+        name,
+        spec.environment or {},
+        spec.mount or {},
+        spec.ports,
+        getattr(spec, "workdir", None),
+        timeout_sec,
+        spec,
+    )
+    containers_registry[resource.name] = resource
+    await resource.start()
+    return resource
+
+
+async def _start_sqs_container(
+    spec: ContainerResourceSpec,
+    resource_id: Optional[str] = None,
+    timeout: Optional[float] = None,
+    *,
+    containers_registry: Dict[str, Any],
+    runner_label: str = "SqsRunner",
+) -> BaseResource:
+    """Create + start an EKS sandbox pod driven over SQS.
+
+    Like ``daytona`` this is not local — the consumer on EKS runs the pod and
+    Kaniko builds the image — but it is driven from this process exactly like
+    the local engines. ``SqsContainer`` is itself a :class:`ContainerResource`,
+    so it is returned directly.
+    """
+    from .containers.sqs_container import start_sqs_container
+
+    if spec.category != "container":
+        raise ValueError(
+            f"sqs engine supports only the 'container' category, "
+            f"got {spec.category!r}"
+        )
+    name = resource_id or random_name(prefix="res")
+    timeout_sec = 1800.0 if timeout is None else timeout
+    resource = await asyncio.to_thread(
+        start_sqs_container,
+        spec.image,
+        name,
+        spec.environment or {},
+        spec.mount or {},
+        spec.ports,
+        getattr(spec, "workdir", None),
+        timeout_sec,
+        spec,
+    )
+    containers_registry[resource.name] = resource
+    await resource.start()
+    return resource
+
+
 class BaseRunner(abc.ABC):
     """
     Backend that creates and manages resources on a given infrastructure.
@@ -184,7 +322,37 @@ class LocalRunner(BaseRunner):
         resource_id: Optional[str],
         timeout: Optional[float] = None,
     ) -> BaseResource:
-        """Start a container using the enroot client (local placement)."""
+        """Start a container via the selected engine (enroot|docker|daytona).
+
+        ``daytona`` is not local — it provisions a cloud sandbox — but it is
+        driven from this process exactly like the local engines, so it is
+        dispatched here rather than through a separate runner.
+        """
+        engine = _resolve_container_engine(spec)
+        if engine == "docker":
+            return await _start_docker_container(
+                spec,
+                resource_id,
+                timeout,
+                containers_registry=self._containers,
+                runner_label="LocalRunner(docker)",
+            )
+        if engine == "daytona":
+            return await _start_daytona_container(
+                spec,
+                resource_id,
+                timeout,
+                containers_registry=self._containers,
+                runner_label="LocalRunner(daytona)",
+            )
+        if engine == "sqs":
+            return await _start_sqs_container(
+                spec,
+                resource_id,
+                timeout,
+                containers_registry=self._containers,
+                runner_label="LocalRunner(sqs)",
+            )
         return await _start_enroot_container(
             self.client,
             spec,

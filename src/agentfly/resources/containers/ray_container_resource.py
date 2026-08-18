@@ -9,7 +9,7 @@ Other Ray workers use the container by holding an :class:`ActorHandle` and calli
 
 Driver-side ``ray.get`` calls use finite ``timeout`` values (see module constants below).
 Override default cap for ``run_cmd`` when enroot ``timeout`` is omitted with environment
-variable ``AGENTFLY_RAY_GET_DEFAULT_TIMEOUT_SEC`` (default ``7200``).
+variable ``AF_RAY_GET_DEFAULT_TIMEOUT_SEC`` (default ``7200``).
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ _RAY_GET_ACTOR_DIED_BACKOFF_BASE_SEC = 8.0
 
 def _default_ray_get_unbounded_cmd_sec() -> float:
     try:
-        return float(os.environ.get("AGENTFLY_RAY_GET_DEFAULT_TIMEOUT_SEC", "7200"))
+        return float(os.environ.get("AF_RAY_GET_DEFAULT_TIMEOUT_SEC", "7200"))
     except ValueError:
         return 7200.0
 
@@ -198,6 +198,26 @@ class _RayEnrootContainerActorBase:
             else:
                 self._container.kill()
             self._container = None
+
+    async def copy_to(self, local_path: str, container_path: str, timeout: float = 300) -> None:
+        """Copy a local file/dir (on this actor's node) into the enroot container.
+
+        Runs on the actor's node, where ``self._container`` lives; delegates to the
+        enroot handle's ``copy_to`` (async variant preferred), mirroring
+        :meth:`ContainerResource.copy_in`. ``local_path`` must be readable on this
+        node (true for shared-weka paths like the installed ``agentfly`` package).
+        """
+        if getattr(self, "_container", None) is None:
+            raise RuntimeError("Container already stopped")
+        handle = self._container
+        # enroot's put_archive (unlike docker's) does NOT create the destination
+        # dir before untarring, so tar fails with "Cannot open: No such file or
+        # directory". Mirror DockerContainer.put_archive and mkdir -p it first.
+        await self.run_cmd(f"mkdir -p {shlex.quote(container_path)}", timeout=60)
+        if hasattr(handle, "copy_to_async"):
+            await handle.copy_to_async(local_path, container_path, timeout)
+        else:
+            await asyncio.to_thread(handle.copy_to, local_path, container_path)
 
     async def raw_exec_run(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -412,6 +432,21 @@ class RayContainerResource(BaseResource):
                 ray.kill(self._actor, no_restart=True)
             except Exception:
                 pass
+
+    async def copy_in(self, local_path: str, container_path: str,
+                      timeout: Optional[float] = 300) -> None:
+        """Copy a local file/dir into the container on the actor's node.
+
+        Matches :meth:`ContainerResource.copy_in` so tool/reward code works across
+        local and Ray backends. Proxies to the actor's ``copy_to``; ``local_path`` is
+        resolved on the actor's node (shared-weka paths are visible there).
+        """
+        ref = self._actor.copy_to.remote(local_path, container_path, timeout)
+        if timeout is not None:
+            get_timeout = float(timeout) + _RAY_GET_RUN_CMD_SLACK_SEC
+        else:
+            get_timeout = _default_ray_get_unbounded_cmd_sec()
+        await self._ray_get(ref, timeout_sec=get_timeout)
 
     async def run_cmd(
         self,

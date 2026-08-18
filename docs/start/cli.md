@@ -51,7 +51,7 @@ agentfly deploy \
 | Flag | Type | Default | Purpose |
 |---|---|---|---|
 | `--model-name-or-path` | str | — | HuggingFace model id or local path. |
-| `--template` | str | `None` | `chat-bricks` template name. If set, the template's Jinja is written under `$AGENT_DATA_DIR/cache/jinja_template.jinja` and passed to `vllm serve` via `--chat-template`. |
+| `--template` | str | `None` | `chat-bricks` template name. If set, the template's Jinja is written under `$AF_DATA_DIR/cache/jinja_template.jinja` and passed to `vllm serve` via `--chat-template`. |
 | `--tp` | int | `1` | Tensor-parallel size. |
 | `--pp` | int | `1` | Pipeline-parallel size. |
 | `--dp` | int | `1` | Data-parallel size. |
@@ -153,8 +153,8 @@ There are no CLI flags. Configuration is entirely via environment variables:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `RETRIEVER_CORPUS_FILE` | `$AGENT_CACHE_DIR/data/search/wiki-18.jsonl` | Corpus file path. |
-| `RETRIEVER_INDEX_FILE` | `$AGENT_CACHE_DIR/data/search/e5_Flat.index` | FAISS index file path. |
+| `RETRIEVER_CORPUS_FILE` | `$AF_CACHE_DIR/data/search/wiki-18.jsonl` | Corpus file path. |
+| `RETRIEVER_INDEX_FILE` | `$AF_CACHE_DIR/data/search/e5_Flat.index` | FAISS index file path. |
 | `RETRIEVER_HOST` | `0.0.0.0` | Bind host. |
 | `RETRIEVER_PORT` | `8765` | Bind port. |
 
@@ -172,7 +172,7 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH}"
 python -m agentfly.cli search
 ```
 
-The corpus and FAISS index are auto-downloaded into `$AGENT_CACHE_DIR/data/search/` by `agentfly.tools.utils.data.download_tool_data("asyncdense_retrieve")` if they're not already present.
+The corpus and FAISS index are auto-downloaded into `$AF_CACHE_DIR/data/search/` by `agentfly.tools.utils.data.download_tool_data("asyncdense_retrieve")` if they're not already present.
 
 ---
 

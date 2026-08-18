@@ -198,7 +198,7 @@ data/
 │   └── webshop/
 ```
 
-Larger artifacts (the Wikipedia corpus and FAISS index used by `asyncdense_retrieve`, the WebShop product DB, etc.) are downloaded on demand into `~/.cache/AgentFly/` by helpers like `agentfly.tools.utils.data.download_tool_data`.
+Larger artifacts (the Wikipedia corpus and FAISS index used by `asyncdense_retrieve`, the WebShop product DB, etc.) are downloaded on demand into `$AF_CACHE_DIR` (default `~/.agentfly/cache`) by `agentfly.utils.download.download_tool_data`. Training/eval task files are likewise fetched from the `Agent-One/AgentFly-Train` dataset when missing. Both go through an **approval prompt** that shows the total size first; set `AF_ASSUME_YES=1` to accept non-interactively (CI/batch). See [Configuration](configuration.md) for the full environment-variable surface.
 
 For a brand-new task, the typical workflow is:
 

@@ -20,11 +20,11 @@ These are the entry points that need this setup:
 
 ## 1. Extra Python dependencies
 
-Install these into the same conda environment used for AgentFly:
+Install these into the same `.venv` used for AgentFly:
 
 ```bash
-pip install swebench
-pip install git+https://github.com/R2E-Gym/R2E-Gym.git
+uv pip install swebench
+uv pip install git+https://github.com/R2E-Gym/R2E-Gym.git
 ```
 
 `swebench` provides the grading harness (`swebench.harness.*`) and `r2egym`

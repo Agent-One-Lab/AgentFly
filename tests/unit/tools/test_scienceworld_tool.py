@@ -13,4 +13,4 @@ async def test_science_world_explorer():
     assert result['observation'].startswith("This room is called")
     print(result['observation'])
     
-    await ctx.release_resource(scope="rollout")
+    await ctx.end_resource(scope="global")

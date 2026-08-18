@@ -349,7 +349,7 @@ def gui_accuracy_score(
 
 
 @reward(name="gui_reward")
-def gui_reward(
+async def gui_reward(
     prediction: str,
     trajectory: List[Dict] = None,
     gt_action: str = "",

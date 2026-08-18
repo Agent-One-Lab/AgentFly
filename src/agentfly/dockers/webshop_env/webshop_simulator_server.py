@@ -40,12 +40,19 @@ async def static_files(path: str):
     return FileResponse(os.path.join(static_dir, path))
 
 
-init_basedir(dataset="full")
+# Dataset ("full" 1.18M catalog or "small" 1,000-product subset) and goal type
+# ("1" human goals or "0" synthetic goals) are selected at container start via env
+# vars, so one image build can serve either benchmark. human_goals must be passed to
+# BOTH load_products (which populates instruction_text/instruction_attributes for the
+# synthetic path) and get_goals.
+_HUMAN_GOALS = os.environ.get("WEBSHOP_HUMAN_GOALS", "1") == "1"
+init_basedir(dataset=os.environ.get("WEBSHOP_DATASET", "full"))
 all_products, product_item_dict, product_prices, attribute_to_asins = load_products(
-    filepath=get_file_path()
+    filepath=get_file_path(),
+    human_goals=_HUMAN_GOALS,
 )
 search_engine = init_search_engine()
-goals = get_goals(all_products, product_prices)
+goals = get_goals(all_products, product_prices, human_goals=_HUMAN_GOALS)
 # random.shuffle(goals)
 weights = [goal["weight"] for goal in goals]
 

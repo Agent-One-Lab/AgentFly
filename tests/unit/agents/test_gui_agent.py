@@ -102,7 +102,9 @@ class TestGUIReward:
         result = await gui_reward(
             prediction=prediction,
             gt_action="click",
-            gt_bbox=[100, 200],
+            # gt_bbox is normalized 0-1 (same contract the scorer applies to the
+            # predicted coord): the click at (100,200) → (100/1920, 200/1080).
+            gt_bbox=[100 / 1920, 200 / 1080],
             gt_input_text="",
         )
 

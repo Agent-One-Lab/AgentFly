@@ -12,10 +12,14 @@ from typing import Any, Dict, List, Optional
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 
-from ... import AGENT_HOME
 from ..reward_base import reward
 
 logger = logging.getLogger(__name__)
+
+# Repository root (.../AgentFly). This used to be derived from the package-level
+# AGENT_HOME, which pointed at the repo root; AF_HOME now points at ~/.agentfly,
+# so compute the repo root locally here where the repo path is what we need.
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def get_server_ips(model: str) -> List[str]:
@@ -23,7 +27,7 @@ def get_server_ips(model: str) -> List[str]:
     # Get the directory where this utils.py file is located
     # current_dir = os.path.dirname(os.path.abspath(__file__))
     server_status_dir = os.path.join(
-        Path(AGENT_HOME).parent.parent, "data-process", "vllm_server", "server_status"
+        REPO_ROOT.parent.parent, "data-process", "vllm_server", "server_status"
     )
 
     # Clean model name for filename matching (replace / and - with _)

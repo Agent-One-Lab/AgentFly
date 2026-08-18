@@ -10,7 +10,7 @@ max_model_len=8192
 kl_coef=0.01
 train_dataset="./data/rlhf/alfworld/alfworld_train_tasks_flat.json"
 eval_dataset="./data/rlhf/alfworld/alfworld_val_tasks.json"
-tools="[alfworld_step,alfworld_get_admissible_commands,alfworld_get_task_objective]"
+tools="[alfworld_step]"
 reward_name="alfworld_episode_reward"
 adv_estimator=reinforce_plus_plus
 # Alternative estimators:
@@ -18,7 +18,7 @@ adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
 # adv_estimator=grpo
 # adv_estimator=gae
-system_prompt="Navigate the ALFWorld environment and complete tasks by interacting with objects. Use the tools provided to step through the environment. when you keep getting Nothing happens as a feedback use admissible commands to see why becasue it's very likely your action / command is wrong !!!"
+system_prompt="Navigate the ALFWorld environment and complete tasks by interacting with objects. Use alfworld_step to act. Each observation lists the admissible actions for the current state under 'Admissible actions:' — always choose your action from that list, otherwise the environment will respond with 'Nothing happens'."
 
 entropy_coeff=0.01  # Higher entropy for exploration
 kl_loss_type=mse

@@ -1,9 +1,34 @@
 import inspect
 import logging
 import re
+import typing
 from copy import deepcopy
 
 logger = logging.getLogger(__name__)
+
+
+def _annotation_type_name(ann):
+    """Resolve a parameter annotation to a base type name.
+
+    Unwraps ``Optional[X]`` / ``Union[X, None]`` / PEP-604 ``X | None`` to
+    the inner type's name, and maps typing generics (``List[..]``,
+    ``Dict[..]``) to ``list`` / ``dict``. Falls back to ``__name__`` for
+    plain types, else ``"str"``. This prevents non-type strings like
+    "Optional" from leaking into the JSON schema (which OpenAI-compatible
+    APIs reject).
+    """
+    args = typing.get_args(ann)
+    if args:
+        origin = typing.get_origin(ann)
+        if origin in (list, typing.List):
+            return "list"
+        if origin in (dict, typing.Dict):
+            return "dict"
+        # Union / Optional / X | None -> use the first non-None member.
+        non_none = [a for a in args if a is not type(None)]
+        if non_none:
+            return _annotation_type_name(non_none[0])
+    return getattr(ann, "__name__", None) or "str"
 
 
 def extract_signatures(func):
@@ -13,7 +38,7 @@ def extract_signatures(func):
         if name not in signature:
             signature[name] = {}
         if param.annotation is not inspect.Parameter.empty:
-            signature[name]["type"] = param.annotation.__name__
+            signature[name]["type"] = _annotation_type_name(param.annotation)
         if param.default is not inspect.Parameter.empty:
             signature[name]["default"] = param.default
 
@@ -176,18 +201,29 @@ def validate_schema(name, description, signature, docs):
         if param in docs_params and "description" in docs_params[param]:
             properties[param]["description"] = docs_params[param]["description"]
 
-    # Postprocess for schema type compatibility
-    for param_name, param_info in properties.items():
-        for k, v in param_info.items():
-            if k == "type":
-                if v == "str":
-                    param_info[k] = "string"
-                if v == "int":
-                    param_info[k] = "integer"
-                if v == "float":
-                    param_info[k] = "number"
-                if v == "bool":
-                    param_info[k] = "boolean"
+    # Postprocess: Python annotation names -> JSON Schema types (OpenAI-compatible).
+    for _param_name, param_info in properties.items():
+        t = param_info.get("type")
+        if t == "str":
+            param_info["type"] = "string"
+        elif t == "int":
+            param_info["type"] = "integer"
+        elif t == "float":
+            param_info["type"] = "number"
+        elif t == "bool":
+            param_info["type"] = "boolean"
+        elif t in ("list", "List"):
+            # Bare ``list`` in signatures becomes ``"list"`` from ``__name__``; JSON Schema requires ``array`` + ``items``.
+            param_info["type"] = "array"
+            param_info.setdefault("items", {"type": "string"})
+        elif t in ("dict", "Dict"):
+            param_info["type"] = "object"
+        # Safety net: any unmapped / unknown annotation becomes a string so
+        # the emitted schema only ever uses valid JSON Schema types.
+        if param_info.get("type") not in (
+            "string", "integer", "number", "boolean", "array", "object",
+        ):
+            param_info["type"] = "string"
 
     # Remove injected/internal params from the schema (env, resource, context, self)
     for key in ("env", "resource", "context", "self"):

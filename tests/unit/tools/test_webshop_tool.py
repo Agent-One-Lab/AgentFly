@@ -14,7 +14,7 @@ async def test_webshop_search():
         print(result)
         assert isinstance(result, dict)
     finally:
-        await ctx.release_resource(scope="rollout")
+        await ctx.end_resource(scope="global")
 
 
 @pytest.mark.asyncio
@@ -32,4 +32,4 @@ async def test_webshop_search_and_next_page():
         print(result)
         assert isinstance(result, dict)
     finally:
-        await ctx.release_resource(scope="rollout")
+        await ctx.end_resource(scope="global")

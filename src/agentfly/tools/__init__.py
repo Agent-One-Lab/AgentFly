@@ -1,11 +1,6 @@
 from .decorator import tool
 from .registry import get_tool_from_name, get_tools_from_names, register_tool
-from .src.alfworld.tools import (
-    alfworld_get_admissible_commands,
-    alfworld_get_task_objective,
-    alfworld_reset,
-    alfworld_step,
-)
+from .src.alfworld.tools import alfworld_step
 from .src.calculate.tools import calculator
 from .src.chess.tools import chess_get_legal_moves, chess_get_state, chess_move
 from .src.code.tools import CodeInterpreterTool, code_interpreter
@@ -32,16 +27,13 @@ from .src.file.tools import (
 )
 
 from .src.shell.tools import run_shell_command
-
-
-@tool()
-def hallucination_tool(tool_name):
-    return f"Hallucinated tool: {tool_name} does not exist."
-
-
-@tool()
-def invalid_input_tool(tool_input):
-    return f"Invalid input: {tool_input}, input must be a valid JSON object."
+from .src.skills import (
+    Skill,
+    load_skill,
+    load_skills,
+    read_skill_file,
+    run_skill_script,
+)
 
 
 __all__ = [
@@ -53,9 +45,6 @@ __all__ = [
     "CodeInterpreterTool",
     "summarize",
     "alfworld_step",
-    "alfworld_get_task_objective",
-    "alfworld_get_admissible_commands",
-    "alfworld_reset",
     "calculator",
     "google_search_serper",
     "dense_retrieve",
@@ -66,8 +55,6 @@ __all__ = [
     "answer_qa",
     "answer_math",
     "pyautogui_code_generator",
-    "hallucination_tool",
-    "invalid_input_tool",
     "get_tool_from_name",
     "get_tools_from_names",
     "register_tool",
@@ -82,4 +69,9 @@ __all__ = [
     "run_python",
     "undo_edit",
     "run_shell_command",
+    "Skill",
+    "load_skill",
+    "load_skills",
+    "read_skill_file",
+    "run_skill_script",
 ]

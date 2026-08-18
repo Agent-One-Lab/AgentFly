@@ -91,7 +91,7 @@ def tool(
 
         signature = extract_signatures(func)
         docs = parse_docstring(inspect.getdoc(func))
-        final_desc = description or docs.get("summary", "")
+        final_desc = description or docs.get("description", "")
         validated_schema = validate_schema(final_name, final_desc, signature, docs)
 
         # Create a Tool subclass with class-level metadata attributes

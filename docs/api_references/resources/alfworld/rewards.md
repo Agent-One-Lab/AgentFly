@@ -22,17 +22,9 @@ This example shows how the ALFWorld reward is used with a ReactAgent:
 from agentfly.agents.react.react_agent import ReactAgent
 from agentfly.rewards import alfworld_episode_reward
 
-from agentfly.tools.src.alfworld.tools import (
-    alfworld_step,
-    alfworld_get_admissible_commands,
-    alfworld_get_task_objective,
-)
+from agentfly.tools.src.alfworld.tools import alfworld_step
 
-tools = [
-    alfworld_step,
-    alfworld_get_task_objective,
-    alfworld_get_admissible_commands,
-]
+tools = [alfworld_step]
 
 task_info = "Navigate the ALFWorld environment and complete tasks using the provided tools."
 

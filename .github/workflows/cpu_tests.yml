@@ -19,7 +19,8 @@ jobs:
           - tests/unit/rewards/ --ignore=tests/unit/rewards/swe/
           - tests/unit/tools/ --ignore=tests/unit/tools/test_webshop_tool.py --ignore=tests/unit/tools/test_scienceworld_tool.py
           - tests/unit/resources/
-          # - test/unit/agents/ # TODO: recheck this
+          - tests/unit/skills/
+          # - tests/unit/agents/  # skipped: complex, some tests require GPUs
 
     steps:
       - name: Checkout repository (with submodules)
@@ -56,16 +57,18 @@ jobs:
       - name: Install dependencies (main repo)
         run: |
           pip install -e .
-          pip install datasets
+          # Pin datasets: 2.14.x uses pyarrow's removed PyExtensionType and breaks
+          # on import; keep in sync with the pin in pyproject.toml's [verl] extra.
+          pip install 'datasets==2.19.0'
           pip install -e '.[dev]' --no-build-isolation
 
       - name: Cache AgentFly cache
         uses: actions/cache@v4
         with:
-          path: ~/.cache/AgentFly
-          key: ${{ runner.os }}-agentfly-cache
+          path: ~/.agentfly/cache
+          key: ${{ runner.os }}-agentfly-cache-v2
           restore-keys: |
-            ${{ runner.os }}-agentfly-cache
+            ${{ runner.os }}-agentfly-cache-v2
 
       - name: Install enroot
         run: |

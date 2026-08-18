@@ -6,7 +6,7 @@ register_template(
         system_template="<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{system_message} Question: ",
         user_template="{content}\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
-        tool_template="<information>{observation}</information>\n",
+        observations_template="<information>{observation}</information>\n",
         stop_words=["<|im_end|>"],
     )
 )
@@ -18,7 +18,7 @@ register_template(
         user_template="<|im_start|>user\n{content}\n<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n",
-        tool_template="<observation>{observation}</observation>\n",
+        observations_template="<observation>{observation}</observation>\n",
         stop_words=["<|im_end|>"],
     )
 )
@@ -30,7 +30,7 @@ register_template(
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
     )
 )
@@ -42,7 +42,7 @@ register_template(
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n<think>{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n<think>",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
     )
 )
@@ -50,12 +50,12 @@ register_template(
 register_template(
     Template(
         name="qwen3-think",
-        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
-        system_template_with_tools="""<|im_start|>system\n{system_message}# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools><|im_end|>\n""",
+        system_template="<|im_start|>system\n{system_message}{tools}<|im_end|>\n",
+        tools_template="""# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{tools}\n</tools>""",
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n<think>{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n<think>",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
     )
 )
@@ -67,12 +67,15 @@ register_template(
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n<think>\n",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
     )
 )
 
-XLMToolCallTemplate = """<|im_start|>system\n{system_message}
+# Body of the XML-tool-call preamble, filled into ``system_template``'s ``{tools}`` slot.
+# The wrapping ``<|im_start|>system\n{system_message}<|im_end|>\n`` is supplied by
+# ``system_template``; this string is just the tool-section that gets appended.
+XLMToolsBody = """
 
 You have access to external functions (tools). When necessary, you may call them to help answer the user's query.
 
@@ -114,19 +117,17 @@ weather in San Francisco
 </parameter>
 </function>
 </tool_call>
-
-<|im_end|>\n
 """
 
 register_template(
     Template(
         name="qwen-xml",
-        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
-        system_template_with_tools=XLMToolCallTemplate,
+        system_template="<|im_start|>system\n{system_message}{tools}<|im_end|>\n",
+        tools_template=XLMToolsBody,
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
     )
 )
@@ -134,12 +135,12 @@ register_template(
 register_template(
     Template(
         name="qwen-xml-think",
-        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
-        system_template_with_tools=XLMToolCallTemplate,
+        system_template="<|im_start|>system\n{system_message}{tools}<|im_end|>\n",
+        tools_template=XLMToolsBody,
         user_template="<|im_start|>user\n{content}<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n<think>{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n<think>",
-        tool_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
     )
 )

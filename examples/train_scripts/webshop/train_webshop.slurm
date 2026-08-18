@@ -39,7 +39,7 @@ srun --nodes=$worker_num --ntasks=$worker_num --ntasks-per-node=1 rm -rf /tmp/ra
 
 # Start Ray head node
 srun --nodes=1 --ntasks=1 -w "$head_node" --export=ALL \
-    ${CONDA_BIN_PATH}ray start --head --node-ip-address="$head_node_ip" --port=$port \
+    uv run --no-sync ray start --head --node-ip-address="$head_node_ip" --port=$port \
     --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --include-dashboard=True --block &
 
 sleep 10
@@ -49,7 +49,7 @@ for ((i = 1; i < worker_num; i++)); do
     node_i=${nodes[$i]}
     echo "Starting WORKER $i at $node_i"
     srun --nodes=1 --ntasks=1 -w "$node_i" --export=ALL \
-        ${CONDA_BIN_PATH}ray start --address "$address_head" \
+        uv run --no-sync ray start --address "$address_head" \
         --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --block &
 done
 sleep 10

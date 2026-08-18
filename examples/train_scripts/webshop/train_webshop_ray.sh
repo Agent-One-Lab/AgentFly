@@ -13,10 +13,27 @@ address_head=$head_node_ip:$port
 
 # export VLLM_ATTENTION_BACKEND=XFORMERS
 # export GLOO_SOCKET_IFNAME=ens10f0np0
-export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
 
 # export VERL_LOGGING_LEVEL=DEBUG
+
+# Dataset mode: full = 1.18M catalog + human goals (standard benchmark); small = 1,000
+# catalog + synthetic goals, aligned to verl-agent/RAGEN. Selects the WebShop image +
+# goal files together. MUST be exported BEFORE `ray start` so the Ray workers inherit
+# WEBSHOP_IMAGE — vars exported after ray start do not reach the workers (they default
+# to :full otherwise).
+MODE="small"
+if [ "$MODE" = "small" ]; then
+    export WEBSHOP_IMAGE=reasonwang/webshop-env:small
+    train_dataset="./data/rlhf/webshop/webshop_train_small.json"
+    eval_dataset="./data/rlhf/webshop/webshop_val_small.json"
+elif [ "$MODE" = "full" ]; then
+    export WEBSHOP_IMAGE=reasonwang/webshop-env:full
+    train_dataset="./data/rlhf/webshop/webshop_train_full.json"
+    eval_dataset="./data/rlhf/webshop/webshop_val_full.json"
+else
+    echo "Usage: $0 [small|full]  (got: '$MODE')"; exit 1
+fi
 
 # Remove existing Ray cluster
 ray stop
@@ -60,13 +77,11 @@ lr=5e-7
 max_model_len=16384
 max_new_tokens_per_turn=384
 val_batch_size=512
-batch_size=64
+batch_size=32
 num_chains=8
 # full on-policy
 mini_batch_size=$((batch_size * num_chains))
 kl_coef=0.001
-train_dataset="./data/rlhf/webshop/webshop_goals_train.json"
-eval_dataset="./data/rlhf/webshop/webshop_goals_val.json"
 # adv_estimator=rloo
 # adv_estimator=reinforce_plus_plus
 # adv_estimator=remax
@@ -85,7 +100,7 @@ total_training_steps=200
 
 model_base_name=$(basename $model)
 project_name="Open"
-experiment_name="webshop_${model_base_name}_${adv_estimator}_test"
+experiment_name="webshop_${model_base_name}_${adv_estimator}_${MODE}_throughput"
 
 python -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \

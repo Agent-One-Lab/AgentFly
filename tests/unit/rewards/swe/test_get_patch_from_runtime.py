@@ -40,7 +40,7 @@ async def test_get_patch_from_runtime_swe_smith():
             # If we got content, it should look like a diff or be cleaned
             assert isinstance(result, str)
     finally:
-        await context.release_resource(scope="rollout")
+        await context.end_resource(scope="rollout")
 
 
 @pytest.mark.asyncio
@@ -82,4 +82,4 @@ async def test_get_patch_from_runtime_with_instance_base_commit():
         assert isinstance(result, str)
         assert marker in result
     finally:
-        await context.release_resource(scope="rollout")
+        await context.end_resource(scope="rollout")

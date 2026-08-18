@@ -68,9 +68,17 @@ async def _run_shell(context: Context, cmd: str) -> str:
         return block_reason
 
     rollout_id = context.rollout_id
+    # Mount the file-tool helper too, so an agent that mixes this shell tool
+    # with the file tools (create_file/edit_file/...) shares ONE container
+    # that always has file_manager available — the resource engine returns
+    # the same container for a given rollout id regardless of which tool
+    # creates it first, so both specs must request the mount.
+    from ..file.tools import FILE_MODULE_DIR, INSTALL_PATH
     spec = ContainerResourceSpec(
         category="container",
         image=image_id,
+        mount={FILE_MODULE_DIR: f"{INSTALL_PATH}:ro,rbind"},
+        docker_host=context.metadata.get("docker_host"),
     )
     is_acquired = context.is_spec_acquired(spec)
 
@@ -81,6 +89,12 @@ async def _run_shell(context: Context, cmd: str) -> str:
         timeout=1200,
     )
 
+    # Working directory for shell commands. Defaults to /testbed (swebench
+    # images), but images with a different layout (e.g. WORKDIR /workspace)
+    # can override via context.metadata['workdir']; otherwise docker exec
+    # would fail with `chdir to cwd ("/testbed") ... no such file or directory`.
+    workdir = context.metadata.get("workdir") or WORKSPACE_DIR
+
     if not is_acquired:
         # Used for swe-smith, we need to checkout the specific commit first.
         # Use a bounded timeout so git operations cannot hang indefinitely.
@@ -88,12 +102,12 @@ async def _run_shell(context: Context, cmd: str) -> str:
         if commit is not None:
             git_timeout = 300
             await container.run_cmd(
-                "git fetch", timeout=git_timeout, workdir=WORKSPACE_DIR
+                "git fetch", timeout=git_timeout, workdir=workdir
             )
             await container.run_cmd(
                 f"git checkout {commit}",
                 timeout=git_timeout,
-                workdir=WORKSPACE_DIR,
+                workdir=workdir,
             )
 
     # We limit the memory to 1g for the shell command to avoid the container being killed by the system.
@@ -101,7 +115,7 @@ async def _run_shell(context: Context, cmd: str) -> str:
         raw = await container.run_cmd(
             cmd,
             timeout=120,
-            workdir=WORKSPACE_DIR,
+            workdir=workdir,
             mem_limit="4g",
             mem_guard_limit="4g",
         )

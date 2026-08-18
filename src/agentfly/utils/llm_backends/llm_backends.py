@@ -6,11 +6,14 @@ This module provides a unified interface to different LLM implementations.
 import asyncio
 import copy
 import logging
+import os
+import random
 import time
 import uuid
 from functools import partial
-from typing import AsyncGenerator, Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
+import httpx
 import numpy as np
 import openai
 import PIL
@@ -47,6 +50,7 @@ class LLMBackend:
         template: str,
         add_generation_prompt: bool = True,
         tools: List[Dict] = None,
+        skills: List[Dict] = None,
     ) -> List[str]:
         """Apply chat template to messages list"""
         prompts = []
@@ -54,7 +58,11 @@ class LLMBackend:
         for messages in messages_list:
             chat = Chat(template, messages)
             prompts.append(
-                chat.prompt(add_generation_prompt=add_generation_prompt, tools=tools)
+                chat.prompt(
+                    add_generation_prompt=add_generation_prompt,
+                    tools=tools,
+                    skills=skills,
+                )
             )
             # We only support image inputs for now
             vision_inputs.append(chat.vision_inputs())
@@ -68,15 +76,6 @@ class LLMBackend:
     def generate(self, messages_list: str, **kwargs) -> str:
         """Generate text from prompt"""
         raise NotImplementedError("Subclasses must implement generate()")
-
-    async def generate_streaming(
-        self,
-        messages_list: List[List[Dict]],
-        streaming_callback: Optional[Callable] = None,
-        **kwargs,
-    ) -> AsyncGenerator[str, None]:
-        """Generate text with streaming support"""
-        raise NotImplementedError("Subclasses must implement generate_streaming()")
 
     def preprocess(self):
         """Preprocess the backend"""
@@ -161,7 +160,10 @@ class AsyncVLLMBackend(LLMBackend):
         return final_output
 
     async def _apply_chat_template_async(
-        self, messages_list: List[List[Dict]], tools: List[Dict] = None
+        self,
+        messages_list: List[List[Dict]],
+        tools: List[Dict] = None,
+        skills: List[Dict] = None,
     ):
         """
         Render chat templates off the event loop.
@@ -173,6 +175,7 @@ class AsyncVLLMBackend(LLMBackend):
             self.template,
             True,
             tools,
+            skills,
         )
 
     async def generate_async(self, messages_list: str, **kwargs) -> str:
@@ -198,13 +201,14 @@ class AsyncVLLMBackend(LLMBackend):
         n = kwargs.get("n", 1)
 
         tools = kwargs.get("tools", None)
+        skills = kwargs.get("skills", None)
         messages_list = [
             self._convert_to_chat_without_tool_call_processing(messages)
             for messages in messages_list
         ]
         print(f"[AsyncVLLMBackend.generate_async] applying chat template")
         prompts, vision_inputs = await self._apply_chat_template_async(
-            messages_list, tools=tools
+            messages_list, tools=tools, skills=skills
         )
         inputs = self._process_inputs(prompts, vision_inputs)
         if n > 1:
@@ -220,7 +224,7 @@ class AsyncVLLMBackend(LLMBackend):
             for req_out in request_outputs
             for out in getattr(req_out, "outputs", [])
         ]
-        # Keep one total length per request to align with chain_base._extract_total_length().
+        # Keep one total length per request to align with rollout.chain._extract_total_length().
         total_lengths = []
         for req_out in request_outputs:
             prompt_len = len(getattr(req_out, "prompt_token_ids", []) or [])
@@ -235,52 +239,11 @@ class AsyncVLLMBackend(LLMBackend):
         if return_dict:
             return {
                 "response_texts": response_texts,
-                "tool_calls": [None] * len(response_texts),
+                "tool_calls": None,
                 "response_dict": {"backend": "async_vllm"},
                 "total_lengths": total_lengths,
             }
         return response_texts
-
-    async def generate_streaming(
-        self, messages_list: List[List[Dict]], **kwargs
-    ) -> AsyncGenerator[str, None]:
-        """Generate text with streaming support using Async vLLM"""
-
-        params = {}
-        if "max_tokens" in kwargs:
-            params["max_tokens"] = kwargs["max_tokens"]
-        if "temperature" in kwargs:
-            params["temperature"] = kwargs["temperature"]
-        if "n" in kwargs:
-            params["n"] = kwargs["n"]
-        
-        sampling_params = SamplingParams(
-            **params
-        )
-
-        tools = kwargs.get("tools", None)
-        messages_list = [
-            self._convert_to_chat_without_tool_call_processing(messages)
-            for messages in messages_list
-        ]
-        prompts, vision_inputs = await self._apply_chat_template_async(
-            messages_list, tools=tools
-        )
-        inputs = self._process_inputs(prompts, vision_inputs)
-
-        # For streaming, we process one input at a time
-        for input_data in inputs:
-            outputs_gen = self.llm_engine.generate(
-                input_data,
-                sampling_params=sampling_params,
-                request_id=str(uuid.uuid4()),
-            )
-
-            async for output in outputs_gen:
-                for sequence in output.outputs:
-                    # Stream each token
-                    if hasattr(sequence, "text"):
-                        yield sequence.text
 
 
 class AsyncVerlBackend(LLMBackend):
@@ -470,7 +433,12 @@ class ClientBackend(LLMBackend):
         self._refill_task = None  # started lazily
 
         # --- misc
-        self.timeout = timeout
+        # AF_REQUEST_TIMEOUT bounds ONE model call (seconds). The 3600s default
+        # means a degraded endpoint stalls a rollout instead of failing it, so
+        # callers that retry (e.g. the trajectory sweep) want a much smaller
+        # value — a stuck call then fails fast and is retried rather than
+        # holding the slot for the whole agent budget.
+        self.timeout = int(os.environ.get("AF_REQUEST_TIMEOUT") or timeout)
 
 
     def _is_gemini_model(self, model_name: str, base_url: str) -> bool:
@@ -634,21 +602,63 @@ class ClientBackend(LLMBackend):
             }
 
     def _blocking_call_openai(self, messages: List[Dict], **kwargs) -> Dict:
-        """Make a blocking call to OpenAI API."""
+        """Make a blocking call to OpenAI API.
+
+        Uses STREAMING by default (set AF_NO_STREAM=1 to disable): some
+        gateway paths (e.g. comet smg, 2026-07-29) close idle non-streaming
+        connections after ~300s, which kills any generation slower than 5 min;
+        SSE keeps bytes flowing so long generations survive. Deltas are
+        re-accumulated into the exact non-streaming response shape.
+        """
         logger.debug(f"[ClientBackend] OpenAI model_name: {self.model_name}")
         logger.debug(f"[ClientBackend] OpenAI messages: {len(messages)}")
         logger.debug(f"[ClientBackend] OpenAI kwargs: {kwargs}")
 
-        resp = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            timeout=self.timeout,
-            **kwargs,
-        )
-        resp_json = resp.dict()
+        # Connection drops (server resets, mid-stream cuts under load) are
+        # retried here at the single-request level — losing a whole builder
+        # trajectory to one reset is far more expensive than re-issuing a turn.
+        attempts = int(os.environ.get("AF_CONN_RETRIES", "8"))
+        last_exc: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                if os.environ.get("AF_NO_STREAM"):
+                    resp = self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=messages,
+                        timeout=self.timeout,
+                        **kwargs,
+                    )
+                    resp_json = resp.dict()
+                else:
+                    resp_json = self._streaming_chat_call(messages, **kwargs)
+                break
+            except (openai.APIConnectionError, openai.NotFoundError,
+                    openai.RateLimitError, openai.InternalServerError,
+                    openai.APITimeoutError,
+                    httpx.RemoteProtocolError, httpx.ReadError) as e:
+                # NotFoundError: comet's registry transiently drops workers
+                # (model_not_found for a served model); Remote/ReadError: the
+                # server can cut a stream mid-flight.
+                # RateLimit/InternalServer/Timeout added 2026-07-31: under load
+                # the endpoint answers 429 and 502 `upstream unreachable`, and
+                # those were NOT retried — one of them ended the whole rollout
+                # (795 agentfly failures in 45min at -j 500). Retrying the
+                # REQUEST is far cheaper than losing the trajectory.
+                last_exc = e
+                logger.warning(
+                    f"[ClientBackend] retryable error attempt {attempt + 1}/{attempts}: "
+                    f"{type(e).__name__}: {e}; retrying"
+                )
+                # exponential with jitter — a fixed ramp makes every concurrent
+                # agent retry in lockstep, re-creating the spike that failed.
+                time.sleep(min(90, (2 ** attempt) * 5) * (0.5 + random.random()))
+        else:
+            raise last_exc
         logger.debug(f"[ClientBackend] resp_json: {resp_json}")
+        # A tool-call turn returns content=null; coerce to "" so downstream
+        # string handling (content blocks, joins, templating) never sees None.
         response_texts = [
-            choice["message"]["content"] for choice in resp_json["choices"]
+            (choice["message"].get("content") or "") for choice in resp_json["choices"]
         ]
         tool_calls = [
             choice["message"].get("tool_calls") for choice in resp_json["choices"]
@@ -663,6 +673,85 @@ class ClientBackend(LLMBackend):
             "total_lengths": total_lengths,
         }
 
+    def _streaming_chat_call(self, messages: List[Dict], **kwargs) -> Dict:
+        """chat.completions with stream=True, re-accumulated to the plain
+        (non-streaming) response-dict shape so downstream code is unchanged."""
+        stream_kwargs = dict(kwargs)
+        stream_kwargs["stream"] = True
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                timeout=self.timeout,
+                stream_options={"include_usage": True},
+                **stream_kwargs,
+            )
+        except openai.BadRequestError:
+            # some servers reject stream_options — retry without usage chunk
+            stream = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                timeout=self.timeout,
+                **stream_kwargs,
+            )
+
+        choices: Dict[int, Dict] = {}
+        usage = None
+        resp_id = resp_model = None
+        for chunk in stream:
+            cj = chunk.dict() if hasattr(chunk, "dict") else chunk
+            resp_id = resp_id or cj.get("id")
+            resp_model = resp_model or cj.get("model")
+            if cj.get("usage"):
+                usage = cj["usage"]
+            for ch in cj.get("choices") or []:
+                idx = ch.get("index", 0)
+                acc = choices.setdefault(idx, {
+                    "index": idx,
+                    "message": {"role": "assistant", "content": "",
+                                "reasoning_content": "", "tool_calls": {}},
+                    "finish_reason": None,
+                })
+                if ch.get("finish_reason"):
+                    acc["finish_reason"] = ch["finish_reason"]
+                delta = ch.get("delta") or {}
+                if delta.get("content"):
+                    acc["message"]["content"] += delta["content"]
+                if delta.get("reasoning_content"):
+                    acc["message"]["reasoning_content"] += delta["reasoning_content"]
+                for tc in delta.get("tool_calls") or []:
+                    ti = tc.get("index", 0)
+                    tacc = acc["message"]["tool_calls"].setdefault(ti, {
+                        "id": None, "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    })
+                    if tc.get("id"):
+                        tacc["id"] = tc["id"]
+                    if tc.get("type"):
+                        tacc["type"] = tc["type"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        tacc["function"]["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        tacc["function"]["arguments"] += fn["arguments"]
+
+        out_choices = []
+        for idx in sorted(choices):
+            acc = choices[idx]
+            msg = acc["message"]
+            tcs = [msg["tool_calls"][i] for i in sorted(msg["tool_calls"])]
+            msg["tool_calls"] = tcs if tcs else None
+            if not msg["reasoning_content"]:
+                msg.pop("reasoning_content")
+            out_choices.append(acc)
+        return {
+            "id": resp_id,
+            "model": resp_model,
+            "object": "chat.completion",
+            "choices": out_choices,
+            "usage": usage,
+        }
+
     # --------------------------------------------------------------------- #
     # Low‑level single request (runs in threadpool so it doesn't block loop)
     # --------------------------------------------------------------------- #
@@ -674,17 +763,6 @@ class ClientBackend(LLMBackend):
         else:
             return self._blocking_call_openai(messages, **kwargs)
 
-    async def generate_streaming(
-        self, messages: List[List[Dict]], **kwargs
-    ) -> AsyncGenerator[str, None]:
-        """
-        This is actually the not streaming. We simply return the generated text.
-        """
-        logger.debug(f"[ClientBackend] generate_streaming kwargs: {kwargs}")
-        response_texts_dicts = await self.generate(messages, **kwargs)
-        for response in response_texts_dicts:
-            yield response
-
     async def _call(self, messages: List[Dict], **kwargs) -> Dict:
         # acquire a rate‑limit token
         async with self._tokens:
@@ -692,6 +770,97 @@ class ClientBackend(LLMBackend):
             return await loop.run_in_executor(
                 None, partial(self._blocking_call, messages, **kwargs)
             )
+
+    # ------------------------------------------------------------------ #
+    # Completions endpoint (/v1/completions) — raw prompt path
+    # ------------------------------------------------------------------ #
+
+    def _blocking_complete_openai(self, prompt: str, **kwargs) -> Dict:
+        """Single blocking call to the OpenAI-compatible /v1/completions endpoint.
+
+        Mirrors `_blocking_call_openai` but for the raw-prompt API. Useful when
+        the caller has already pre-rendered the chat template and wants the
+        server to consume the prompt verbatim (e.g., evaluating models on
+        custom prompt formats without going through chat.completions's
+        server-side templating).
+        """
+        resp = self.client.completions.create(
+            model=self.model_name,
+            prompt=prompt,
+            timeout=self.timeout,
+            **kwargs,
+        )
+        resp_json = resp.model_dump() if hasattr(resp, "model_dump") else resp.dict()
+        choices = resp_json.get("choices") or []
+        return {
+            "response_texts": [c.get("text", "") for c in choices],
+            "tool_calls": [None] * len(choices),
+            "response_dict": resp_json,
+            "total_lengths": (resp_json.get("usage") or {}).get("total_tokens"),
+        }
+
+    async def _call_complete(self, prompt: str, **kwargs) -> Dict:
+        async with self._tokens:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None, partial(self._blocking_complete_openai, prompt, **kwargs)
+            )
+
+    def complete(
+        self,
+        prompts: "List[str] | str",
+        return_dict: bool = False,
+        **kwargs,
+    ):
+        """Public API for the /v1/completions endpoint.
+
+        • Pass a single prompt string → single completion.
+        • Pass a list of prompts       → batch completions (parallel via asyncio).
+
+        Returns:
+          • In an *async* context → awaitable Task (caller awaits).
+          • In a *sync* context   → list of completion strings (or list of
+            response dicts when `return_dict=True`).
+
+        This is the prompt-completion counterpart to ``generate(messages, ...)``.
+        Gemini does not have a completions endpoint, so this is OpenAI/vLLM
+        only.
+        """
+        if self.is_gemini:
+            raise NotImplementedError(
+                "Gemini does not expose a /v1/completions endpoint. "
+                "Use generate(messages=...) instead."
+            )
+
+        if isinstance(prompts, str):
+            prompts_list = [prompts]
+        else:
+            prompts_list = list(prompts)
+
+        async def _runner():
+            self._ensure_refiller_running()
+            tasks = [
+                asyncio.create_task(self._call_complete(p, **kwargs))
+                for p in prompts_list
+            ]
+            response_dicts = await asyncio.gather(*tasks)
+            if return_dict:
+                return response_dicts
+            return [t for rd in response_dicts for t in rd["response_texts"]]
+
+        try:
+            loop = asyncio.get_running_loop()  # already inside a loop?
+        except RuntimeError:
+            return asyncio.run(_runner())
+        return loop.create_task(_runner())
+
+    async def complete_async(
+        self,
+        prompts: "List[str] | str",
+        return_dict: bool = False,
+        **kwargs,
+    ):
+        return await self.complete(prompts, return_dict, **kwargs)
 
     def _convert_to_openai_chat_without_tool_call_processing(
         self, messages: list, is_openai_model: bool = False
@@ -737,16 +906,38 @@ class ClientBackend(LLMBackend):
         return messages
 
     def _preprocess_messages_and_args(self, messages_list, **kwargs):
+        # ``tool_call_source`` (from the agent's default_tool_call_source) lets the
+        # caller force NATIVE server-side tool calling even on a self-deployed
+        # OpenAI-compatible endpoint that isn't on the allowlist below. "backend"
+        # => request tool_choice="auto" and keep the structured tool_calls the
+        # server returns; "parser" (default) => the legacy self-deployed path
+        # (tool_choice="none" + local parsing from content).
+        tool_call_source = kwargs.pop("tool_call_source", "parser")
+
+        # Hosted OpenAI-compatible endpoints parse tool calls server-side and
+        # return them in the structured `tool_calls` field. Self-deployed
+        # vLLM/sglang do not, so we have to fall back to local parsing. Keep
+        # this list explicit: false negatives clobber `tool_choice` to "none"
+        # and silently break function calling on the affected provider.
         is_openai_model = False
         if not self.is_gemini and (
-            "gpt" in self.model_name.lower() or "api.openai.com" in self.base_url
+            "gpt" in self.model_name.lower()
+            or "api.openai.com" in self.base_url
+            or "api.deepseek.com" in self.base_url
+            or "api.openai-next.com" in self.base_url
+            or "api.anthropic.com" in self.base_url
+            or "openrouter.ai" in self.base_url
         ):
             is_openai_model = True
+
+        # Native server-side tool calling: allowlisted hosted models, OR any
+        # endpoint where the agent explicitly opted into backend tool calls.
+        native_tools = is_openai_model or tool_call_source == "backend"
 
         if not self.is_gemini:
             messages_list = [
                 self._convert_to_openai_chat_without_tool_call_processing(
-                    messages, is_openai_model
+                    messages, native_tools
                 )
                 for messages in messages_list
             ]
@@ -756,11 +947,21 @@ class ClientBackend(LLMBackend):
                 # Gemini handles tools differently - convert to function declarations
                 # This will be handled in the Gemini call if needed
                 pass
-            elif is_openai_model:
+            elif native_tools:
                 kwargs["tool_choice"] = "auto"
             else:
                 # For self-deployed models, we will use the response to extract tool calls
                 kwargs["tool_choice"] = "none"
+
+        # Skills are a non-standard OpenAI field. Self-deployed servers (vLLM)
+        # consume them via the chat template by way of ``chat_template_kwargs``
+        # in ``extra_body``. Skills are unsupported on Gemini / hosted OpenAI.
+        if "skills" in kwargs:
+            skills = kwargs.pop("skills")
+            if skills and not self.is_gemini and not is_openai_model:
+                extra_body = kwargs.setdefault("extra_body", {})
+                chat_template_kwargs = extra_body.setdefault("chat_template_kwargs", {})
+                chat_template_kwargs["skills"] = skills
 
         return messages_list, kwargs
 

@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from ....core.context import Context
 from ...agent_base import BaseAgent
-from ...chain.structures import Node
+from ...rollout.structures import Node
 from ..action_agent import (
     CONTEXT_TRIGGER_MESSAGE_DICT,
     CONTEXT_TRIGGER_MESSAGE_TYPE_ENV,
@@ -143,6 +143,15 @@ class Qwen3CoderSWEAgent(BaseAgent):
 
         return text
 
+    @staticmethod
+    def _truncate_after_tool_call(response: str) -> str:
+        """Drop trailing model output after the last </tool_call> tag."""
+        marker = "</tool_call>"
+        idx = response.rfind(marker)
+        if idx == -1:
+            return response
+        return response[: idx + len(marker)]
+
     def parse(
         self,
         responses: List[str],
@@ -152,6 +161,8 @@ class Qwen3CoderSWEAgent(BaseAgent):
         trajectory_segments = []
         if context is not None:
             trajectory_segments = context.metadata.get("trajectory_segments", [])
+
+        responses = [self._truncate_after_tool_call(r) for r in responses]
 
         # Keep default parser behavior and only override context-triggered turns.
         parsed_messages = super().parse(responses, context=context, **kwargs)
@@ -203,7 +214,6 @@ class Qwen3CoderSWEAgent(BaseAgent):
         chain_id,
         depth,
         have_set_resources,
-        enable_streaming,
     ):
         """
         Execute tool call, with special handling for internal summarize pseudo-tool.
@@ -231,5 +241,4 @@ class Qwen3CoderSWEAgent(BaseAgent):
             chain_id,
             depth,
             have_set_resources,
-            enable_streaming,
         )

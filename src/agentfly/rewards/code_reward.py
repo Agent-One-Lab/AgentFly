@@ -8,7 +8,7 @@ from .reward_base import reward
 async def code_reward_test(prediction: str, context: Context) -> dict:
     """
     Run code in the rollout's Python sandbox and return reward.
-    Uses the same sandbox as the code tool (context.acquire_resource with scope=rollout).
+    Uses the same sandbox as the code tool (context.acquire_resource with scope="global").
     Caller must pass context when invoking this reward.
     """
     try:

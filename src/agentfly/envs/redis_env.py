@@ -25,14 +25,14 @@ class RedisEnv(BaseEnv):
             return s.getsockname()[1]
 
     async def start(self):
-        global AGENT_DATA_DIR
-        global AGENT_CONFIG_DIR
+        global AF_DATA_DIR
+        global AF_CONFIG_DIR
         # If port is None, find a free port
         if self.port is None:
             self.port = self._find_free_port()
 
-        config_path = os.path.join(AGENT_CONFIG_DIR, "redis", "redis.conf")
-        data_path = os.path.join(AGENT_DATA_DIR, "redis")
+        config_path = os.path.join(AF_CONFIG_DIR, "redis", "redis.conf")
+        data_path = os.path.join(AF_DATA_DIR, "redis")
         os.makedirs(data_path, exist_ok=True)
         print(
             f"Starting Redis server at {self.host}:{self.port} with config {config_path}"

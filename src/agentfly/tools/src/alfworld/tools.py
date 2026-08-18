@@ -6,6 +6,7 @@ from ...decorator import tool
 
 
 async def _get_alfworld_env(context: Context):
+    """Acquire the ALFWorld resource, resetting it to the episode's task on first use."""
     need_reset = not context.is_spec_acquired(ALFWorldSpec)
     env = await context.acquire_resource(
         spec=ALFWorldSpec,
@@ -14,99 +15,48 @@ async def _get_alfworld_env(context: Context):
     )
     if need_reset:
         meta = context.metadata or {}
-        if "task_id" in meta:
-            await env.reset(
-                env_args={"task_id": meta["task_id"]},
-                split=meta.get("split", "train"),
-            )
-        else:
-            await env.reset(split=meta.get("split", "train"))
+        env_args = {"task_id": meta["task_id"]} if "task_id" in meta else None
+        await env.reset(env_args=env_args, split=meta.get("split", "train"))
     return env
+
+
+def format_observation(observation: str, commands) -> str:
+    """Append the admissible-action menu to the observation so the model can pick
+    a valid action every turn (mirrors verl-agent's per-step prompt) without
+    spending a turn on a separate lookup tool. Shared with the agent's first-node
+    hook so the initial reset observation is rendered the same way as step results."""
+    text = str(observation)
+    if commands:
+        text += "\n\nAdmissible actions: [" + ", ".join(commands) + "]"
+    return text
 
 
 @tool(
     name="alfworld_step",
-    description="Take an action in the ALFWorld environment and return the observation",
+    description="Take an action in the ALFWorld environment and return the resulting observation plus the admissible actions for the new state.",
     stateful=True,
 )
 async def alfworld_step(action: str, context: Context):
     """
-    Take an action in the ALFWorld environment and return the observation
+    Take an action in the ALFWorld environment.
 
     Args:
-        action (str): The action to take in the environment
+        action (str): The action to take in the environment.
         context (Context): Injected rollout context; used to acquire the ALFWorld resource.
 
     Returns:
-        dict: A dictionary containing the observation, reward, done, and info
+        dict: observation (raw text + admissible actions), reward, done, info.
     """
     try:
         env = await _get_alfworld_env(context)
         obs, reward, done, info = await env.step(action)
+        commands = info.get("admissible_commands") if info else None
         return {
-            "observation": obs,
+            "observation": format_observation(obs, commands),
             "reward": float(reward),
             "done": bool(done),
             "info": info | {"reward": float(reward)},  # keep reward in info
         }
-    except Exception as e:
-        return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-@tool(
-    name="alfworld_reset",
-    description="Reset the ALFWorld environment to start a new episode",
-    stateful=True,
-)
-async def alfworld_reset(context: Context):
-    try:
-        env = await _get_alfworld_env(context)
-        meta = context.metadata or {}
-        if "task_id" in meta:
-            obs, _info = await env.reset(
-                env_args={"task_id": meta["task_id"]},
-                split=meta.get("split", "train"),
-            )
-        else:
-            obs, _info = await env.reset(split=meta.get("split", "train"))
-        return obs
-    except Exception as e:
-        return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-@tool(
-    name="alfworld_get_admissible_commands",
-    description="Get the list of admissible commands for the current state in ALFWorld",
-    stateful=True,
-)
-async def alfworld_get_admissible_commands(context: Context):
-    try:
-        env = await _get_alfworld_env(context)
-        commands = await env.get_admissible_commands()
-        return "\n".join(commands)
-    except Exception as e:
-        return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-@tool(
-    name="alfworld_get_task_objective",
-    description="Get the current task objective/goal from the ALFWorld environment",
-    stateful=True,
-)
-async def alfworld_get_task_objective(context: Context):
-    try:
-        env = await _get_alfworld_env(context)
-        info = await env.get_info()
-        if not info:
-            info = getattr(env, "_current_info", {}) or {}
-
-        task_objective = info.get(
-            "goal",
-            info.get("task_description", info.get("task", "No task objective found")),
-        )
-        task_type = info.get("task_type", "Unknown task type")
-
-        return f"Task: {task_objective}\nTask Type: {task_type}"
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
 
@@ -116,5 +66,3 @@ if __name__ == "__main__":
     print("======================")
     print("alfworld_step schema:")
     print(alfworld_step.schema)
-    print("\nalfworld_get_admissible_commands schema:")
-    print(alfworld_get_admissible_commands.schema)

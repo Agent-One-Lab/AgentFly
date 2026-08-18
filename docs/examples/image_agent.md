@@ -1,9 +1,8 @@
 ## Installation
 
 ```bash
-pip install -e .
-pip install -e '.[verl]' --no-build-isolation
-pip install git+https://github.com/huggingface/diffusers.git
+uv sync --extra verl
+uv pip install git+https://github.com/huggingface/diffusers.git
 ```
 
 ## Basic Usage

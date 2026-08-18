@@ -43,7 +43,7 @@ srun --nodes=$worker_num --ntasks=$worker_num --ntasks-per-node=1 rm -rf /tmp/ra
 
 # Start Ray head node
 srun --nodes=1 --ntasks=1 -w "$head_node" --export=ALL \
-    ${CONDA_BIN_PATH}ray start --head --node-ip-address="$head_node_ip" --port=$port \
+    uv run --no-sync ray start --head --node-ip-address="$head_node_ip" --port=$port \
     --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --include-dashboard=True --block &
 
 sleep 10
@@ -53,7 +53,7 @@ for ((i = 1; i < worker_num; i++)); do
     node_i=${nodes[$i]}
     echo "Starting WORKER $i at $node_i"
     srun --nodes=1 --ntasks=1 -w "$node_i" --export=ALL \
-        ${CONDA_BIN_PATH}ray start --address "$address_head" \
+        uv run --no-sync ray start --address "$address_head" \
         --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --block &
 done
 sleep 10
@@ -134,9 +134,9 @@ python -m agentfly.cli train \
     actor_rollout_ref.model.lora_alpha=$lora_alpha \
     actor_rollout_ref.model.lora.rank=$lora_rank \
     actor_rollout_ref.model.lora.alpha=$lora_alpha \
-    actor_rollout_ref.model.use_fused_kernel=True \
+    actor_rollout_ref.model.use_fused_kernels=True \
     actor_rollout_ref.model.target_modules=$lora_target_modules \
-    actor_rollout_ref.model.lora.merge=True \
+    actor_rollout_ref.model.lora.merge=False \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=$sequence_parallel_size \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=${lr_warmup_steps_ratio} \
     actor_rollout_ref.actor.ppo_mini_batch_size=$mini_batch_size \
@@ -145,7 +145,7 @@ python -m agentfly.cli train \
     actor_rollout_ref.actor.kl_loss_coef=$kl_coef \
     actor_rollout_ref.actor.kl_loss_type=$kl_loss_type \
     actor_rollout_ref.actor.entropy_coeff=$entropy_coeff \
-    actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.model.enable_gradient_checkpointing=False \
     actor_rollout_ref.model.enable_activation_offload=False \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \

@@ -13,4 +13,4 @@ async def test_scienceworld_reward():
     assert "reward" in result
     assert result["reward"] >= 0.0
 
-    await ctx.end_resource(scope="rollout")
+    await ctx.end_resource(scope="global")

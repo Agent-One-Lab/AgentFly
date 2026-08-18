@@ -130,6 +130,8 @@ tests/e2e/toy_examples/deepspeed/synchronous/output.txt
 
 # ckpt
 *.lock
+# ...but the uv lockfile must be committed for reproducible installs
+!uv.lock
 
 # data
 data/
@@ -177,3 +179,15 @@ verl/training_scripts/
 # training scripts
 training_scripts/
 verl/training_scripts/
+
+# local paper/scratch artifacts (not part of the release)
+*.pptx
+/review.md
+/docs_notes/
+/plot/
+examples/train_scripts/context/
+# local-only release working docs (not uploaded to the official repo)
+/CHANGELOG.md
+/release_readiness.md
+# testing deploy scripts
+examples/utils/

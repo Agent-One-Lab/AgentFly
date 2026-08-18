@@ -3,7 +3,7 @@ import os
 import click
 from chat_bricks import get_template
 
-from .. import AGENT_DATA_DIR
+from .. import AF_DATA_DIR
 
 
 def vllm_serve(
@@ -16,23 +16,34 @@ def vllm_serve(
     tool_call_parser,
     port,
     allowed_local_media_path,
+    override_generation_config,
 ):
 
     if template is None:
         template_option = ""
     else:
         jinja_template = get_template(template).jinja_template()
-        if not os.path.exists(f"{AGENT_DATA_DIR}/cache"):
-            os.makedirs(f"{AGENT_DATA_DIR}/cache")
-        with open(f"{AGENT_DATA_DIR}/cache/jinja_template.jinja", "w") as f:
+        if not os.path.exists(f"{AF_DATA_DIR}/cache"):
+            os.makedirs(f"{AF_DATA_DIR}/cache")
+        with open(f"{AF_DATA_DIR}/cache/jinja_template.jinja", "w") as f:
             f.write(jinja_template)
-        template_option = f"--chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja"
+        template_option = f"--chat-template {AF_DATA_DIR}/cache/jinja_template.jinja"
+
+    if tool_call_parser:
+        tool_call_parser_option = f"--enable-auto-tool-choice --tool-call-parser {tool_call_parser}"
+    else:
+        tool_call_parser_option = ""
 
     if allowed_local_media_path:
         allowed_local_media_path_option = f"--allowed-local-media-path {allowed_local_media_path}"
     else:
         allowed_local_media_path_option = ""
-    # command = f"vllm serve {model_name_or_path} --chat-template {AGENT_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
+    
+    if override_generation_config:
+        override_generation_config_option = f"--override-generation-config {override_generation_config}"
+    else:
+        override_generation_config_option = ""
+    # command = f"vllm serve {model_name_or_path} --chat-template {AF_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
     command = f"""vllm serve {model_name_or_path} \
 {template_option} \
 --trust-remote-code \
@@ -40,7 +51,7 @@ def vllm_serve(
 --pipeline-parallel-size {pp} \
 --data-parallel-size {dp} --port {port} \
 --gpu-memory-utilization {gpu_memory_utilization} \
---enable-auto-tool-choice --tool-call-parser {tool_call_parser} \
+{tool_call_parser_option} \
 {allowed_local_media_path_option}"""
 
     print(command)
@@ -54,9 +65,10 @@ def vllm_serve(
 @click.option("--pp", type=int, default=1)
 @click.option("--dp", type=int, default=1)
 @click.option("--gpu-memory-utilization", type=float, default=0.8)
-@click.option("--tool-call-parser", type=str, default="hermes")
+@click.option("--tool-call-parser", type=str, default=None)
 @click.option("--port", type=int, default=8000)
 @click.option("--allowed-local-media-path", type=str, default=None)
+@click.option("--override-generation-config", type=str, default=None)
 def main(
     model_name_or_path,
     template,
@@ -67,6 +79,7 @@ def main(
     tool_call_parser,
     port,
     allowed_local_media_path,
+    override_generation_config,
 ):
     vllm_serve(
         model_name_or_path,
@@ -78,6 +91,7 @@ def main(
         tool_call_parser,
         port,
         allowed_local_media_path,
+        override_generation_config,
     )
 
 
