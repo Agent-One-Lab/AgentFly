@@ -26,6 +26,7 @@ from .src.file.tools import (
     undo_edit,
 )
 
+from .src.miniswe import miniswe_bash
 from .src.shell.tools import run_shell_command
 from .src.skills import (
     Skill,
@@ -68,6 +69,7 @@ __all__ = [
     "edit_file",
     "run_python",
     "undo_edit",
+    "miniswe_bash",
     "run_shell_command",
     "Skill",
     "load_skill",

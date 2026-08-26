@@ -24,7 +24,7 @@ entropy_coeff=0.01  # Higher entropy for exploration
 kl_loss_type=mse
 agent_type=action
 template="action-agent"
-max_turns=10
+max_turns=50
 total_training_steps=200
 project_name="Open"
 

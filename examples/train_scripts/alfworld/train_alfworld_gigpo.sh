@@ -40,12 +40,15 @@ train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
 eval_dataset="./data/rlhf/alfworld/alfworld_valid_unseen_tasks.json"
 tools="[alfworld_step]"
 reward_name="alfworld_episode_reward"
-# adv_estimator=reinforce_plus_plus
-# Alternative estimators:
-# adv_estimator=rloo
-# adv_estimator=remax
-adv_estimator=grpo
-# adv_estimator=gae
+# Multi-turn GiGPO: episode advantage (group by prompt, GRPO-style) + step advantage
+# (per-turn discounted returns grouped by (prompt, anchor observation), scattered onto
+# each turn's tokens). Uses the per-turn step_reward returned by alfworld_step and the
+# per-turn observation as the grouping anchor. step_advantage_w is currently 1.0 (in code).
+# A/B baseline: the same config with adv_estimator=grpo (train_alfworld_ray.sh).
+adv_estimator=gigpo
+# gamma discounts the per-turn step return-to-go (GiGPO step level). GRPO ignores gamma,
+# so this only affects the GiGPO run. verl-agent uses 0.95.
+gamma=0.95
 system_prompt="You are an ALFWorld agent operating in an interactive, text-based household environment (derived from the ALFRED benchmark). You are placed in one of 120 possible rooms (kitchen, bedroom, bathroom, or living room) populated with portable objects (e.g., apple, mug, book) and static receptacles (e.g., microwave, fridge, drawer, countertop). Your goal is to complete the given household task by interacting with the world through high-level text commands, and to finish it in as few steps as possible. The environment is partially observable: the initial observation lists all navigable receptacles in the room, but you must actively go to receptacles, open them, and examine their contents to find target objects.
 
 You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
@@ -68,11 +71,12 @@ agent_type=action
 template="action-agent"
 max_turns=40
 total_training_steps=200
-experiment_name="${model}-alfworld-${max_turns}turns-${adv_estimator}_new"
+experiment_name="${model}-alfworld-${max_turns}turns-${adv_estimator}_test2"
 project_name="Open"
 
 python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
+    algorithm.gamma=$gamma \
     data.train_files=${train_dataset} \
     data.val_files=${eval_dataset} \
     data.val_batch_size=$val_batch_size \

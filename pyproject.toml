@@ -50,7 +50,11 @@ dependencies = [
     "timeout-decorator",
     "redis",
     "docker",
-    "ray",
+    # Pin ray to the version the reference (conda) env trained on. ray 2.57.x
+    # hangs verl's agent-loop generation (workers wait forever on the vLLM
+    # rollout server); 2.55.1 is the known-good version. Constrains ray[default]
+    # in the verl extra too.
+    "ray==2.55.1",
     "openai",
     "enroot-py",
     "omegaconf",

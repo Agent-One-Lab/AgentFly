@@ -72,6 +72,7 @@ Please refer to [installation.md](docs/start/installation.md) for customized ins
 | ScienceWorld | Qwen3-4B-Instruct | [report](https://api.wandb.ai/links/AgentRL/f99omj98) | ✅ |
 | SWE | Qwen3-32B | [report](https://wandb.ai/AgentRL/Resource/reports/SWE-OS---VmlldzoxNjUzNjk0Mw?accessToken=x4co1e22ddhkm1qjo791a9blmvt4uqz9jmgytybkq4xtgfwt0u8jjx28wpqcsqex) | ✅ (on going) |
 | SimuScene | SFT DeepSeek-R1-Distill-Qwen |[report](https://wandb.ai/AgentRL/SimuScene/reports/SimuScene--VmlldzoxNjYzNzYzMg?accessToken=qe00f9dy59hiu2uyndyn22xl141s37sybnxlp5e5ybryqqahao5mvyra0sbmlf9v) | ✅ |
+| ALFWorld | Qwen2.5-3B-Instruct | _report link — to add_ | ✅ |
  
 ## Quick Start
 ```python

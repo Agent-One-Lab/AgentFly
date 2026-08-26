@@ -269,7 +269,7 @@ class BaseTool:
                 - "arguments": The arguments used to call the tool.
                 - "observation": The observation of the tool call.
                 - "status": The status of the tool call.
-                - "info": The info of the tool call.
+                - "metrics": Extra numeric metrics logged for the tool call.
         """
         cls = type(self)
         # If async is needed, return a coroutine
@@ -318,10 +318,14 @@ class BaseTool:
         """
         from .types import ToolResult
 
+        # Record only the LLM-provided arguments, not framework-injected params
+        # (``context``), which aren't tool inputs and can hold non-serializable
+        # objects (``Context``) that would break trajectory/metrics serialization.
+        recorded_args = {k: v for k, v in kwargs.items() if k not in ("context",)}
         return ToolResult.from_raw(
             result,
             name=self.name,
-            arguments=kwargs,
+            arguments=recorded_args,
             status=self.status,
             max_length=self.max_length,
         ).to_dict()

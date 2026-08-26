@@ -899,6 +899,51 @@ class BaseAgent(ChainRollout, ABC):
         world_size: int = 1,
         pad_to_multiple_of: Optional[int] = None,
     ):
+        """Convert the last ``run``'s trajectories into a verl ``DataProto``.
+
+        This is the agent→trainer boundary. It flattens trajectories into rows
+        (one row per **segment**; for the common non-folded rollout that is one
+        row per trajectory), tokenizes them, and packs the fields the trainer
+        consumes. The returned ``DataProto`` carries the following contract.
+
+        ``batch`` (tensors, shape ``[B, L]`` unless noted):
+
+        - ``input_ids`` / ``attention_mask`` / ``position_ids`` — the sequence.
+        - ``action_mask`` — 1 on assistant (policy) tokens, 0 elsewhere; the
+          per-token loss mask. Contiguous runs of 1s delimit turns.
+        - ``reward_mask`` — 1 on the single token that carries the outcome
+          reward (the trajectory's last assistant token).
+        - ``rm_scores`` — the scalar outcome reward placed on the ``reward_mask``
+          token (``reward_mask * reward``); ``rm_scores.sum(-1)`` per row is the
+          episode outcome.
+        - ``multi_modal_inputs`` — present only for vision-language models.
+
+        ``non_tensor_batch`` (arrays, shape ``[B]``):
+
+        - ``uid`` — prompt/group id shared by a prompt's rollouts; the group a
+          group-relative estimator (GRPO, GiGPO episode level) normalizes within.
+        - ``batch_idx`` — per-trajectory index; the de-facto trajectory id (all
+          rows of one trajectory share it).
+        - ``segment_idx`` — segment order within a trajectory (0 when not folded).
+        - ``rm_<key>`` — one array per extra key a reward dict returned
+          (e.g. ``rm_f1``), broadcast to each of the trajectory's rows.
+        - ``step_observations`` / ``step_rewards`` — per-turn lists (turn order,
+          projected from the row's ``tool_results``): the observation the agent
+          acted on (grouping anchor) and the per-step reward. Consumed by
+          step-level estimators (GiGPO), which map them to token spans via a
+          ``turn_ids`` derived from ``action_mask``; ignored otherwise.
+
+        ``meta_info``:
+
+        - ``use_agent`` — marks this as an agent-produced batch.
+        - ``repeat_times`` — number of segments per trajectory.
+
+        Args:
+            train_on_last_turn: (forced ``False``) restrict the loss to the last turn.
+            world_size: data-parallel world size.
+            pad_to_multiple_of: pad the batch dimension to a multiple of this
+                (extra rows repeat the last row) so it shards evenly.
+        """
         run_result = self._require_last_run()
         trajectories = run_result.trajectories
         segments_list = []
@@ -990,6 +1035,32 @@ class BaseAgent(ChainRollout, ABC):
         segment_index = np.array(segment_index_list, dtype=np.int32)
         batch_index = np.array(batch_index_list, dtype=np.int32)
 
+        # Per-turn rollout signals projected from each row's trajectory
+        # ``tool_results`` (turn order). Only these clean arrays cross the
+        # boundary; the raw ``tool_results`` stay agent-side. Consumed by
+        # step-level estimators (GiGPO); ignored otherwise.
+        #
+        # ANCHOR = the state the agent acted FROM (pre-action s_t). GiGPO groups
+        # turns by the state the action was taken from; ``tool_results[t].observation``
+        # is the observation returned AFTER action t (post-action s_{t+1}), so we shift
+        # the observations right by one — anchor[t] = the previous turn's observation,
+        # with a shared marker for the first turn (all chains of a prompt share s_0, and
+        # grouping is scoped within uid). ``step_reward[t]`` is the reward from action t
+        # (``tool_results[t]``), which is already correctly aligned.
+        step_observations_list = []
+        step_rewards_list = []
+        for info in other_info_list:
+            tr = info.get("tool_results") or []
+            # Prefer the raw ``anchor`` (undecorated state key) over the LLM-facing
+            # ``observation`` (which may carry an admissible-action menu that fragments
+            # exact-hash grouping); fall back to ``observation`` when no anchor is set.
+            post_obs = [
+                r.get("anchor") if r.get("anchor") is not None else r.get("observation")
+                for r in tr
+            ]
+            step_observations_list.append((["__init__"] + post_obs[:-1]) if post_obs else [])
+            step_rewards_list.append([r.get("step_reward") for r in tr])
+
 
         batch_size = len(group_ids_list)
         unique_group_ids = []
@@ -1045,6 +1116,14 @@ class BaseAgent(ChainRollout, ABC):
         inputs["uid"] = group_ids
         inputs["segment_idx"] = segment_index
         inputs["batch_idx"] = batch_index
+        # 1D object arrays of per-turn lists (np.empty avoids equal-length rows
+        # collapsing into a 2D array).
+        step_observations = np.empty(len(step_observations_list), dtype=object)
+        step_observations[:] = step_observations_list
+        step_rewards = np.empty(len(step_rewards_list), dtype=object)
+        step_rewards[:] = step_rewards_list
+        inputs["step_observations"] = step_observations
+        inputs["step_rewards"] = step_rewards
         
         if "mm_inputs" in inputs:
             mm_inputs = inputs.pop("mm_inputs")

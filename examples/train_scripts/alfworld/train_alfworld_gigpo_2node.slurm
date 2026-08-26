@@ -1,51 +1,80 @@
+#!/bin/bash
+#SBATCH --job-name=alfworld_gigpo
+#SBATCH --time=200:00:00
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:8
+#SBATCH --account=iq
+#SBATCH --cpus-per-task=128
+#SBATCH --output=stdout/%x_%j.out
+#SBATCH --error=stdout/%x_%j.err
 
-# Run in single node
-export VLLM_USE_V1=1
-
+# Multi-turn GiGPO on ALFWorld, 2 nodes (16 GPUs). A/B baseline is adv_estimator=grpo.
+# Get the list of allocated nodes
+nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
+echo "Nodes: ${nodes[@]}"
 
 set -x
 
 export head_node=${nodes[0]}
-
-head_node_ip=$(hostname --ip-address)
+head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
 port=6379
 address_head=$head_node_ip:$port
 
-# export VLLM_ATTENTION_BACKEND=XFORMERS
-# export GLOO_SOCKET_IFNAME=ens10f0np0
+export worker_num=$SLURM_NNODES
+export VLLM_USE_V1=1
 export HYDRA_FULL_ERROR=1
-# Remove existing Ray cluster
-ray stop
-rm -rf /tmp/ray/ray_current_cluster
 
-# Start Ray head node
-ray start --head --node-ip-address="$head_node_ip" --port=$port  --num-cpus 192 --num-gpus 8
+# =================== Ray start ===================
+# ray stop on all nodes
+srun --nodes=$worker_num --ntasks=$worker_num --ntasks-per-node=1 ray stop
+sleep 10
+srun --nodes=$worker_num --ntasks=$worker_num --ntasks-per-node=1 rm -rf /tmp/ray/ray_current_cluster
 
-# AlfWorld Configuration
+# Head node
+srun --nodes=1 --ntasks=1 -w "$head_node" --export=ALL \
+    uv run --no-sync ray start --head --node-ip-address="$head_node_ip" --port=$port \
+    --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --include-dashboard=True --block &
+sleep 10
+
+# Worker nodes
+for ((i = 1; i < worker_num; i++)); do
+    node_i=${nodes[$i]}
+    echo "Starting WORKER $i at $node_i"
+    srun --nodes=1 --ntasks=1 -w "$node_i" --export=ALL \
+        uv run --no-sync ray start --address "$address_head" \
+        --num-cpus "${SLURM_CPUS_PER_TASK}" --num-gpus 8 --block &
+done
+sleep 10
+
+# =================== AlfWorld / GiGPO config ===================
 model=Qwen/Qwen2.5-3B-Instruct
 lr=5e-7
-length=512  # Increased for longer episodes
 val_batch_size=256
-train_batch_size=32
-num_chains=8  # More chains for better exploration
-mini_batch_size=$((train_batch_size * num_chains))
+train_batch_size=8
+num_chains=8
+mini_batch_size=$((train_batch_size * num_chains))   # 64
 
 max_new_tokens_per_turn=256
-max_model_len=12288
+max_model_len=40000
 kl_coef=0.001
-# Full official ALFWorld splits (3553 train / 134 valid_unseen), matching verl-agent.
-# Regenerate with: python examples/data_preprocess/prepare_alfworld.py --out-dir data/rlhf/alfworld
-# Swap eval to alfworld_valid_seen_tasks.json (140) for the in-distribution eval.
 train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
 eval_dataset="./data/rlhf/alfworld/alfworld_valid_unseen_tasks.json"
 tools="[alfworld_step]"
 reward_name="alfworld_episode_reward"
-# adv_estimator=reinforce_plus_plus
-# Alternative estimators:
-# adv_estimator=rloo
-# adv_estimator=remax
-adv_estimator=grpo
-# adv_estimator=gae
+adv_estimator=gigpo
+gamma=0.95                          # GiGPO step-return discount (GRPO ignores gamma)
+
+# --- Sequence parallelism (optional; likely UNNEEDED for 3B @ 40k with micro_batch=1) ---
+# If you OOM (or want micro_batch>1), enable Ulysses SP by adding these to the launch:
+#   actor_rollout_ref.actor.ulysses_sequence_parallel_size=4 \
+#   actor_rollout_ref.ref.ulysses_sequence_parallel_size=4 \
+#   critic.ulysses_sequence_parallel_size=4 \
+# SP splits the 40k sequence across GPUs. Note: the long-context SP path typically also
+# wants actor_rollout_ref.model.use_remove_padding=True (currently False for the action
+# agent) — flip it together and verify the multi-turn masking still lines up.
+
 system_prompt="You are an ALFWorld agent operating in an interactive, text-based household environment (derived from the ALFRED benchmark). You are placed in one of 120 possible rooms (kitchen, bedroom, bathroom, or living room) populated with portable objects (e.g., apple, mug, book) and static receptacles (e.g., microwave, fridge, drawer, countertop). Your goal is to complete the given household task by interacting with the world through high-level text commands, and to finish it in as few steps as possible. The environment is partially observable: the initial observation lists all navigable receptacles in the room, but you must actively go to receptacles, open them, and examine their contents to find target objects.
 
 You must conduct reasoning inside <think> and </think> first every time you get new information. After reasoning, you can do one action by <action> action </action>. If you think you have finished the task, summarize what you have done.
@@ -68,11 +97,12 @@ agent_type=action
 template="action-agent"
 max_turns=40
 total_training_steps=200
-experiment_name="${model}-alfworld-${max_turns}turns-${adv_estimator}_new"
+experiment_name="${model}-alfworld-${max_turns}turns-${adv_estimator}-2node-40k"
 project_name="Open"
 
 python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
+    algorithm.gamma=$gamma \
     data.train_files=${train_dataset} \
     data.val_files=${eval_dataset} \
     data.val_batch_size=$val_batch_size \
@@ -115,7 +145,7 @@ python3 -m agentfly.cli train \
     trainer.project_name=${project_name} \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=8 \
-    trainer.nnodes=1 \
+    trainer.nnodes=${worker_num} \
     trainer.save_freq=50 \
     trainer.test_freq=25 \
     trainer.total_training_steps=$total_training_steps \

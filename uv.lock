@@ -146,7 +146,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
     { name = "pyyaml" },
     { name = "qwen-vl-utils" },
-    { name = "ray" },
+    { name = "ray", specifier = "==2.55.1" },
     { name = "ray", extras = ["default"], marker = "extra == 'verl'" },
     { name = "redis" },
     { name = "requests" },
@@ -3153,7 +3153,7 @@ wheels = [
 
 [[package]]
 name = "ray"
-version = "2.57.0"
+version = "2.55.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -3166,7 +3166,7 @@ dependencies = [
     { name = "requests", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/3f/a580c1a8d9574372f83d4b97cd11ae64fdfa1c099c4728ec5197470cf094/ray-2.57.0-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:595d088b1fd1add64654c6cebe203e25903787b650d35c4a3dc008d451e48a41", size = 77891434, upload-time = "2026-08-11T00:21:29.991Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/f8/fffadf3f4285eebd460e4d7f2ed1c0cd641ed89613c3f49eb881ee9fa7e2/ray-2.55.1-cp312-cp312-manylinux2014_x86_64.whl", hash = "sha256:263705f6bab29e7622a94f82da25fd7f9cead76cdf89a07aab28f79cdf8f9d95", size = 73765203, upload-time = "2026-04-22T20:10:10.495Z" },
 ]
 
 [package.optional-dependencies]

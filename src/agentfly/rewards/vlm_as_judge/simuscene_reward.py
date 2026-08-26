@@ -17,7 +17,6 @@ from .prompt_utils import create_vlm_prompt, create_vlm_prompt_custom, create_vl
 from ...core import Context
 from ..reward_base import reward
 from ...resources import APIModelResourceSpec
-from ..llm_as_judge.llm_as_judge_client import LLMClient
 
 
 def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:

@@ -12,7 +12,6 @@ from .reward_base import reward
 try:
     from math_verify import parse, verify
 except ImportError:
-    print("math_verify is not installed in this environment")
     parse = None
     verify = None
 

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 import time
 import uuid
@@ -37,6 +38,13 @@ from .tokens import estimate_chat_prompt_tokens, observation_token_length
 # (e.g. ``<|im_start|>user<tool_response>`` ... ``</tool_response><|im_end|>``). Approximate;
 # used only for the max_model_len budget check, not for the actual prompt rendering.
 TOOL_OBS_PREFIX_TOKENS = 15
+# Headroom reserved below max_model_len for the context guard. The incremental
+# per-turn token estimate has a small residual drift (a few tokens: single-render
+# wrapper markers + generation suffix vs the flat TOOL_OBS_PREFIX_TOKENS), which
+# at the exact ceiling can let an over-length prompt slip to vLLM — which RAISES
+# and kills the whole run. Clipping the guard this far below max_model_len absorbs
+# that drift. Env-overridable.
+TOKEN_SAFETY_MARGIN = int(os.environ.get("AGENTFLY_TOKEN_SAFETY_MARGIN", "512"))
 
 
 @dataclass(frozen=True)
@@ -174,6 +182,8 @@ class ChainRollout:
         "finish_reason",
         "rollout_time_sec",
         "reward",
+        "_tool_results",
+        "tool_metrics",
     })
 
     def get_trajectories(self) -> List[Trajectory]:
@@ -183,6 +193,8 @@ class ChainRollout:
 
         - ``reward`` (a ``RewardResult`` produced by ``calculate_reward``) →
           ``Trajectory.reward`` (float) + ``Trajectory.metrics`` (extras)
+        - ``tool_metrics`` (per-chain averages finalized in ``_finalize_chain``)
+          → merged into ``Trajectory.metrics`` alongside the reward metrics
         - ``finish_reason``, ``rollout_time_sec``, ``chain_id``,
           ``group_id``, ``chain_idx``, ``group_idx`` → first-class fields
         - everything else (dataset-row passthrough fields like ``answer``,
@@ -208,7 +220,7 @@ class ChainRollout:
             raw_reward = info.get("reward")
             if isinstance(raw_reward, RewardResult):
                 reward_value = raw_reward.reward
-                metrics = dict(raw_reward.extras)
+                metrics = dict(raw_reward.metrics)
             elif isinstance(raw_reward, dict):
                 # Legacy back-compat: a dict reward stored directly without
                 # going through calculate_reward (rare).
@@ -221,6 +233,10 @@ class ChainRollout:
                 # None when no reward function was configured.
                 reward_value = None
                 metrics = {}
+
+            # Tool metrics were finalized per-chain in _finalize_chain; read them
+            # the same way reward metrics are read above.
+            metrics.update(info.get("tool_metrics") or {})
 
             # Free-form bag: everything in chain.info that isn't a reserved key.
             metadata = {
@@ -239,6 +255,7 @@ class ChainRollout:
                     chain_idx=info.get("chain_idx"),
                     group_idx=info.get("group_idx"),
                     metadata=metadata,
+                    tool_results=info.get("_tool_results") or [],
                 )
             )
         return trajectories
@@ -509,10 +526,44 @@ class ChainRollout:
         """
         max_model_len = getattr(self, "max_model_len", None)
 
+        # --- SKILLRL_TOKEN_DEBUG: per-turn drift probe. The pre-check below trusts
+        # the INCREMENTAL running estimate (running_total + obs_raw + TOOL_OBS_PREFIX
+        # per turn). This probe re-tokenizes the real prompt EXACTLY (uncapped) and
+        # logs incremental-vs-exact so we can catch the turn where the incremental
+        # estimate under-counts what vLLM will actually tokenize (the 40968>40960
+        # crash). Localized to the danger zone so the O(n) recompute cost is bounded;
+        # off unless the env var is set. ---
+        # Gate on DEPTH (not on the incremental estimate we're auditing) and use
+        # print(flush) — agentfly's rollout logger is not captured in the job
+        # stdout, but verl's step prints are, so print is what actually surfaces.
+        if os.environ.get("SKILLRL_TOKEN_DEBUG") and max_model_len is not None:
+            _min_depth = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MINDEPTH", "6"))
+            if depth >= _min_depth:
+                _incr = current_node.total_token_length
+                try:
+                    _exact = estimate_chat_prompt_tokens(
+                        self, current_node, tools=tools, cap=False)
+                except Exception:  # noqa: BLE001
+                    _exact = -1
+                _margin = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MARGIN", "6000"))
+                # Only surface turns that matter: near/over the ceiling by EITHER
+                # measure, or a large incremental-vs-exact divergence.
+                if (_exact >= max_model_len - _margin
+                        or _incr >= max_model_len - _margin
+                        or (_exact >= 0 and abs(_exact - _incr) > 100)):
+                    print(
+                        f"[TOKDBG] chain={chain_id} depth={depth} incr={_incr} "
+                        f"exact={_exact} drift={(_exact - _incr) if _exact >= 0 else 'NA'} "
+                        f"max={max_model_len} guard_fires={_incr >= max_model_len} "
+                        f"exact_over={(_exact > max_model_len) if _exact >= 0 else 'NA'} "
+                        f"slips_through={_exact >= 0 and _exact > max_model_len and _incr < max_model_len}",
+                        flush=True,
+                    )
+
         # 1. Pre-check: stop before generating if already at/over the context limit.
         if (
             max_model_len is not None
-            and current_node.total_token_length >= max_model_len
+            and current_node.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
         ):
             current_node.is_terminal = True
             chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
@@ -525,16 +576,39 @@ class ChainRollout:
         # history the LLM was given (generate_async reads current_node.messages).
         self._maybe_append_context_trigger_user_message(current_node)
         newest_messages = current_node.messages.copy()
-        new_msg, total_token_length = await generate_response(
-            self,
-            chain=chain,
-            current_node=current_node,
-            tools=tools,
-            depth=depth,
-            chain_id=chain_id,
-            generation_config=generation_config,
-            context=context,
-        )
+        try:
+            new_msg, total_token_length = await generate_response(
+                self,
+                chain=chain,
+                current_node=current_node,
+                tools=tools,
+                depth=depth,
+                chain_id=chain_id,
+                generation_config=generation_config,
+                context=context,
+            )
+        except Exception as e:  # noqa: BLE001
+            # Backstop for an over-length prompt reaching vLLM: it RAISES
+            # (ValueError "Prompt length ... exceeds the model's maximum context
+            # length" / VLLMValidationError "max_tokens must be at least 1, got
+            # 0"), and unhandled that kills the entire run. The TOKEN_SAFETY_MARGIN
+            # guard should prevent ever getting here, but if a residual drift slips
+            # through, abort THIS chain gracefully instead of propagating.
+            _m = str(e)
+            if ("maximum context length" in _m
+                    or "Prompt length" in _m
+                    or "max_tokens must be at least 1" in _m):
+                print(
+                    f"[TOKDBG] OVER-LENGTH at generation (chain={chain_id} "
+                    f"depth={depth}) — aborting chain, not raising. incr="
+                    f"{current_node.total_token_length} max={max_model_len} :: {_m[:180]}",
+                    flush=True,
+                )
+                current_node.is_terminal = True
+                chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
+                yield TurnResult(current_node, have_set_resources, False)
+                return
+            raise
         newest_messages.append(new_msg)
         thought_node = chain.add_node(
             type="Thought",
@@ -557,7 +631,7 @@ class ChainRollout:
         )
         if (
             max_model_len is not None
-            and thought_node.total_token_length >= max_model_len
+            and thought_node.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
         ):
             thought_node.is_terminal = True
             chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
@@ -658,6 +732,12 @@ class ChainRollout:
             num_tool_calls += 1
             have_set_resources = True
 
+            # Preserve the per-turn tool result on the chain — the single per-turn
+            # source. It feeds both metric-averaging (logging, in _finalize_chain)
+            # and feature harvesting (raw, from Trajectory.tool_results). One record
+            # per tool call (== one turn for action agents).
+            chain.info.setdefault("_tool_results", []).append(result)
+
             action_input_node = chain.add_node(
                 type="Action Input",
                 messages=newest_messages.copy(),
@@ -685,7 +765,7 @@ class ChainRollout:
             # Terminate if context length exceeded after this tool observation
             if (
                 max_model_len is not None
-                and action_input_node.total_token_length >= max_model_len
+                and action_input_node.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
             ):
                 action_input_node.is_terminal = True
                 chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
@@ -898,6 +978,25 @@ class ChainRollout:
             chain.info["reward"] = reward
         else:
             chain.info["reward"] = None
+
+        # Derive averaged tool metrics from the per-turn tool results (the single
+        # per-turn source). Each tool's per-call metrics and its first-class
+        # step_reward are averaged over the chain, namespaced tool/<name>/<key>,
+        # for wandb logging. The raw _tool_results list is left on chain.info for
+        # feature harvesting. Mirrors how the reward is finalized above.
+        acc: Dict[str, List[Any]] = {}
+        for r in chain.info.get("_tool_results") or []:
+            tname = r.get("name") or "tool"
+            for k, v in (r.get("metrics") or {}).items():
+                acc.setdefault(f"tool/{tname}/{k}", []).append(v)
+            if r.get("step_reward") is not None:
+                acc.setdefault(f"tool/{tname}/step_reward", []).append(r["step_reward"])
+        tool_metrics: Dict[str, float] = {}
+        for key, values in acc.items():
+            nums = [float(v) for v in values if isinstance(v, (int, float, bool))]
+            if nums:
+                tool_metrics[key] = sum(nums) / len(nums)
+        chain.info["tool_metrics"] = tool_metrics
 
 
         # Release global resources so other rollouts can use them

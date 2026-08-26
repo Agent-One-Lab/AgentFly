@@ -14,5 +14,5 @@ async def test_args_validation():
         "arguments": {"a": 1, "b": 2, "c": 3},
         "observation": 'Invalid argument "c" for tool add.',
         "status": "success",
-        "info": {},
+        "metrics": {},
     }

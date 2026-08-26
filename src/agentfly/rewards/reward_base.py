@@ -369,13 +369,10 @@ def get_reward_from_name(reward_name: str) -> BaseReward | type[BaseReward]:
     Raises:
         KeyError: If the reward name is not found in the registry
     """
-    global REWARD_REGISTRY
-    reward_name = reward_name.lower()
-    if reward_name not in REWARD_REGISTRY:
-        raise KeyError(
-            f"Unknown reward: '{reward_name}'. Available rewards: {list(REWARD_REGISTRY.keys())}"
-        )
-    return REWARD_REGISTRY[reward_name]
+    from ..utils.references import resolve_reference
+    # Accepts a registered name OR an import reference ("module:attr",
+    # "/path.py:attr") so a custom reward loads without a pre-import.
+    return resolve_reference(reward_name, REWARD_REGISTRY, "reward")
 
 
 def get_rewards_from_names(

@@ -103,8 +103,11 @@ def serialize_for_json(obj):
         return tuple(serialize_for_json(i) for i in obj)
     elif isinstance(obj, bytes):
         return {"__image__": base64.b64encode(obj).decode("utf-8")}
+    elif isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj  # JSON primitives pass through
     else:
-        return obj  # leave other types as-is
+        # Opaque object (e.g. Context) — stringify so JSON logging can't crash the run.
+        return str(obj)
 
 
 class JsonlSink(BaseSink):

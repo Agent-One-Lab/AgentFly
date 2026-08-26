@@ -37,7 +37,10 @@ def get_tools_from_names(tool_names: List[str]) -> List[BaseTool]:
     Raises:
         KeyError: If a tool name is not found in the registry
     """
-    return [TOOL_REGISTRY[tool_name] for tool_name in tool_names]
+    from ...utils.references import resolve_reference
+    # Each entry is a registered name OR an import reference
+    # ("module:tool", "/path.py:tool"); names and refs may be mixed.
+    return [resolve_reference(name, TOOL_REGISTRY, "tool") for name in tool_names]
 
 
 def list_available_tools() -> List[str]:

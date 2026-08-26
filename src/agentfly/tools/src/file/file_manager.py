@@ -48,9 +48,14 @@ class FileManager:
         ".db", ".sqlite", ".sqlite3", ".mo",
     })
 
-    def __init__(self, task_id: str, workspace_root: Optional[str] = None):
+    def __init__(self, task_id: str, workdir: Optional[str] = None):
         self.task_id = task_id
-        root = workspace_root or os.environ.get("WORKSPACE_ROOT", "/testbed")
+        # Unified on the container WORKDIR (named ``workdir`` everywhere — same
+        # key the shell tool and rollout metadata use): an explicit workdir
+        # wins; otherwise root at the process cwd, which the runtime sets to the
+        # image's WORKDIR. (Previously read a WORKSPACE_ROOT env var that callers
+        # had to inject; WORKDIR is the single source of truth now.)
+        root = workdir or os.getcwd()
         self.root = os.path.realpath(os.path.abspath(root))
         self._file_index_cache: Optional[List[str]] = None
 
@@ -438,7 +443,7 @@ class FileManager:
         files_with, total = self._undo_stats()
         return {
             "task_id": self.task_id,
-            "workspace": self.root,
+            "workdir": self.root,
             "files_with_history": files_with,
             "total_snapshots": total,
         }
@@ -490,7 +495,7 @@ if __name__ == "__main__":
         if tool_name not in ALLOWED_TOOLS:
             print(f"Error: Unknown tool '{tool_name}'", end="")
         else:
-            fm = FileManager(task_id=task_id, workspace_root=data.get("workspace"))
+            fm = FileManager(task_id=task_id, workdir=data.get("workdir"))
             method = getattr(fm, tool_name, None)
             if method is None:
                 print(f"Error: Tool '{tool_name}' not implemented", end="")

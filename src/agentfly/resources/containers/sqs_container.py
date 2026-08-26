@@ -37,6 +37,7 @@ import logging
 import os
 import random
 import re
+import shlex
 import tarfile
 import time
 import zlib
@@ -109,14 +110,32 @@ def _build_artifact(
     context_dir: Optional[str],
     repository: Optional[str] = None,
 ) -> tuple[str, str, bytes]:
-    """Return a shared-repository build tag, deterministic S3 key, and context."""
-    context = _build_context_archive(dockerfile, context_dir)
-    digest = hashlib.sha256(context).hexdigest()
+    """Return a shared-repository build tag, deterministic S3 key, and context.
+
+    Exact task context (the requested Dockerfile matches the one on disk in
+    ``context_dir``) uses the shared ``harbor-v3`` content identity so a
+    prebuilt image is reused — this is what used to be the
+    ``install_agentfly_sqs_build_cache_patch`` monkey-patch, now native. A
+    transformed / synthesized Dockerfile (differs from the on-disk one) uses the
+    native scheme below.
+    """
     build_repository = (
         repository
         or os.environ.get("AF_SQS_BUILD_REPOSITORY")
         or _DEFAULT_BUILD_REPOSITORY
     )
+    ctx = Path(context_dir) if context_dir else None
+    if (
+        ctx is not None
+        and ctx.is_dir()
+        and (ctx / "Dockerfile").is_file()
+        and (ctx / "Dockerfile").read_text() == dockerfile
+    ):
+        from .build_identity import build_artifact as _shared_build_artifact
+        return _shared_build_artifact(ctx, build_repository)
+
+    context = _build_context_archive(dockerfile, context_dir)
+    digest = hashlib.sha256(context).hexdigest()
     if not re.fullmatch(r"[a-z0-9]+(?:[._/-][a-z0-9]+)*", build_repository):
         raise ValueError(f"invalid SQS build repository: {build_repository!r}")
     build_tag = f"{build_repository}:af-{_BUILD_TAG_VERSION}-{digest[:32]}"
@@ -427,8 +446,14 @@ class SqsContainer(ContainerResource):
               timeout=None) -> SqsExecResult:
         wd = workdir or self.workdir
         if wd:
-            inner = cmd if isinstance(cmd, str) else " ".join(cmd)
-            cmd = f"cd {wd} && {inner}"
+            # shlex.join (NOT " ".join): run_cmd passes argv ["bash","-c",<script>];
+            # a plain-space join drops the quoting so `bash -c` sees only the
+            # first word of the script and the rest leak to the outer shell —
+            # every multi-word container command silently runs only its first
+            # token. Quote each argv element (and the workdir) so the script
+            # stays one argument.
+            inner = cmd if isinstance(cmd, str) else shlex.join(str(p) for p in cmd)
+            cmd = f"cd {shlex.quote(str(wd))} && {inner}"
         return self.transport.exec(
             self.cid, cmd, user=str(user) if user else "",
             env=environment or None, timeout_sec=timeout)

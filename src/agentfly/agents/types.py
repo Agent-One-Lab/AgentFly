@@ -75,6 +75,13 @@ class Trajectory(BaseModel):
     fields above. Use sparingly; prefer first-class fields when a value is
     stable."""
 
+    tool_results: List[Dict[str, Any]] = Field(default_factory=list)
+    """Per-turn tool results in turn order (one record per tool call: keys
+    ``name``/``arguments``/``observation``/``status``/``metrics``/``step_reward``).
+    The single per-turn source: metric-averaging derives from it for logging, and
+    the feature channel harvests from it (e.g. ``anchor`` = ``observation``,
+    ``step_reward``) for step-level advantage estimators."""
+
     # ---- Convenience accessors ----
 
     @property

@@ -52,7 +52,11 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
     if INSTALL_PATH not in staged:
         await container.copy_in(FILE_MODULE_DIR, INSTALL_PATH)
         staged.add(INSTALL_PATH)
-    payload = json.dumps({"tool": tool_name, "params": params})
+    # Root the file manager at the rollout's WORKDIR (unified with the shell
+    # tool). When set, it is passed explicitly and also becomes the exec cwd, so
+    # file_manager.py's os.getcwd() fallback resolves to the same directory.
+    workdir = context.metadata.get("workdir")
+    payload = json.dumps({"tool": tool_name, "params": params, "workdir": workdir})
     escaped = _escape_shell_json(payload)
     # Many SWE images only provide ``python3``; merge stderr so failures are visible on stdout.
     cmd = (
@@ -60,7 +64,7 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
         f"python {INSTALL_PATH}/file_manager.py '{escaped}' 2>&1"
     )
     try:
-        raw = await container.run_cmd(cmd, timeout=120)
+        raw = await container.run_cmd(cmd, timeout=120, workdir=workdir)
     except asyncio.TimeoutError:
         return f"{tool_name} timed out."
     out = raw.decode("utf-8") if isinstance(raw, bytes) else raw

@@ -17,17 +17,26 @@ class ToolResult:
 
     The framework constructs these via :meth:`from_raw` from whatever the
     user's ``@tool`` function returned. ``observation`` is the string the
-    LLM sees as the tool's output; ``info`` carries any additional fields
-    the tool returned in a dict (everything except ``observation`` and
-    ``image``).
+    LLM sees as the tool's output; ``metrics`` carries any additional logged
+    metrics the tool returned (either an explicit ``metrics`` sub-dict or extra
+    top-level keys) — mirroring :class:`~agentfly.rewards.types.RewardResult`.
+    ``step_reward`` is the optional per-step environment reward (an RL signal,
+    distinct from logged metrics) — env tools that step an environment can
+    return it; it feeds step-level advantage estimators (e.g. GiGPO).
+    ``anchor`` is the optional raw state key used for step-level grouping (the
+    grouping key GiGPO clusters turns by). It is the *undecorated* state (e.g.
+    the raw observation, without an appended admissible-action menu), so identical
+    states hash equal. Falls back to ``observation`` when not set.
     """
 
     name: str
     arguments: Dict[str, Any]
     observation: str
     status: str = "success"
-    info: Dict[str, Any] = field(default_factory=dict)
+    metrics: Dict[str, Any] = field(default_factory=dict)
     image: Optional[str] = None
+    step_reward: Optional[float] = None
+    anchor: Optional[Any] = None
 
     @classmethod
     def from_raw(
@@ -42,9 +51,11 @@ class ToolResult:
         """Normalize a tool function's raw return into a ``ToolResult``.
 
         Accepts:
-        - ``str``: treated as ``observation``; ``info`` is empty.
-        - ``dict``: must have an ``observation`` key. ``image`` is extracted
-          to its own field; everything else goes into ``info``.
+        - ``str``: treated as ``observation``; ``metrics`` is empty.
+        - ``dict``: must have an ``observation`` key. ``image`` and
+          ``step_reward`` are extracted to their own fields; metrics may be
+          given as an explicit ``metrics`` sub-dict and/or as extra top-level
+          keys, which are merged into ``metrics`` (explicit wins on collision).
         - ``ToolResult``: returned as-is.
         """
         if isinstance(raw, cls):
@@ -56,7 +67,7 @@ class ToolResult:
                 arguments=arguments,
                 observation=obs,
                 status=status,
-                info={},
+                metrics={},
             )
         if isinstance(raw, dict):
             if "observation" not in raw:
@@ -69,13 +80,19 @@ class ToolResult:
             if max_length is not None and len(obs) > max_length:
                 obs = obs[:max_length] + "...(truncated)"
             image = raw.pop("image", None)
+            step_reward = raw.pop("step_reward", None)
+            anchor = raw.pop("anchor", None)
+            explicit = raw.pop("metrics", None) or {}
+            metrics = {**raw, **explicit}
             return cls(
                 name=name,
                 arguments=arguments,
                 observation=obs,
                 status=status,
-                info=raw,
+                metrics=metrics,
                 image=image,
+                step_reward=None if step_reward is None else float(step_reward),
+                anchor=anchor,
             )
         raise ValueError(
             f"Tool {name!r} returned {type(raw).__name__}; "
@@ -93,10 +110,14 @@ class ToolResult:
             "arguments": self.arguments,
             "observation": self.observation,
             "status": self.status,
-            "info": self.info,
+            "metrics": self.metrics,
         }
         if self.image is not None:
             d["image"] = self.image
+        if self.step_reward is not None:
+            d["step_reward"] = self.step_reward
+        if self.anchor is not None:
+            d["anchor"] = self.anchor
         return d
 
 
@@ -105,9 +126,13 @@ class ToolReturn(TypedDict, total=False):
 
     Tools may return a bare ``str`` (treated as ``observation``) **or** a
     dict with these keys. ``observation`` is required if a dict is returned;
-    any keys beyond ``observation`` and ``image`` flow through to
-    :attr:`ToolResult.info`.
+    metrics may be given as an explicit ``metrics`` sub-dict and/or as extra
+    top-level keys, which flow through to :attr:`ToolResult.metrics`.
+    ``step_reward`` is the optional per-step environment reward.
     """
 
     observation: str
     image: str
+    metrics: Dict[str, Any]
+    step_reward: float
+    anchor: Any

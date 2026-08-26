@@ -45,7 +45,7 @@ ALFWorldSpec = ContainerResourceSpec(
     container_port=8000,
     start_timeout=120.0,
     host_ip="127.0.0.1",
-    max_global_num=8,
+    max_global_num=16,
 )
 
 

@@ -14,6 +14,7 @@ from .specialized.gui_agent import GUIAgent
 from .specialized.swe_agents import BashSWEAgent, FunctionCallSWEAgent, Qwen3CoderSWEAgent
 from .specialized.hf_agent import HFAgent, SearchR1Agent
 from .specialized.image_agent import ImageEditingAgent
+from .specialized.miniswe import MinisweAgent
 
 __all__ = [
     "BaseAgent",
@@ -28,6 +29,7 @@ __all__ = [
     "HFAgent",
     "ImageEditingAgent",
     "ActionAgent",
+    "MinisweAgent",
     "Trajectory",
     "RunResult",
     "ClientBackend",

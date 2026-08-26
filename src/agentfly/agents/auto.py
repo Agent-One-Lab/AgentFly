@@ -9,6 +9,7 @@ from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
 from .specialized.swe_agents import BashSWEAgent, FunctionCallSWEAgent, Qwen3CoderSWEAgent
 from .specialized.hf_agent import HFAgent, SearchR1Agent
+from .specialized.miniswe import MinisweAgent
 from omegaconf import OmegaConf, DictConfig
 
 
@@ -51,15 +52,13 @@ class AutoAgent:
         Raises:
             ValueError: If the agent type is not registered
         """
-        agent_type = agent_type.lower()
-
-        if agent_type not in cls.AGENT_MAPPING:
-            available_types = list(cls.AGENT_MAPPING.keys())
-            raise ValueError(
-                f"Unknown agent type: '{agent_type}'. Available types: {available_types}"
-            )
-
-        return cls.AGENT_MAPPING[agent_type]
+        from ..utils.references import resolve_reference
+        # Accepts a registered type OR an import reference
+        # ("module:AgentClass", "/path.py:AgentClass").
+        try:
+            return resolve_reference(agent_type, cls.AGENT_MAPPING, "agent")
+        except KeyError as e:
+            raise ValueError(str(e)) from e
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> BaseAgent:
@@ -187,5 +186,6 @@ AutoAgent.register_agent("gui", GUIAgent)
 AutoAgent.register_agent("hf", HFAgent)
 AutoAgent.register_agent("searchr1", SearchR1Agent)
 AutoAgent.register_agent("action", ActionAgent)
+AutoAgent.register_agent("miniswe", MinisweAgent)
 AutoAgent.register_agent("bash_swe", BashSWEAgent)
 AutoAgent.register_agent("qwen3coder_swe", Qwen3CoderSWEAgent)
