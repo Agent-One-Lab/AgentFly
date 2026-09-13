@@ -25,7 +25,9 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import numpy as np
 from PIL import Image
 
-import wandb
+# NOTE: ``wandb`` (~1.5s) is imported lazily inside WandbSink's methods so that
+# importing this module (pulled in by agent_base for the light Monitor/emit path)
+# doesn't pay for wandb. Only the wandb sink actually needs it.
 
 
 @dataclass(slots=True)
@@ -163,12 +165,14 @@ class WandbSink(BaseSink):
         # if wandb.run is None:
         #     wandb.init(project=project, **wandb_init_kwargs)
         self._defined_axes: Set[Tuple[str, str]] = set()
-        self.tables: Dict[str, wandb.Table] = {}
+        self.tables: Dict[str, Any] = {}  # values are wandb.Table (lazy import)
 
     async def log(self, evt: MetricEvent) -> None:  # pragma: no cover
         """
         Log the event to wandb.
         """
+        import wandb  # lazy: heavy import
+
         if wandb.run is not None:
             payload = {evt.name: evt.value, **evt.tags}
             if evt.x is not None:
@@ -201,10 +205,14 @@ class WandbSink(BaseSink):
                 wandb.log(payload, step=evt.step, commit=evt.commit)
 
     async def flush(self) -> None:  # pragma: no cover
+        import wandb  # lazy: heavy import
+
         wandb.log({}, commit=True)  # forces step commit
         wandb.flush()
 
     async def close(self) -> None:  # pragma: no cover
+        import wandb  # lazy: heavy import
+
         await super().close()
         wandb.finish()
 

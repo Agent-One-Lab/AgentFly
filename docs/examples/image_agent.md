@@ -186,23 +186,31 @@ backend_config = ClientConfig(
 
 ## Getting Trajectories and Messages
 
-After running the agent, you can access the complete conversation history and trajectories.
+Keep the `RunResult` returned by `run()`. Each trajectory contains its recorded
+conversation segments; later segments may repeat earlier messages as context.
 
 ### Accessing Messages
 
 ```python
-# Get all messages from all chains
-messages = agent.get_messages()
+from agentfly.agents.utils.inspection import print_trajectory
 
-# Print messages for a specific chain
-agent.print_messages(index=0)
+result = await agent.run(messages=messages_list, max_turns=4, num_chains=1)
 
-# Access specific message content
-for message in messages[0]["messages"]:
-    role = message["role"]
-    content = message["content"]
-    print(f"{role}: {content}")
+# Print one trajectory, keeping its segment boundaries visible
+print_trajectory(result[0])
+
+# Inspect messages segment by segment; do not concatenate overlapping views
+for index, segment in enumerate(result[0].segments):
+    print(f"Segment {index}:")
+    for message in segment.messages:
+        role = message["role"]
+        content = message.get("content")
+        print(f"{role}: {content}")
 ```
+
+`print_trajectory` is a standalone utility: no agent instance is needed to inspect
+a saved trajectory. Rewards, extra metrics, and task metadata are available as
+`result[0].reward`, `result[0].metrics`, and `result[0].metadata`.
 
 ### Understanding Message Structure
 
@@ -294,6 +302,7 @@ Here's a complete example showing how to use the ImageEditingAgent with differen
 ```python
 import asyncio
 from agentfly.agents import ImageEditingAgent
+from agentfly.agents.utils.inspection import print_trajectory
 from agentfly.utils.llm_backends import AsyncVLLMConfig, ClientConfig
 
 async def main():
@@ -350,14 +359,14 @@ async def main():
         }
     ]
 
-    await agent.run(
+    result = await agent.run(
         messages=messages_list,
         max_turns=4,
         num_chains=1,
         enable_streaming=True
     )
 
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
 
 if __name__ == "__main__":
     asyncio.run(main())

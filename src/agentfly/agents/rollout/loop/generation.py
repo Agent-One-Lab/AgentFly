@@ -1,13 +1,12 @@
-"""Response generation + backend-response normalization for the rollout loop.
+"""Shared response generation and backend-response normalization for rollouts.
 
-These were methods on ``ChainRollout`` that encode *backend response-dict shape*
-knowledge (``response_dict`` / ``choices`` / ``total_lengths``) and the per-call
-generation-config budgeting. They are pulled out as free functions so the loop class
-(:mod:`.chain`) is not responsible for "how we talk to a backend and read its response."
+Chain and step rollout strategies share these helpers for backend response-dict
+handling (``response_dict`` / ``choices`` / ``total_lengths``) and per-call
+generation-config budgeting.
 
 The orchestrating functions (:func:`generate_response`, :func:`prepare_generation_config`)
-take the ``rollout`` (a :class:`~agentfly.agents.rollout.host.RolloutHost` that is also the
-loop) because they call host hooks (``generate_async`` / ``parse``) and ``_skills_payload``.
+take the ``agent`` (a :class:`~agentfly.agents.rollout.agent.RolloutAgent`) because they call
+agent hooks (``generate_async`` / ``parse`` / ``skills_payload``).
 Token estimation lives in :mod:`.tokens`. The pure helpers take only their data.
 """
 
@@ -16,9 +15,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from .tokens import estimate_chat_prompt_tokens
 
 if TYPE_CHECKING:
-    from ...core import Context
-    from .chain import ChainRollout
-    from .structures import Node
+    from ....core import Context
+    from ..agent import RolloutAgent
+    from ..structures import Step
 
 
 # Fields agentfly constructs itself; everything else the server returned on the
@@ -58,6 +57,30 @@ def overlay_raw_message_fields(messages, responses) -> None:
             msg.setdefault(k, v)
 
 
+def attach_token_ids(messages, responses) -> None:
+    """Carry the backend's generated token ids onto each assistant message as
+    ``token_ids`` (one list per response, same order as ``response_texts``).
+
+    Training tokenization (chat-bricks) splices these ids verbatim for the
+    assistant span instead of re-tokenizing the decoded text, which removes
+    retokenization "token drift" (the sampled sequence and the re-encoded text
+    can tokenize differently, e.g. ``<think>``) and keeps native tool-call turns
+    exactly as sampled. The ids are the FULL generation even though the parsed
+    ``content`` may be truncated (e.g. at ``</action>``) — that matches training
+    on the sampled response like verl-agent's ``batch['responses']``.
+
+    Only backends that expose ids set ``response_ids`` (the verl training
+    backend); when absent nothing is attached and tokenization re-encodes text
+    as before.
+    """
+    response_ids = responses.get("response_ids") if isinstance(responses, dict) else None
+    if not response_ids:
+        return
+    for msg, ids in zip(messages or [], response_ids):
+        if isinstance(msg, dict) and ids is not None:
+            msg["token_ids"] = list(ids)
+
+
 def extract_total_length(responses: dict) -> Optional[int]:
     """Extract total token length (after chat template) from a ``generate_async`` response dict."""
     if "total_lengths" not in responses:
@@ -73,18 +96,18 @@ def extract_total_length(responses: dict) -> Optional[int]:
 
 
 def prepare_generation_config(
-    rollout: "ChainRollout",
+    agent: "RolloutAgent",
     generation_config: Optional[Dict[str, Any]],
-    current_node: "Node",
+    current_step: "Step",
     tools: Optional[List] = None,
 ) -> Dict[str, Any]:
     """Merge max_tokens / max_new_tokens; if ``max_model_len`` is set, cap completion budget.
 
-    Only the first generation in a chain (``total_token_length == 0`` on the node) uses
+    Only the first generation in a chain (``total_token_length == 0`` on the step) uses
     chat_bricks ``Chat.tokenize``; later turns use ``max_model_len - total_token_length``.
     """
     config = dict(generation_config) if generation_config else {}
-    max_model_len = getattr(rollout, "max_model_len", None)
+    max_model_len = getattr(agent, "max_model_len", None)
 
     if config.get("max_tokens") is not None:
         config.pop("max_new_tokens", None)
@@ -94,10 +117,10 @@ def prepare_generation_config(
             config["max_tokens"] = max_new
 
     if max_model_len is not None:
-        if current_node.total_token_length == 0:
-            prompt_tok = estimate_chat_prompt_tokens(rollout, current_node, tools=tools)
+        if current_step.total_token_length == 0:
+            prompt_tok = estimate_chat_prompt_tokens(agent, current_step, tools=tools)
         else:
-            prompt_tok = current_node.total_token_length
+            prompt_tok = current_step.total_token_length
         budget = max_model_len - prompt_tok
         budget = max(1, budget)
         explicit = config.get("max_tokens")
@@ -114,9 +137,9 @@ def prepare_generation_config(
 
 
 async def generate_response(
-    rollout: "ChainRollout",
+    agent: "RolloutAgent",
     chain,
-    current_node,
+    current_step,
     tools,
     depth,
     chain_id,
@@ -125,15 +148,15 @@ async def generate_response(
 ) -> Tuple[Any, Optional[int]]:
     """Generate one assistant message. Returns ``(message, total_token_length)``."""
     effective_config = prepare_generation_config(
-        rollout, generation_config, current_node, tools=tools
+        agent, generation_config, current_step, tools=tools
     )
-    skills_payload = rollout._skills_payload()
+    skills_payload = agent.skills_payload()
     extra_kwargs = {"skills": skills_payload} if skills_payload else {}
     extra_kwargs["tool_call_source"] = getattr(
-        rollout, "default_tool_call_source", "parser"
+        agent, "default_tool_call_source", "parser"
     )
-    raw = await rollout.generate_async(
-        [current_node.messages.messages],
+    raw = await agent.generate_async(
+        [current_step.messages.messages],
         return_dict=True,
         tools=tools,
         **extra_kwargs,
@@ -143,13 +166,14 @@ async def generate_response(
     response_texts = responses.get("response_texts")
     context.metadata = {
         **context.metadata,
-        "trajectory_segments": [current_node.messages.messages],
+        "trajectory_segments": [current_step.messages.messages],
     }
-    new_msg = rollout.parse(
+    new_msg = agent.parse(
         response_texts,
         tool_calls=responses.get("tool_calls"),
         context=context,
     )
     overlay_raw_message_fields(new_msg, responses)
+    attach_token_ids(new_msg, responses)
     total_length = extract_total_length(responses)
     return (new_msg[0], total_length)

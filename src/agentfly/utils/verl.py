@@ -1,11 +1,21 @@
-import torch
+# Defer annotation evaluation so the ``torch.Tensor`` type hints don't force torch
+# (~3s) at import; it's used lazily inside the functions that need it. This module
+# is imported by agent_base, so a bare ``import agentfly.agents`` must not pull torch.
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 
-def pad_tensor_to_rank_size(tensor: torch.Tensor, rank_size: int) -> torch.Tensor:
+def pad_tensor_to_rank_size(tensor: "torch.Tensor", rank_size: int) -> "torch.Tensor":
     """
     verl DP Proto requires the batch size to be divisible by the DP size.
     This function pads the tensor to be divisible by the DP size using last row of the tensor.
     """
+    import torch  # lazy: heavy import
+
     pad_size = (rank_size - tensor.shape[0] % rank_size) % rank_size
     if pad_size == 0:
         return tensor
@@ -15,8 +25,10 @@ def pad_tensor_to_rank_size(tensor: torch.Tensor, rank_size: int) -> torch.Tenso
         return padded_tensor
 
 
-def pad_tensor_batch_dim_with_zeros(tensor: torch.Tensor, multiple: int) -> torch.Tensor:
+def pad_tensor_batch_dim_with_zeros(tensor: "torch.Tensor", multiple: int) -> "torch.Tensor":
     """Pad dim 0 to the next multiple of ``multiple`` with zeros (no contribution under loss masks)."""
+    import torch  # lazy: heavy import
+
     pad_size = (multiple - tensor.shape[0] % multiple) % multiple
     if pad_size == 0:
         return tensor
@@ -27,7 +39,7 @@ def pad_tensor_batch_dim_with_zeros(tensor: torch.Tensor, multiple: int) -> torc
     return torch.cat([tensor, zeros], dim=0)
 
 
-def truncate_tensor_to_rank_size(tensor: torch.Tensor, rank_size: int) -> torch.Tensor:
+def truncate_tensor_to_rank_size(tensor: "torch.Tensor", rank_size: int) -> "torch.Tensor":
     """
     Truncate the tensor along the first dimension so its size is divisible by rank_size (DP size).
     """

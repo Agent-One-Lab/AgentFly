@@ -8,7 +8,7 @@ Skills reach the model via one of two mutually-exclusive paths:
    content. Works for hosted models (OpenAI/Gemini) since it needs no template
    support. In this case ``_skills_payload()`` returns None to avoid double
    injection.
-2. Template — when there is no ``{skills}`` slot, ``ChainRollout._skills_payload()``
+2. Template — when there is no ``{skills}`` slot, ``BaseAgent.skills_payload()``
    projects skills to ``[{"name", "description"}]`` dicts; ``ClientBackend`` re-emits
    them as ``extra_body={"chat_template_kwargs": {"skills": ...}}`` and the
    deployed chat template fills the skills block in the system prompt.
@@ -190,7 +190,7 @@ async def test_country_capital_skill_canberra_trap(skills):
         messages=messages, max_turns=6, num_chains=1
     )
 
-    segment = result.trajectories[0].segments[0]
+    segment = result.trajectories[0].segments[0].messages
     invoked = _tool_calls_in_segment(segment)
     assert "load_skill" in invoked, f"expected load_skill, got: {invoked}"
     assert "read_skill_file" in invoked, f"expected read_skill_file, got: {invoked}"
@@ -208,7 +208,7 @@ async def test_add_numbers_skill_runs_script(skills):
         messages=messages, max_turns=6, num_chains=1
     )
 
-    segment = result.trajectories[0].segments[0]
+    segment = result.trajectories[0].segments[0].messages
     invoked = _tool_calls_in_segment(segment)
     assert "load_skill" in invoked, f"expected load_skill, got: {invoked}"
     assert "run_skill_script" in invoked, f"expected run_skill_script, got: {invoked}"
@@ -237,7 +237,7 @@ async def test_word_count_skill_exit_code_branch(skills):
         messages=messages, max_turns=8, num_chains=1
     )
 
-    segment = result.trajectories[0].segments[0]
+    segment = result.trajectories[0].segments[0].messages
     invoked = _tool_calls_in_segment(segment)
     # word-count SKILL.md instructs the model to consult references/rules.md when
     # the script exits non-zero, so all three skill tools should fire.

@@ -6,6 +6,28 @@ from .types import RewardResult
 # Global reward registry
 REWARD_REGISTRY = {}
 
+builtins_loaded = False
+
+
+def ensure_builtins_loaded() -> None:
+    """Import the built-in reward impls once so name lookups resolve.
+
+    The built-ins live in :mod:`agentfly.rewards.impls` and register themselves
+    on import (heavy deps), so we defer that until a name is actually looked up.
+    User rewards registered earlier via ``@reward`` are preserved: importing the
+    built-ins only ADDS to ``REWARD_REGISTRY``, and if a built-in shares a name
+    with a user reward, the user's entry is re-applied on top so the user still
+    wins (matching the old import-order behavior).
+    """
+    global builtins_loaded
+    if builtins_loaded:
+        return
+    user_entries = dict(REWARD_REGISTRY)  # snapshot user regs (collision: user wins)
+    builtins_loaded = True  # set before import so re-entrant lookups are a no-op
+    from . import impls  # noqa: F401  (imports every built-in impl -> registers)
+
+    REWARD_REGISTRY.update(user_entries)
+
 
 async def calculate_reward(reward_fn: Callable | None, **kwargs) -> Optional[RewardResult]:
     """Execute a reward function and normalize its return into a ``RewardResult``.
@@ -370,6 +392,7 @@ def get_reward_from_name(reward_name: str) -> BaseReward | type[BaseReward]:
         KeyError: If the reward name is not found in the registry
     """
     from ..utils.references import resolve_reference
+    ensure_builtins_loaded()
     # Accepts a registered name OR an import reference ("module:attr",
     # "/path.py:attr") so a custom reward loads without a pre-import.
     return resolve_reference(reward_name, REWARD_REGISTRY, "reward")
@@ -399,6 +422,7 @@ def list_available_rewards() -> List[str]:
         List of reward names
     """
     global REWARD_REGISTRY
+    ensure_builtins_loaded()
     return list(REWARD_REGISTRY.keys())
 
 

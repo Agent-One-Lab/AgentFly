@@ -2,9 +2,9 @@ import asyncio
 import inspect
 import json
 import logging
+import traceback
 from typing import Any, Callable, List, Optional
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
-from .. import TOOL_ERROR_AS_OBSERVATION
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +212,10 @@ class BaseTool:
     def _execute_user_function_sync(self, **kwargs):
         """Execute the user function synchronously.
 
-        On error: returns str(e) if ``TOOL_ERROR_AS_OBSERVATION`` is True,
-        otherwise re-raises.
+        On a body exception: returns a ``status="error"`` result carrying the error
+        text (a *diagnosis*, not a control decision). The rollout's ``on_tool_error``
+        policy decides whether that error continues / ends / raises — the tool layer
+        no longer makes that call.
         """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
@@ -226,15 +228,13 @@ class BaseTool:
             else:
                 return self.user_func(**kwargs)
         except Exception as e:
-            if TOOL_ERROR_AS_OBSERVATION:
-                return str(e)
-            raise
+            return self._error_result(e)
 
     async def _execute_user_function_async(self, **kwargs):
         """Execute the user function, handling both sync and async functions.
 
-        On error: returns str(e) if ``agentfly.TOOL_ERROR_AS_OBSERVATION`` is True,
-        otherwise re-raises.
+        On a body exception: returns a ``status="error"`` result (see
+        :meth:`_execute_user_function_sync`).
         """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
@@ -253,9 +253,17 @@ class BaseTool:
                 else:
                     return self.user_func(**kwargs)
         except Exception as e:
-            if TOOL_ERROR_AS_OBSERVATION:
-                return str(e)
-            raise
+            return self._error_result(e)
+
+    @staticmethod
+    def _error_result(e: Exception) -> dict:
+        """A ``status="error"`` raw result for an exception raised inside a tool body.
+
+        ``status`` marks it as an error *diagnosis*; the informative text goes to the
+        model as the observation if ``on_tool_error`` continues. No ``control`` is set,
+        so the rollout policy — not the tool — decides continue / end / raise.
+        """
+        return {"observation": f"{e}\n{traceback.format_exc()}", "status": "error"}
 
     def __call__(self, **kwargs):
         """
@@ -288,7 +296,7 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
+        # Execute the function (a body exception becomes a status="error" result)
         result = self._execute_user_function_sync(**kwargs)
 
         # Format and return result
@@ -303,18 +311,17 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
+        # Execute the function (a body exception becomes a status="error" result)
         result = await self._execute_user_function_async(**kwargs)
 
         # Format and return result
         return self._format_result(result, kwargs)
 
     def _format_result(self, result, kwargs):
-        """Format the result into the standard tool response dict.
+        """Normalize the user function's return into a typed :class:`ToolResult`.
 
-        Normalization is delegated to :meth:`ToolResult.from_raw`; the legacy
-        dict shape is reproduced via :meth:`ToolResult.to_dict` so existing
-        downstream consumers keep working.
+        Normalization is delegated to :meth:`ToolResult.from_raw`; downstream
+        rollout code reads the typed fields directly.
         """
         from .types import ToolResult
 
@@ -328,7 +335,7 @@ class BaseTool:
             arguments=recorded_args,
             status=self.status,
             max_length=self.max_length,
-        ).to_dict()
+        )
 
     # ========== Registration ==========
     @classmethod
@@ -391,12 +398,13 @@ def _tool_accepts_context(tool_obj: Any) -> bool:
 
 
 class InvalidToolCallError(Exception):
-    """Raised for an *invalid tool call* — one the model formed with the wrong shape
-    (unknown tool name / non-JSON args / unknown argument names) — when
-    ``invalid_call_as_observation`` is False (fail-fast mode).
+    """Raised by the rollout for an *invalid tool call* — one the model formed with the
+    wrong shape (unknown tool name / non-JSON args / unknown argument names) — when the
+    run's ``on_invalid_tool_call`` policy is ``"raise"`` (fail-fast mode).
 
     Distinct from an exception raised *inside* a tool's body while it runs: that is a
-    runtime tool error, handled by the ``TOOL_ERROR_AS_OBSERVATION`` policy instead."""
+    runtime tool error diagnosed as ``status="error"`` and governed by the run's
+    ``on_tool_error`` policy. A malformed call is diagnosed as ``status="invalid"``."""
 
 
 async def submit_tool_call(
@@ -404,8 +412,7 @@ async def submit_tool_call(
     tool_input: str,
     context: Optional[Any] = None,
     allowed_tool_names: Optional[List[str]] = None,
-    invalid_call_as_observation: bool = True,
-) -> dict:
+) -> "ToolResult":
     """
     Submit a tool call to the environment.
 
@@ -415,17 +422,13 @@ async def submit_tool_call(
         context: Optional Context instance for rollout-scoped data and resources.
                  Injected into tools that accept a `context` parameter.
         allowed_tool_names: Optional list of allowed tool names.
-        invalid_call_as_observation: Policy for an *invalid tool call* — one the model
-            formed with the wrong shape: unknown tool name, arguments that aren't a JSON
-            object, or unknown argument names. ``True`` (default) returns a
-            ``status="error"`` result whose ``observation`` is an informative hint, so
-            the model can read it and recover on the next turn. ``False`` raises
-            :class:`InvalidToolCallError` (fail-fast). This governs the tool-call *shape*
-            only; exceptions raised *inside* a tool's body are handled separately by the
-            ``TOOL_ERROR_AS_OBSERVATION`` policy in :meth:`BaseTool._execute_user_function`.
 
     Returns:
-        dict: Tool result with keys like observation, status, etc.
+        ToolResult: Typed tool result (observation, status, metrics, ...). A *malformed*
+        call (unknown tool name, non-JSON args, or unknown argument names) returns a
+        ``status="invalid"`` result whose ``observation`` is an informative hint — the
+        diagnosis only. The continue / end / raise *decision* is the rollout's, via its
+        ``on_invalid_tool_call`` policy; this function never raises for a malformed call.
     """
     from .registry import TOOL_REGISTRY
     from .types import ToolResult
@@ -433,16 +436,18 @@ async def submit_tool_call(
     if allowed_tool_names is None:
         allowed_tool_names = list(TOOL_REGISTRY.keys())
 
-    def invalid_call(observation: str, arguments: dict) -> dict:
-        """Apply the invalid-tool-call policy: hint-as-observation, or fail-fast."""
-        if not invalid_call_as_observation:
-            raise InvalidToolCallError(observation)
+    def invalid_call(observation: str, arguments: dict) -> "ToolResult":
+        """A malformed-call diagnosis: an informative hint tagged ``status="invalid"``.
+
+        Distinct from a tool-body ``status="error"`` so the rollout can route it to
+        ``on_invalid_tool_call`` (vs ``on_tool_error``). The rollout, not this function,
+        decides whether it continues / ends / raises."""
         return ToolResult(
             name=tool_name,
             arguments=arguments,
             observation=observation,
-            status="error",
-        ).to_dict()
+            status="invalid",
+        )
 
     # 1. Hallucinated tool: the model named a tool that does not exist. Report the
     # real name and list what is actually available, so the hint is actionable.

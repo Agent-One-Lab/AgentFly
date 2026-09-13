@@ -28,11 +28,11 @@ async def test_edit_file_replace_first_occurrence():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = (await list_files(path=".", context=context))['observation']
+        listing = (await list_files(path=".", context=context)).observation
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
-        before = (await read_file(path=path, context=context))['observation']
+        before = (await read_file(path=path, context=context)).observation
         print(f"before: {before}")
         content_before = _strip_line_numbers(before)
         print(f"content_before: {content_before}")
@@ -52,12 +52,12 @@ async def test_edit_file_replace_first_occurrence():
             replace_block=replace_block,
             context=context,
         )
-        obs = result["observation"]
+        obs = result.observation
         print(obs)
         assert "file updated" in obs.lower() or "Error" in obs
 
         if "Error" not in obs:
-            after = (await read_file(path=path, context=context))['observation']
+            after = (await read_file(path=path, context=context)).observation
             print(f"after: {after}")
             assert replace_block in _strip_line_numbers(after)
     finally:
@@ -72,7 +72,7 @@ async def test_edit_file_search_block_not_found():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = (await list_files(path=".", context=context))['observation']
+        listing = (await list_files(path=".", context=context)).observation
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
@@ -82,7 +82,7 @@ async def test_edit_file_search_block_not_found():
             replace_block="replacement",
             context=context,
         )
-        obs = result["observation"]
+        obs = result.observation
         print(obs)
         assert "Error" in obs
         assert "not found" in obs.lower() or "exact" in obs.lower()

@@ -2,6 +2,9 @@
 LLM Backend module for reward functions.
 This module provides a unified interface to different LLM implementations.
 """
+# Defer annotation evaluation so lazily-imported types (e.g. vLLM ``SamplingParams``
+# in a method signature) don't force those heavy modules at import time.
+from __future__ import annotations
 
 import asyncio
 import copy
@@ -11,28 +14,28 @@ import random
 import time
 import uuid
 from functools import partial
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import httpx
 import numpy as np
-import openai
 import PIL
-import torch
 from chat_bricks import Chat
-from google import genai
-from google.genai import types
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams
+
+# NOTE: the heavy backends are imported lazily inside the methods that use them,
+# so importing this module — which agent_base and the resources/rewards packages
+# pull in transitively — costs nothing up front:
+#   * ``vllm`` (~4s), ``google.genai`` (~1s)  — VLLMBackend / Gemini path
+#   * ``openai`` (~1s)                         — ClientBackend methods
+#   * ``torch`` (~3s), ``transformers``        — AsyncVerlBackend only
+# (``AutoModelForCausalLM`` was imported but unused, so it's dropped.)
 
 from ...utils.vision import image_to_data_uri
 
 logger = logging.getLogger(__name__)
 
-try:
-    from ...verl.protocol import DataProto
-except ImportError:
-    print("verl can not be imported.")
-    pass
+# NOTE: ``DataProto`` (from the verl trainer) is imported lazily inside
+# AsyncVerlBackend where it's used — it pulls the whole verl/torch/ray stack,
+# which importing this module (agent_base pulls it in) must not load up front.
 
 
 class LLMBackend:
@@ -77,6 +80,74 @@ class LLMBackend:
         """Generate text from prompt"""
         raise NotImplementedError("Subclasses must implement generate()")
 
+    def _check_splice_continuity(self, sent_prompt_ids, messages_list, tools) -> None:
+        """Guard: a sampled turn must reappear in later prompts as exactly the prompt it was
+        sampled from followed by its sampled ids (token-prefix continuity).
+
+        For a checked row, let ``k`` be the last assistant message carrying ``token_ids``.
+        The ids this backend renders for the current call must start with
+        ``render(messages[:k], add_generation_prompt=True) + token_ids_k``. Anything the
+        renderer inserts between the generation prompt and the ids (template glue, a
+        re-rendered think block) breaks this and silently makes every update off-policy
+        -- the prompt guard above cannot see it because sampling and training share the
+        render. Same cadence and reporting as :meth:`_check_prompt_consistency`;
+        ``check_prompt_consistency="strict"`` raises.
+        """
+        if not self.check_prompt_consistency:
+            return
+        # _check_prompt_consistency already advanced the call counter for this call.
+        if self._prompt_check_calls != 1 and self._prompt_check_calls % self._PROMPT_CHECK_EVERY != 0:
+            return
+        try:
+            n = min(self._PROMPT_CHECK_ROWS, len(messages_list))
+            checked, broken, first_diff = 0, 0, None
+            for i in range(n):
+                messages = list(messages_list[i])
+                k = next(
+                    (j for j in range(len(messages) - 1, -1, -1)
+                     if messages[j].get("role") == "assistant" and messages[j].get("token_ids")),
+                    None,
+                )
+                if k is None:
+                    continue
+                if sent_prompt_ids is not None:
+                    current = list(sent_prompt_ids[i])
+                else:
+                    current = self._render_prompt_ids([messages], tools, allow_vision=True)[0]
+                turn_prompt = self._render_prompt_ids([messages[:k]], tools, allow_vision=True)[0]
+                expected = list(turn_prompt) + [int(t) for t in messages[k]["token_ids"]]
+                checked += 1
+                if current[: len(expected)] != expected:
+                    broken += 1
+                    if first_diff is None:
+                        first_diff = (i, k, current, expected)
+            self.prompt_check_stats["continuity_checked"] += checked
+            self.prompt_check_stats["continuity_broken"] += broken
+            if broken:
+                i, k, cur, exp = first_diff
+                d = next((j for j in range(min(len(cur), len(exp))) if cur[j] != exp[j]), min(len(cur), len(exp)))
+                msg = (
+                    f"[AsyncVerlBackend] SPLICE DISCONTINUITY: {broken}/{checked} rows: the prompt "
+                    f"does not start with (turn prompt + sampled ids) of assistant message {k}; "
+                    f"first diff at {d}: prompt={self.tokenizer.decode(cur[d : d + 24])!r} "
+                    f"expected={self.tokenizer.decode(exp[d : d + 24])!r}"
+                )
+                print(msg, flush=True)
+                logger.warning(msg)
+                if self.check_prompt_consistency == "strict":
+                    raise RuntimeError(msg)
+            elif checked:
+                print(
+                    f"[AsyncVerlBackend] splice_check: {checked}/{checked} rows continuous "
+                    "(prompt == turn prompt + sampled ids)",
+                    flush=True,
+                )
+        except RuntimeError:
+            raise
+        except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
+            print(f"[AsyncVerlBackend] splice continuity check failed: {e}", flush=True)
+            logger.warning("[AsyncVerlBackend] splice continuity check failed: %s", e)
+
     def preprocess(self):
         """Preprocess the backend"""
         pass
@@ -104,6 +175,8 @@ class AsyncVLLMBackend(LLMBackend):
             max_new_tokens (int): Maximum number of new tokens to generate. Defaults to 1024.
             **kwargs: Additional configuration parameters that will be passed to AsyncEngineArgs.
         """
+        from vllm import AsyncEngineArgs, AsyncLLMEngine  # lazy: heavy import
+
         super().__init__()
         self.model_name = model_name_or_path
         self.template = template
@@ -197,6 +270,8 @@ class AsyncVLLMBackend(LLMBackend):
         # completions per prompt. vLLM v1's AsyncLLM with n>1 has a generator-
         # exhaustion bug that deadlocks the `async for output in outputs_gen`
         # loop in _generate_single, so we route around it.
+        from vllm import SamplingParams  # lazy: heavy import
+
         sampling_params = SamplingParams(**sampling_params)
         n = kwargs.get("n", 1)
 
@@ -224,7 +299,7 @@ class AsyncVLLMBackend(LLMBackend):
             for req_out in request_outputs
             for out in getattr(req_out, "outputs", [])
         ]
-        # Keep one total length per request to align with rollout.chain._extract_total_length().
+        # Keep one total length per request to align with rollout.strategies.chain_rollout._extract_total_length().
         total_lengths = []
         for req_out in request_outputs:
             prompt_len = len(getattr(req_out, "prompt_token_ids", []) or [])
@@ -246,6 +321,25 @@ class AsyncVLLMBackend(LLMBackend):
         return response_texts
 
 
+def extract_response_ids(batch) -> List[List[int]]:
+    """Per-row generated token ids from a verl generation batch, padding stripped.
+
+    verl right-pads ``responses`` to ``response_length``. The valid length of a
+    row is the non-pad count of the response slice of ``attention_mask`` (the
+    same rule verl uses), with the prompt width taken from ``prompts``. The
+    result is exactly the sampled sequence — eos included when the model
+    stopped on it — suitable for splicing into training tokenization verbatim.
+    """
+    responses = batch["responses"]
+    attention_mask = batch["attention_mask"]
+    if "prompts" in batch.keys():
+        prompt_len = batch["prompts"].shape[1]
+    else:
+        prompt_len = attention_mask.shape[1] - responses.shape[1]
+    resp_lens = attention_mask[:, prompt_len:].sum(dim=1).tolist()
+    return [responses[i, : int(n)].tolist() for i, n in enumerate(resp_lens)]
+
+
 class AsyncVerlBackend(LLMBackend):
     """Asynchronous Verl implementation for distributed model inference.
 
@@ -254,22 +348,154 @@ class AsyncVerlBackend(LLMBackend):
     complex inference pipelines.
     """
 
-    def __init__(self, llm_engine, model_name_or_path: str, template: str):
+    def __init__(
+        self,
+        llm_engine,
+        model_name_or_path: str,
+        template: str,
+        check_prompt_consistency: Union[bool, str] = True,
+    ):
         """Initialize AsyncVerlBackend.
 
         Args:
             llm_engine: Verl engine instance for distributed inference.
             model_name_or_path (str): Name or path of the pre-trained model to load.
             template (str): Chat template to use for formatting messages.
-            **kwargs: Additional configuration parameters.
+            check_prompt_consistency (bool | "strict"): Periodically verify that the prompt
+                verl sampled from equals the ids this backend rendered with the training
+                tokenizer call (see :meth:`_check_prompt_consistency`). ``True`` (default)
+                reports a mismatch on stdout; ``"strict"`` raises on it; ``False`` disables
+                it. Set via ``agent.init_config.backend_config.check_prompt_consistency``.
         """
+        from transformers import AutoTokenizer  # lazy: heavy import
+
         super().__init__()
         self.model_name = model_name_or_path
+        self.template = template
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
             trust_remote_code=True,
         )
         self.llm_engine = llm_engine
+        # Sampling-vs-training prompt guard bookkeeping (see _check_prompt_consistency).
+        self.check_prompt_consistency = check_prompt_consistency
+        self._prompt_check_calls = 0
+        self.prompt_check_stats = {
+            "checked": 0, "mismatched": 0,
+            # Splice continuity (see _check_splice_continuity): rows whose last
+            # sampled turn is exactly "its prompt + its sampled ids" inside the
+            # prompt rendered for this call.
+            "continuity_checked": 0, "continuity_broken": 0,
+        }
+        self._warned_vision_fallback = False
+
+    # Check on the first call, then periodically; a few rows each time.
+    _PROMPT_CHECK_EVERY = 200
+    _PROMPT_CHECK_ROWS = 4
+
+    @staticmethod
+    def _has_vision(messages) -> bool:
+        """True if any message carries an image/video content part (no image is loaded)."""
+        for m in messages:
+            content = m.get("content")
+            if isinstance(content, list) and any(
+                isinstance(part, dict)
+                and part.get("type") in ("image", "image_url", "image_base64", "video")
+                for part in content
+            ):
+                return True
+        return False
+
+    def _render_prompt_ids(self, messages_list, tools, *, allow_vision: bool = False):
+        """Render each row's prompt ids with chat-bricks — the call ``tokenize_trajectories``
+        makes (same template, tokenizer, ``tools``, ``ignore_tool_calls``, generation
+        prompt). Earlier assistant turns are spliced from their sampled ``token_ids``, so
+        the prompt vLLM samples from is, by construction, the prefix of the training row.
+
+        Returns ``None`` when a row carries vision inputs (unless ``allow_vision``): ids and
+        images are not threaded through verl together yet, so those rows keep verl's own
+        text render of ``raw_prompt``.
+        """
+        from chat_bricks import Chat  # lazy: keep import cost off the hot path
+
+        template = self.template or self.model_name
+        rendered = []
+        for messages in messages_list:
+            if not allow_vision and self._has_vision(messages):
+                return None
+            chat = Chat(
+                template=template,
+                messages=list(messages),
+                tokenizer=self.tokenizer,
+                ignore_tool_calls=True,
+            )
+            ids = chat.tokenize(self.tokenizer, add_generation_prompt=True, tools=tools or None)
+            rendered.append(ids["input_ids"][0].tolist())
+        return rendered
+
+    def _check_prompt_consistency(self, sent_prompt_ids, messages_list, tools, gb) -> None:
+        """Guard: the prompt verl actually sampled from must equal what training renders.
+
+        ``sent_prompt_ids`` is the render this backend handed verl (see
+        :meth:`_render_prompt_ids`), so the check is an exact comparison against the
+        ``prompts`` verl returns — it catches verl ignoring or re-rendering the ids. Rows
+        that were not pre-tokenized (vision fallback) are re-rendered with chat-bricks
+        instead. Runs on the first call and every ``_PROMPT_CHECK_EVERY`` calls, a few rows
+        each time, and reports through ``print`` (visible in the Ray log; a plain
+        ``logger.warning`` is not). ``check_prompt_consistency="strict"`` raises on a
+        mismatch; ``False`` disables the check.
+        """
+        if not self.check_prompt_consistency:
+            return
+        self._prompt_check_calls += 1
+        if self._prompt_check_calls != 1 and self._prompt_check_calls % self._PROMPT_CHECK_EVERY != 0:
+            return
+        try:
+            prompts, attention_mask = gb["prompts"], gb["attention_mask"]
+            prompt_len = prompts.shape[1]
+            n = min(self._PROMPT_CHECK_ROWS, len(messages_list))
+            depths = [
+                sum(1 for m in messages_list[i] if m.get("role") == "assistant") for i in range(n)
+            ]
+            mismatched, first_diff = 0, None
+            for i in range(n):
+                sampled = prompts[i][attention_mask[i, :prompt_len].bool()].tolist()
+                if sent_prompt_ids is not None:
+                    rendered = list(sent_prompt_ids[i])
+                else:
+                    rendered = self._render_prompt_ids([messages_list[i]], tools, allow_vision=True)[0]
+                if sampled != rendered:
+                    mismatched += 1
+                    if first_diff is None:
+                        first_diff = (sampled, rendered)
+            self.prompt_check_stats["checked"] += n
+            self.prompt_check_stats["mismatched"] += mismatched
+            if mismatched:
+                s, r = first_diff
+                k = next((j for j in range(min(len(s), len(r))) if s[j] != r[j]), min(len(s), len(r)))
+                msg = (
+                    f"[AsyncVerlBackend] PROMPT MISMATCH (sampling vs training render): "
+                    f"{mismatched}/{n} rows differ (assistant turns in checked rows={depths}); "
+                    f"sampled {len(s)} tok vs rendered {len(r)} tok, first diff at {k}: "
+                    f"sampled={self.tokenizer.decode(s[k : k + 40])!r} "
+                    f"rendered={self.tokenizer.decode(r[k : k + 40])!r}"
+                )
+                print(msg, flush=True)
+                logger.warning(msg)
+                if self.check_prompt_consistency == "strict":
+                    raise RuntimeError(msg)
+            else:
+                # print (not logger.info) so it is greppable next to the [StepRollout] batch line
+                print(
+                    f"[AsyncVerlBackend] prompt_check: {n}/{n} rows identical "
+                    f"(sampling == training render; assistant turns={depths})",
+                    flush=True,
+                )
+        except RuntimeError:
+            raise
+        except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
+            print(f"[AsyncVerlBackend] prompt consistency check failed: {e}", flush=True)
+            logger.warning("[AsyncVerlBackend] prompt consistency check failed: %s", e)
 
     def preprocess(self):
         """Preprocess the backend"""
@@ -331,14 +557,31 @@ class AsyncVerlBackend(LLMBackend):
         """Generate text from prompt using Verl"""
         # We need to build a DataProto from the prompts
 
+        import torch  # lazy: heavy import
+        from ...verl.protocol import DataProto  # lazy: pulls the verl/torch/ray stack
+
         generation_config = {}
         tensors = torch.ones(len(messages_list), dtype=torch.int64)
+        tools = kwargs.get("tools", None)
+        # Render the prompt ids from the trajectory messages as-is (list content,
+        # tool_calls, sampled ``token_ids``) — exactly what ``tokenize_trajectories``
+        # sees — BEFORE the raw-prompt cleanup below, so the sampled prompt is the
+        # training row's prefix. verl executes these ids instead of re-rendering the
+        # messages from text (which re-tokenizes earlier assistant turns).
+        original_messages_list = messages_list
+        prompt_ids = self._render_prompt_ids(messages_list, tools)
+        if prompt_ids is None and not self._warned_vision_fallback:
+            self._warned_vision_fallback = True
+            print(
+                "[AsyncVerlBackend] prompt carries vision inputs: verl renders the prompt "
+                "itself (pre-tokenized ids are text-only for now)",
+                flush=True,
+            )
         messages_list = [self._process_messages(messages) for messages in messages_list]
         messages_list = [
             self._convert_to_openai_chat_without_tool_call_processing(messages)
             for messages in messages_list
         ]
-        tools = kwargs.get("tools", None)
         data_source = kwargs.get("data_source", None)
         tools_list = np.array([tools] * len(messages_list))
         data_source_list = np.array([data_source] * len(messages_list))
@@ -348,6 +591,13 @@ class AsyncVerlBackend(LLMBackend):
             "tools": tools_list,
             "data_source": data_source_list,
         }
+        if prompt_ids is not None:
+            # One object per row (rows differ in length; a plain np.array would try to
+            # build a 2-D int array).
+            prompt_ids_arr = np.empty(len(prompt_ids), dtype=object)
+            for i, ids in enumerate(prompt_ids):
+                prompt_ids_arr[i] = ids
+            data["prompt_ids"] = prompt_ids_arr
 
         if "temperature" in kwargs:
             generation_config["temperature"] = kwargs["temperature"]
@@ -363,21 +613,29 @@ class AsyncVerlBackend(LLMBackend):
         )
 
         gen_batch_output = await self.llm_engine.generate_sequences_async(batch)
-        response_ids = gen_batch_output.batch[
-            "responses"
-        ].tolist()  # np.array of strings with length BS
-        assert len(response_ids) == len(messages_list)
+        gb = gen_batch_output.batch
+        assert len(gb["responses"]) == len(messages_list)
+        self._check_prompt_consistency(prompt_ids, original_messages_list, tools, gb)
+        self._check_splice_continuity(prompt_ids, original_messages_list, tools)
+        # Padding-stripped sampled ids (eos included when the model stopped on it).
+        response_ids = extract_response_ids(gb)
+        # Same text as before: decoding the padded row with skip_special_tokens
+        # already dropped the (special) pad tokens, so stripping first is a no-op
+        # for the text and makes the ids trustworthy.
         response_texts = [
             self.tokenizer.decode(response_id, skip_special_tokens=True)
             for response_id in response_ids
         ]
 
         if return_dict:
-            attention_mask = gen_batch_output.batch["attention_mask"]
-            total_lengths = attention_mask.sum(dim=1)
+            total_lengths = gb["attention_mask"].sum(dim=1)
 
             return {
                 "response_texts": response_texts,
+                # Generated token ids, verbatim: consumed downstream as the
+                # assistant message's ``token_ids`` so training splices the
+                # sampled tokens instead of re-tokenizing decoded text.
+                "response_ids": response_ids,
                 "total_lengths": total_lengths,
             }
 
@@ -422,9 +680,13 @@ class ClientBackend(LLMBackend):
         self.is_gemini = self._is_gemini_model(model_name_or_path, base_url)
 
         if self.is_gemini:
+            from google import genai  # lazy: heavy import
+
             # Initialize once to avoid overhead and connection leaks
             self.gemini_client = genai.Client(api_key=api_key)
         else:
+            import openai  # lazy: heavy import
+
             self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
 
         # --- rate limiting (token bucket, 1 r/s = 60 r/m)
@@ -453,6 +715,8 @@ class ClientBackend(LLMBackend):
 
     def _prepare_gemini_payload(self, messages: List[Dict]):
         """Separates system instructions from chat history and converts to Gemini format."""
+        from google.genai import types  # lazy: heavy import
+
         system_instruction = None
         contents = []
 
@@ -516,8 +780,10 @@ class ClientBackend(LLMBackend):
         elif self.max_tokens:
             config_kwargs["max_output_tokens"] = self.max_tokens
 
-        # FIX: Move tools into the config dictionary
-        if "tools" in kwargs:
+        # FIX: Move tools into the config dictionary. Only when non-empty: agents that
+        # don't render tools pass ``[]`` (see BaseAgent.prompt_tools), and an empty
+        # tools list is not the same as "no tools" to every API.
+        if kwargs.get("tools"):
             config_kwargs["tools"] = kwargs["tools"]
 
         # Safety settings
@@ -610,6 +876,8 @@ class ClientBackend(LLMBackend):
         SSE keeps bytes flowing so long generations survive. Deltas are
         re-accumulated into the exact non-streaming response shape.
         """
+        import openai  # lazy: heavy import (used in the except clauses below)
+
         logger.debug(f"[ClientBackend] OpenAI model_name: {self.model_name}")
         logger.debug(f"[ClientBackend] OpenAI messages: {len(messages)}")
         logger.debug(f"[ClientBackend] OpenAI kwargs: {kwargs}")
@@ -676,6 +944,8 @@ class ClientBackend(LLMBackend):
     def _streaming_chat_call(self, messages: List[Dict], **kwargs) -> Dict:
         """chat.completions with stream=True, re-accumulated to the plain
         (non-streaming) response-dict shape so downstream code is unchanged."""
+        import openai  # lazy: heavy import (used in the except clause below)
+
         stream_kwargs = dict(kwargs)
         stream_kwargs["stream"] = True
         try:

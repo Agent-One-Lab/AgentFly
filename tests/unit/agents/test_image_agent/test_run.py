@@ -1,5 +1,6 @@
 import asyncio
 from agentfly.agents import ImageEditingAgent
+from agentfly.agents.utils.inspection import print_trajectory
 import os
 from datetime import datetime
 
@@ -65,7 +66,7 @@ async def test_image_editing():
         try:
             # 运行Agent
             print("⏳ 处理中...")
-            await agent.run(
+            result = await agent.run(
                 messages=messages_list,
                 max_turns=4,  # 最多4步完成任务
                 num_chains=1,
@@ -75,9 +76,8 @@ async def test_image_editing():
             print("\n✅ 处理完成！")
 
             # 获取最终的消息
-            agent_messages = agent.get_messages()
-            if agent_messages and len(agent_messages) > 0:
-                last_messages = agent_messages[0]["messages"]
+            if result and result[0].segments:
+                last_messages = result[0].segments[-1].messages
 
                 # 查找最终生成的图片ID
                 for msg in last_messages:
@@ -109,7 +109,7 @@ async def test_image_editing():
 
             # 打印完整的对话历史
             print("\n📜 对话历史:")
-            agent.print_messages(index=0)
+            print_trajectory(result[0])
 
         except Exception as e:
             print(f"❌ 测试失败: {str(e)}")
@@ -157,10 +157,10 @@ async def test_specific_function():
         }
     ]
 
-    await agent.run(messages=messages, max_turns=3, num_chains=1)
+    result = await agent.run(messages=messages, max_turns=3, num_chains=1)
 
     # 显示结果
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
 
 
 async def interactive_test():
@@ -203,12 +203,12 @@ async def interactive_test():
 
         try:
             print("\n⏳ 处理中...")
-            await agent.run(
+            result = await agent.run(
                 messages=messages_list, max_turns=4, num_chains=1
             )
 
             print("\n✅ 处理完成！")
-            agent.print_messages(index=0)
+            print_trajectory(result[0])
 
             # 询问是否保存结果
             save = input("\n是否保存结果图片？(y/n): ").strip().lower()

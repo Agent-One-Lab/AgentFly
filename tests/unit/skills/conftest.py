@@ -32,8 +32,13 @@ def context(test_skills_root, request) -> Context:
 
 
 def _parse_observation(result):
-    """Tools wrap output in ``{"observation": "...json..."}``; pull the JSON out."""
-    obs = result["observation"] if isinstance(result, dict) else result
+    """Tools wrap output in a ``ToolResult`` (``.observation``); pull the JSON out."""
+    if hasattr(result, "observation"):
+        obs = result.observation
+    elif isinstance(result, dict):
+        obs = result["observation"]
+    else:
+        obs = result
     return json.loads(obs)
 
 

@@ -9,139 +9,47 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
-import torch
+# NOTE: ``torch`` is imported lazily inside the two methods that use it
+# (``tokenize_trajectories`` / ``to_verl_dataproto``) so a bare
+# ``import agentfly.agents`` doesn't pull torch (~3s). It's only needed when
+# actually building tensors for the trainer.
 from chat_bricks import (
     split_messages_with_assistant,
     tokenize_conversations,
 )
-from termcolor import colored
 
 from ..templates import *  # noqa: F403
 from ..rewards.types import RewardResult
-from ..tools.tool_base import BaseTool
+from ..tools.tool_base import BaseTool, submit_tool_call
 from ..tools.src.skills import Skill
 from ..core.context import Context
 from ..core.context_config import ContextConfig
 from ..utils.monitor import JsonlSink, Monitor, WandbSink
 from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
-from .rollout.chain import ChainRollout
+from .rollout.registry import resolve_rollout
+from .rollout.conversion import result_to_dataproto
 from .types import RunResult, Trajectory
 from ..utils.llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
 from ..utils.llm_backends.backend_configs import BACKEND_CONFIGS
 from .utils.messages import MessagesList
 from .utils.tokenizer import create_processor, create_tokenizer, get_jinja_template
-from .utils.tool_parser import (
-    ChatCompletionRequest,
-    VLLM_TOOL_PARSER_AVAILABLE,
-    create_tool_parser,
-)
+# Import the module (not the vLLM-derived values) so the vLLM stack loads lazily:
+# read ``tool_parser.ChatCompletionRequest`` / ``VLLM_TOOL_PARSER_AVAILABLE`` at
+# runtime, after ``tool_parser.ensure_vllm_tool_parser()``, rather than binding
+# them here at import time.
+from .utils import tool_parser
+from .utils.tool_parser import create_tool_parser
 
-try:
-    from ..verl.protocol import DataProto
-except ImportError:
-    print("verl can not be imported.")
-    pass
+# NOTE: ``DataProto`` (from the verl trainer) is imported lazily inside
+# ``to_verl_dataproto`` — it pulls the whole verl/torch/ray stack, which a bare
+# ``import agentfly.agents`` must not load. It's only needed when actually
+# converting trajectories to a verl batch (i.e. under the trainer).
 
-from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
 
-REWARD_DECOMPOSITION_MODES = ("last_only", "broadcast", "uniform", "geometric")
-
-
-def decompose_trajectory_reward(
-    reward: float,
-    num_segments: int,
-    mode: str = "last_only",
-    gamma: float = 0.9,
-) -> List[float]:
-    """Distribute a trajectory's outcome reward across its segments.
-
-    Modes:
-        - "last_only": [0, 0, ..., 0, R]
-              Sparse outcome — only the final segment receives the reward.
-        - "broadcast": [R, R, ..., R]
-              Each segment sees the full R. Total trajectory reward = n * R
-              (NOT conservative — inflates magnitude with segment count).
-        - "uniform":   [R/n, R/n, ..., R/n]
-              Sum-to-R, equal weight per segment. Conservative.
-        - "geometric": [R · γ^{n-1-k} · (1 − γ) / (1 − γ^n)] for k = 0..n-1
-              Sum-to-R, more weight on segments closer to the outcome.
-              γ → 1 collapses to "uniform". Conservative.
-
-    Conservative modes preserve total trajectory reward equal to R, so PPO
-    clipping ranges, KL budgets, and learning rates tuned against sparse
-    rewards continue to apply without retuning.
-
-    Args:
-        reward: trajectory outcome reward R.
-        num_segments: number of segments n in the trajectory (>= 1).
-        mode: one of REWARD_DECOMPOSITION_MODES.
-        gamma: decay rate for "geometric" mode. Ignored otherwise.
-
-    Returns:
-        List of per-segment rewards of length num_segments.
-
-    Raises:
-        ValueError: if mode is unknown or num_segments < 1.
-    """
-    if num_segments < 1:
-        raise ValueError(f"num_segments must be >= 1, got {num_segments}")
-    if mode not in REWARD_DECOMPOSITION_MODES:
-        raise ValueError(
-            f"mode must be one of {REWARD_DECOMPOSITION_MODES}, got: {mode!r}"
-        )
-
-    n = num_segments
-    if mode == "last_only":
-        return [0.0] * (n - 1) + [reward]
-    if mode == "broadcast":
-        return [reward] * n
-    if mode == "uniform":
-        per = reward / n
-        return [per] * n
-    # geometric
-    if n == 1 or gamma >= 1.0:
-        per = reward / n
-        return [per] * n
-    raw = [gamma ** (n - 1 - k) for k in range(n)]
-    total = sum(raw)
-    return [reward * (w / total) for w in raw]
-
-
-def _resolve_reward_decomposition_config() -> tuple:
-    """Resolve (mode, gamma) for trajectory reward decomposition from env vars.
-
-    Env vars:
-        REWARD_DECOMPOSITION:       one of REWARD_DECOMPOSITION_MODES.
-                                    Default: "last_only".
-        REWARD_DECOMPOSITION_GAMMA: float decay rate for "geometric" mode.
-                                    Default: 0.9.
-    """
-    env_decomp = os.getenv("REWARD_DECOMPOSITION")
-    if env_decomp is not None and env_decomp.strip() != "":
-        mode = env_decomp.strip().lower()
-        if mode not in REWARD_DECOMPOSITION_MODES:
-            raise ValueError(
-                f"REWARD_DECOMPOSITION must be one of {list(REWARD_DECOMPOSITION_MODES)}, "
-                f"got: {env_decomp!r}"
-            )
-    else:
-        mode = "last_only"
-
-    env_gamma = os.getenv("REWARD_DECOMPOSITION_GAMMA", "0.9")
-    try:
-        gamma = float(env_gamma)
-    except ValueError as exc:
-        raise ValueError(
-            f"REWARD_DECOMPOSITION_GAMMA must be a float, got: {env_gamma!r}"
-        ) from exc
-
-    return mode, gamma
-
-
-class BaseAgent(ChainRollout, ABC):
+class BaseAgent(ABC):
     """
     Base class for all agents. All agent should subclass this class. A customized agent can implement the following methods:
 
@@ -169,7 +77,7 @@ class BaseAgent(ChainRollout, ABC):
         tool_parser: Optional[Any] = None,
         tool_parser_name: Optional[str] = None,
         default_tool_call_source: str = "parser",
-        invalid_tool_call_as_observation: bool = True,
+        render_tools_in_prompt: bool = True,
         **kwargs,  # To pass other unused arguments
     ):
         """
@@ -192,14 +100,18 @@ class BaseAgent(ChainRollout, ABC):
                 when no parser is set); ``"backend"`` prefers tool calls already parsed by the inference backend
                 (e.g. an OpenAI-compatible server with ``--enable-auto-tool-choice``), falling back to the local
                 parser per response when the backend provided none.
-            invalid_tool_call_as_observation: Policy for an *invalid tool call* — one the model formed with the
-                wrong shape: an unknown/hallucinated tool name, arguments that are not a JSON object, or unknown
-                argument names. ``True`` (default) feeds the model a ``status="error"`` observation with an
-                informative hint (which tools are available / which arguments are expected) so the chain continues
-                and the model can recover on the next turn; ``False`` raises ``InvalidToolCallError`` (fail-fast),
-                aborting the rollout on the first invalid call. This is deliberately distinct from an error raised
-                *inside* a tool's body while it runs — that is a runtime tool error, governed separately by the
-                ``TOOL_ERROR_AS_OBSERVATION`` env policy.
+            render_tools_in_prompt: Whether the tools' schemas are rendered into the model prompt
+                (the chat template's tools block). ``True`` for native tool-calling agents. ``False``
+                for agents whose prompt already carries the environment interface directly (e.g. the
+                ``<action>`` format), where the tools exist only to execute the parsed action. Read
+                exclusively through :meth:`prompt_tools`, which both generation and training
+                tokenization consult, so the two always render the same prompt.
+
+        Note:
+            Loop control — whether a malformed tool call, a tool-body error, or a no-tool-call
+            turn continues / ends / raises — is NOT an agent setting. It's the rollout's, via the
+            run-config policies ``on_no_tool_call`` / ``on_invalid_tool_call`` / ``on_tool_error``
+            (see :class:`~agentfly.agents.rollout.base.Rollout`).
 
         """
         if default_tool_call_source not in ("parser", "backend"):
@@ -230,8 +142,8 @@ class BaseAgent(ChainRollout, ABC):
         self.tools = tools
         self.max_model_len = max_model_len
         self.default_tool_call_source = default_tool_call_source
-        self.invalid_tool_call_as_observation = invalid_tool_call_as_observation
         self.tool_names = [tool.name for tool in tools]
+        self.render_tools_in_prompt = render_tools_in_prompt
         self.skills = self._normalize_skills(skills)
         self.skill_names = [s.name for s in self.skills]
 
@@ -272,10 +184,6 @@ class BaseAgent(ChainRollout, ABC):
             self.tool_parser = create_tool_parser(tool_parser_name, self.tokenizer)
 
         super().__init__()
-
-        # Result of the most recent agent.run(...) call. Populated by run();
-        # consumed by get_verl_data_proto(). None until the first run.
-        self._last_run_result: Optional["RunResult"] = None
 
         if kwargs:
             raise ValueError(f"Unused arguments for agent: {kwargs}")
@@ -474,34 +382,48 @@ class BaseAgent(ChainRollout, ABC):
         self,
         messages: Union[List[dict], np.ndarray, Dict],
         max_turns: int,
+        rollout: Union[str, "Rollout"] = "chain",
+        rollout_config: Optional[Dict[str, Any]] = None,
         generation_config: Optional[Dict[str, Any]] = {},
         context_config: Optional[ContextConfig] = None,
         **kwargs,
     ) -> RunResult:
         """Run the agent on a batch of messages and return the rollout result.
 
-        This is the main interface for running the agent. It is a wrapper of
-        different rollout methods, which must be asynchronous. Currently we
-        only support chain-based rollout.
+        This is the main interface for running the agent. The *rollout* is how the
+        agent completes the task — a per-call :class:`~agentfly.agents.rollout.base.Rollout`
+        strategy (``"chain"`` by default). The agent passes itself to the strategy as the
+        agent; the strategy drives the loop and reaches agent-specific behavior back
+        through the agent.
 
         Args:
             messages: List of messages to generate responses for.
             max_turns: The maximum number of turns to generate.
+            rollout: The rollout strategy — a registered name (``"chain"``), an import
+                reference (``"pkg.mod:MyRollout"``), or a ``Rollout`` instance.
             generation_config: The generation configuration.
             context_config: Optional settings for :class:`~agentfly.core.context.Context` (resource backend).
-            **kwargs: Additional keyword arguments for generation (passed to ``run_async``).
+            **kwargs: Additional keyword arguments forwarded to the rollout strategy
+                (e.g. ``num_chains``, ``max_concurrent_chains`` for the chain rollout).
 
         Returns:
             :class:`~agentfly.agents.types.RunResult` containing the trajectories
-            produced by this run. The same result is also cached on the agent so
-            that :meth:`get_verl_data_proto` can be called afterwards without
-            re-running.
+            produced by this run, including its rollout identifier. Pass this result
+            explicitly to :meth:`to_verl_dataproto` for training conversion.
+            Latest-run caches are retained only for inspection and timing helpers.
         """
         processed_messages = self._preprocess_messages(messages)
         self._preprocess_backends()
 
-        await self.run_async(
-            processed_messages,
+        # ``rollout_config`` holds the strategy's constructor kwargs (e.g.
+        # ``{"prompt_builder": "alfworld_flat", "history_length": 2}`` for StepRollout),
+        # so a training config can select AND configure the rollout. Coerce an OmegaConf
+        # mapping to a plain dict; ignored when ``rollout`` is already a Rollout instance.
+        rc = dict(rollout_config) if rollout_config else {}
+        resolved_rollout = resolve_rollout(rollout, **rc)
+        run_result = await resolved_rollout.run(
+            agent=self,
+            messages=processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
             context_config=context_config,
@@ -510,9 +432,9 @@ class BaseAgent(ChainRollout, ABC):
 
         self._postprocess_backends()
 
-        trajectories = self.postprocess_trajectories(self.get_trajectories())
-        self._last_run_result = RunResult(trajectories=trajectories)
-        return self._last_run_result
+        trajectories = self.postprocess_trajectories(run_result.trajectories)
+        run_result = RunResult(trajectories=trajectories, rollout=run_result.rollout)
+        return run_result
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
         assert self.backend == "async_verl", (
@@ -539,58 +461,103 @@ class BaseAgent(ChainRollout, ABC):
         """
         return await self.llm_engine.generate_async(messages_list_or_inputs, **kwargs)
 
-    @property
-    def timing_data(self):
-        return self.timer.timing_data
-
     def postprocess_trajectories(self, trajectories: List[Trajectory]) -> List[Trajectory]:
         """Hook for subclasses to post-process trajectories before they're
         wrapped in a :class:`RunResult`. Default implementation is identity.
+        Training-row eligibility is handled by conversion, not this rollout hook.
         """
         return trajectories
 
-    def _require_last_run(self) -> RunResult:
-        """Return the cached :class:`RunResult` from the most recent
-        :meth:`run` call, raising a clear error if ``run`` hasn't been called yet."""
-        if self._last_run_result is None:
-            raise RuntimeError(
-                "agent.run(...) has not been called yet; no RunResult is available. "
-                "Call `result = await agent.run(...)` first."
-            )
-        return self._last_run_result
+    # ---- L1 rollout hooks (defaults; specialized agents override) ----
+    # These are reached by a rollout strategy through the agent (the agent). The
+    # defaults live here so `agent.<hook>` resolves to the agent's (possibly
+    # overridden) behavior under composition.
 
-    def tokenize_trajectories(
+    def maybe_append_context_trigger_user_message(self, current_step) -> None:
+        """Hook for subclasses to append a user turn before the next LLM call. No-op by default."""
+        return
+
+    def skills_payload(self) -> Optional[List[Dict[str, str]]]:
+        """Skill list as JSON-serializable dicts for ``chat_template_kwargs``.
+
+        This is the *template* path: chat-bricks renders the skills slot from
+        these dicts. It is mutually exclusive with the agent-layer ``{skills}``
+        substitution in ``_preprocess_messages`` — when the system prompt carries
+        a ``{skills}`` slot the agent already renders the block into the system
+        message, so we return None here to avoid injecting skills twice.
+
+        Returns None when no skills are configured (so the backend can skip the
+        ``extra_body`` field entirely) or when the agent renders skills itself.
+        """
+        skills = getattr(self, "skills", None)
+        if not skills:
+            return None
+        system_prompt = getattr(self, "system_prompt", None)
+        if system_prompt and "{skills}" in system_prompt:
+            return None
+        return [{"name": s.name, "description": s.description} for s in skills]
+
+    def prompt_tools(self) -> List[Dict]:
+        """Tool schemas rendered into the model prompt (``[]`` for none).
+
+        This is the ONLY place prompt tools come from: the rollout passes the
+        result to the backend for generation AND to ``tokenize_trajectories``
+        for training, so sampling and training are conditioned on the same
+        prompt by construction. Returns ``[]`` (not ``None``) so it can flow
+        through numpy/DataProto columns unchanged.
+        """
+        if not self.render_tools_in_prompt or not self.tools:
+            return []
+        return [tool.schema for tool in self.tools]
+
+    def validate_tool_call(self, tool_call):
+        tool_name = tool_call["function"]["name"]
+        # TODO: validate tool input
+        tool_input = tool_call["function"]["arguments"]  # noqa: F841
+        if tool_name not in self.tool_names:
+            return False
+        return True
+
+    async def execute_tool_call(
         self,
-        messages_list,
-        template=None,
-        tokenizer=None,
-        processor=None,
-        return_reward_mask: bool = False,
-        concatenate_mm_inputs: bool = True,
-        train_on_last_turn: bool = False,
+        context,
+        tool_call,
+        newest_messages,
+        chain,
+        chain_id,
+        depth,
+        have_set_resources,
     ):
+        """Execute a tool call."""
+        tool_name = tool_call["function"]["name"]
+        tool_input = tool_call["function"]["arguments"]
 
-        # TODO: we will remove this argument in the future
-        train_on_last_turn = False
+        # Set up tools if needed (reset resources that may have been acquired at chain start)
+        if not have_set_resources:
+            env_args = {
+                k: context.metadata[k]
+                for k in ("task_name", "variation_idx")
+                if k in context.metadata
+            }
+            # We have moved reset to the tool call
+            # if env_args:
+            #     await context.reset_resource(scope="rollout", env_args=env_args)
+            #     await context.reset_resource(scope="global", env_args=env_args)
+            # else:
+            #     await context.reset_resource(scope="rollout")
+            #     await context.reset_resource(scope="global")
+            # have_set_resources = True
 
-        inputs = tokenize_conversations(
-            messages_list,
-            tokenizer=tokenizer,
-            template=template or self.template,
-            processor=processor or self.processor,
-            max_length=self.max_model_len,
-            return_reward_mask=return_reward_mask,
-            add_generation_prompt=True,
-            concatenate_mm_inputs=concatenate_mm_inputs,
-            ignore_tool_calls=True,
-            train_on_last_turn_only=train_on_last_turn,
+        # Execute tool call. A malformed call comes back as a ``status="invalid"`` result
+        # (not raised); the rollout applies its ``on_invalid_tool_call`` policy.
+        result = await submit_tool_call(
+            tool_name,
+            tool_input,
+            context=context,
+            allowed_tool_names=self.tool_names,
         )
-        position_ids = torch.clip(
-            torch.cumsum(inputs["attention_mask"], dim=-1) - 1, min=0, max=None
-        )
-        inputs["position_ids"] = position_ids
 
-        return inputs
+        return result
 
     def extract_final_response(self, messages: List[Dict[str, Any]]) -> str:
         """
@@ -787,7 +754,7 @@ class BaseAgent(ChainRollout, ABC):
         Returns:
             List of assistant messages with tool_calls.
         """
-        if not VLLM_TOOL_PARSER_AVAILABLE:
+        if not tool_parser.ensure_vllm_tool_parser():
             raise ImportError("vLLM tool parser is not available. Please install vllm.")
 
         # Convert tools to vLLM format (tool.schema is already in OpenAI format)
@@ -831,7 +798,7 @@ class BaseAgent(ChainRollout, ABC):
                 if tool_schemas:
                     req_dict["tools"] = tool_schemas
 
-                req = ChatCompletionRequest(**req_dict)
+                req = tool_parser.ChatCompletionRequest(**req_dict)
 
                 # Adjust request (some parsers may modify it)
                 req = self.tool_parser.adjust_request(req)
@@ -863,48 +830,33 @@ class BaseAgent(ChainRollout, ABC):
 
         return new_messages_list
 
-
-    def print_messages(self, index: int = 0):
-        messages = self.get_messages()
-        for message in messages[index]["messages"]:
-            role = message["role"]
-            text = f"{role}: "
-            if "content" in message:
-                content = message["content"]
-                if isinstance(content, str):
-                    text += content
-                elif isinstance(content, list):
-                    for item in content:
-                        if item["type"] == "text":
-                            text += item["text"]
-                        elif item["type"] == "image":
-                            text += colored("ImagePlaceholder", "red")
-                elif content is None:
-                    assert role == "assistant", (
-                        f"Invalid content type: {type(content)} for role {role}"
-                    )
-                    if "tool_calls" in message:
-                        tool_calls = message["tool_calls"]
-                        for tool_call in tool_calls:
-                            text += f"Tool call: {tool_call['name']} Arguments: {tool_call['arguments']}"
-                    else:
-                        raise ValueError(
-                            f"Invalid message: {message} must have content or tool_calls."
-                        )
-            print(text)
-
-    def get_verl_data_proto(
+    def to_verl_dataproto(
         self,
+        run_result: RunResult,
+        *,
         train_on_last_turn: bool = False,
         world_size: int = 1,
         pad_to_multiple_of: Optional[int] = None,
+        log_token_drift: bool = True,
     ):
-        """Convert the last ``run``'s trajectories into a verl ``DataProto``.
+        """Convert an explicit ``RunResult`` into a verl ``DataProto``.
 
         This is the agent→trainer boundary. It flattens trajectories into rows
-        (one row per **segment**; for the common non-folded rollout that is one
-        row per trajectory), tokenizes them, and packs the fields the trainer
-        consumes. The returned ``DataProto`` carries the following contract.
+        (one row per trainable **segment**), tokenizes them, and packs trainer fields.
+        ``run_result.rollout`` selects the stateless converter; latest-run caches
+        are never consulted. Built-ins are ``"chain"`` and ``"step"``; missing
+        or unsupported identifiers raise ``ValueError``.
+
+        Empty/context-only segments are excluded from the batch, as are rows
+        with no action-mask tokens after tokenization. No trajectory, segment,
+        or runtime step is removed from the supplied result. An entirely
+        untrainable batch raises ``ValueError``.
+
+        Use the in-memory result: JSON serialization excludes internal steps and
+        is not a complete training snapshot. The agent supplies its current
+        tokenizer, processor, template, and prompt tools.
+
+        The returned ``DataProto`` carries the following contract.
 
         ``batch`` (tensors, shape ``[B, L]`` unless noted):
 
@@ -912,224 +864,58 @@ class BaseAgent(ChainRollout, ABC):
         - ``action_mask`` — 1 on assistant (policy) tokens, 0 elsewhere; the
           per-token loss mask. Contiguous runs of 1s delimit turns.
         - ``reward_mask`` — 1 on the single token that carries the outcome
-          reward (the trajectory's last assistant token).
+          reward (each segment's last assistant token).
         - ``rm_scores`` — the scalar outcome reward placed on the ``reward_mask``
-          token (``reward_mask * reward``); ``rm_scores.sum(-1)`` per row is the
-          episode outcome.
+          token (``reward_mask * reward``). The full episode outcome is broadcast
+          to every retained segment, including earlier context-folded views;
+          it is not divided by the number of segments.
         - ``multi_modal_inputs`` — present only for vision-language models.
 
         ``non_tensor_batch`` (arrays, shape ``[B]``):
 
         - ``uid`` — prompt/group id shared by a prompt's rollouts; the group a
           group-relative estimator (GRPO, GiGPO episode level) normalizes within.
+
+        Chain-specific arrays:
+
         - ``batch_idx`` — per-trajectory index; the de-facto trajectory id (all
           rows of one trajectory share it).
-        - ``segment_idx`` — segment order within a trajectory (0 when not folded).
-        - ``rm_<key>`` — one array per extra key a reward dict returned
-          (e.g. ``rm_f1``), broadcast to each of the trajectory's rows.
-        - ``step_observations`` / ``step_rewards`` — per-turn lists (turn order,
-          projected from the row's ``tool_results``): the observation the agent
-          acted on (grouping anchor) and the per-step reward. Consumed by
-          step-level estimators (GiGPO), which map them to token spans via a
-          ``turn_ids`` derived from ``action_mask``; ignored otherwise.
+        - ``segment_idx`` — original segment index within a trajectory; skipping
+          untrainable segments does not renumber it.
+        - ``step_observations`` / ``step_rewards`` / ``step_invalids`` — per-turn
+          lists (turn order, projected from the trajectory's ``steps``): the
+          observation the agent acted on (grouping anchor), the per-step **raw**
+          env reward, and a 0/1 invalid-action flag per turn. Consumed by step-level
+          estimators (GiGPO), which map them to token spans via a ``turn_ids``
+          derived from ``action_mask`` and apply the invalid-action penalty as a
+          local post-discount deduction; ignored otherwise.
+
+        Step-specific arrays: ``traj_uid``, ``anchor_obs``, ``step_env_reward``,
+        ``is_action_valid``, and ``active_masks`` (0 for padding). These are scalar
+        signals for each segment's generation step, rather than per-turn lists.
+        Both converters broadcast ``rm_<key>`` reward metrics to segment rows.
 
         ``meta_info``:
 
         - ``use_agent`` — marks this as an agent-produced batch.
-        - ``repeat_times`` — number of segments per trajectory.
+        - ``repeat_times`` — training-row count per original trajectory, including
+          padding copies; zero for trajectories with no retained rows.
+        - ``layout`` — ``"per_segment"`` (chain) or ``"per_step"`` (step); the trainer
+          uses it to pick the estimator implementation in :mod:`agentfly.algorithms`.
 
         Args:
+            run_result: The result to convert, even if another run has completed.
             train_on_last_turn: (forced ``False``) restrict the loss to the last turn.
             world_size: data-parallel world size.
             pad_to_multiple_of: pad the batch dimension to a multiple of this
                 (extra rows repeat the last row) so it shards evenly.
+            log_token_drift: Include the token-drift diagnostic (spliced vs re-tokenized ids) in the batch log and meta_info.
         """
-        run_result = self._require_last_run()
-        trajectories = run_result.trajectories
-        segments_list = []
-        other_info_list = []
-        for batch_idx, trajectory in enumerate(trajectories):
-            trajectory_segments = trajectory.segments
-            for segment_idx, segment in enumerate(trajectory_segments):
-                segments_list.append(segment)
-                # Per-segment metadata: everything about the trajectory
-                # except segments themselves, plus segment indexing.
-                info = trajectory.model_dump(exclude={"segments"})
-                info["batch_idx"] = batch_idx
-                info["segment_idx"] = segment_idx
-                other_info_list.append(info)
-
-        inputs = self.tokenize_trajectories(
-            messages_list=segments_list,
-            tokenizer=self.tokenizer,
-            processor=self.processor,
-            return_reward_mask=True,
-            concatenate_mm_inputs=False,
+        return result_to_dataproto(
+            agent=self,
+            run_result=run_result,
             train_on_last_turn=train_on_last_turn,
+            world_size=world_size,
+            pad_to_multiple_of=pad_to_multiple_of,
+            log_token_drift=log_token_drift,
         )
-
-        reward_values = run_result.rewards
-        other_values = defaultdict(list)
-        for k, v in run_result.reward_extras.items():
-            other_values[k] = list(v)
-
-        # Expand trajectory reward to segment level. See docstring of
-        # `decompose_trajectory_reward` for the available modes.
-        decomposition_mode, decomposition_gamma = _resolve_reward_decomposition_config()
-        reward_values_segment: List[float] = []
-        for trajectory in trajectories:
-            n = trajectory.num_segments
-            if n <= 0:
-                continue
-            reward_values_segment.extend(
-                decompose_trajectory_reward(
-                    reward=trajectory.reward,
-                    num_segments=n,
-                    mode=decomposition_mode,
-                    gamma=decomposition_gamma,
-                )
-            )
-        num_trajectories = len(trajectories)
-        other_values_segment = {}
-        for key, values in other_values.items():
-            # When reward is scalar (not dict), that trajectory never appends to other_values[key],
-            # so values may be shorter than num_trajectories. Pad to match.
-            if len(values) < num_trajectories:
-                values = list(values) + [0.0] * (num_trajectories - len(values))
-            other_values_segment[key] = []
-            for traj_idx, trajectory in enumerate(trajectories):
-                n = trajectory.num_segments
-                val = values[traj_idx]
-                other_values_segment[key].extend([val] * n)
-        reward_values = reward_values_segment
-        other_values = other_values_segment
-
-        # Number of segments per trajectory (one integer per trajectory).
-        repeat_times = [t.num_segments for t in trajectories]
-
-        align = pad_to_multiple_of
-        if align and align > 1:
-            n = inputs["input_ids"].shape[0]
-            pad_size = (align - n % align) % align
-            for k, v in inputs.items():
-                if k == "action_mask" and isinstance(v, torch.Tensor) and not v.is_nested:
-                    inputs[k] = pad_tensor_batch_dim_with_zeros(v, align)
-                else:
-                    inputs[k] = pad_tensor_to_rank_size(v, align)
-            if pad_size > 0:
-                # Pad other_info_list with copies of the last element (matches last-row repeat in pad_tensor_to_rank_size)
-                other_info_list = other_info_list + [other_info_list[-1]] * pad_size
-                # Pad reward_values and other_values to match the padded inputs
-                reward_values = reward_values + [reward_values[-1]] * pad_size
-                other_values = {
-                    k: v + [v[-1]] * pad_size for k, v in other_values.items()
-                }
-                # Add pad_size to the last trajectory's segment count
-                repeat_times[-1] += pad_size
-
-        group_ids_list = [info["group_id"] for info in other_info_list]
-        segment_index_list = [info["segment_idx"] for info in other_info_list]
-        batch_index_list = [info["batch_idx"] for info in other_info_list]
-        discarded_segment_list = [bool(info.get("discarded", False)) for info in other_info_list]
-        group_ids = np.array(group_ids_list, dtype=object)
-        segment_index = np.array(segment_index_list, dtype=np.int32)
-        batch_index = np.array(batch_index_list, dtype=np.int32)
-
-        # Per-turn rollout signals projected from each row's trajectory
-        # ``tool_results`` (turn order). Only these clean arrays cross the
-        # boundary; the raw ``tool_results`` stay agent-side. Consumed by
-        # step-level estimators (GiGPO); ignored otherwise.
-        #
-        # ANCHOR = the state the agent acted FROM (pre-action s_t). GiGPO groups
-        # turns by the state the action was taken from; ``tool_results[t].observation``
-        # is the observation returned AFTER action t (post-action s_{t+1}), so we shift
-        # the observations right by one — anchor[t] = the previous turn's observation,
-        # with a shared marker for the first turn (all chains of a prompt share s_0, and
-        # grouping is scoped within uid). ``step_reward[t]`` is the reward from action t
-        # (``tool_results[t]``), which is already correctly aligned.
-        step_observations_list = []
-        step_rewards_list = []
-        for info in other_info_list:
-            tr = info.get("tool_results") or []
-            # Prefer the raw ``anchor`` (undecorated state key) over the LLM-facing
-            # ``observation`` (which may carry an admissible-action menu that fragments
-            # exact-hash grouping); fall back to ``observation`` when no anchor is set.
-            post_obs = [
-                r.get("anchor") if r.get("anchor") is not None else r.get("observation")
-                for r in tr
-            ]
-            step_observations_list.append((["__init__"] + post_obs[:-1]) if post_obs else [])
-            step_rewards_list.append([r.get("step_reward") for r in tr])
-
-
-        batch_size = len(group_ids_list)
-        unique_group_ids = []
-        seen_group_ids = set()
-        for group_id in group_ids_list:
-            if group_id not in seen_group_ids:
-                unique_group_ids.append(group_id)
-                seen_group_ids.add(group_id)
-
-        # For discarded trajectories, mask out all response tokens for every segment row.
-        if discarded_segment_list:
-            discarded_tensor = torch.tensor(
-                discarded_segment_list, dtype=torch.bool, device=inputs["attention_mask"].device
-            ).unsqueeze(dim=-1)
-            if "action_mask" in inputs:
-                inputs["action_mask"] = inputs["action_mask"] * (~discarded_tensor).to(
-                    dtype=inputs["action_mask"].dtype
-                )
-            if "reward_mask" in inputs:
-                inputs["reward_mask"] = inputs["reward_mask"] * (~discarded_tensor).to(
-                    dtype=inputs["reward_mask"].dtype
-                )
-
-        inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(
-            reward_values, dtype=torch.float32
-        ).unsqueeze(dim=-1)  # BS x L
-        # Handle other values as np.array
-        for key, values in other_values.items():
-            aligned_values = list(values)
-            if len(aligned_values) == len(unique_group_ids) and unique_group_ids:
-                group_to_value = {
-                    group_id: aligned_values[idx]
-                    for idx, group_id in enumerate(unique_group_ids)
-                }
-                aligned_values = [
-                    group_to_value[group_id] for group_id in group_ids_list
-                ]
-            elif len(aligned_values) == 1 and batch_size > 1:
-                aligned_values = aligned_values * batch_size
-            if len(aligned_values) != batch_size:
-                logger.warning(
-                    f"Adjusting rm_{key} length from {len(aligned_values)} to {batch_size} to match batch size."
-                )
-                if len(aligned_values) < batch_size:
-                    aligned_values = aligned_values + [0.0] * (
-                        batch_size - len(aligned_values)
-                    )
-                else:
-                    aligned_values = aligned_values[:batch_size]
-            inputs[f"rm_{key}"] = np.array(aligned_values)
-        
-        # We handle the group id in the agent side, to be compatible with GRPO
-        inputs["uid"] = group_ids
-        inputs["segment_idx"] = segment_index
-        inputs["batch_idx"] = batch_index
-        # 1D object arrays of per-turn lists (np.empty avoids equal-length rows
-        # collapsing into a 2D array).
-        step_observations = np.empty(len(step_observations_list), dtype=object)
-        step_observations[:] = step_observations_list
-        step_rewards = np.empty(len(step_rewards_list), dtype=object)
-        step_rewards[:] = step_rewards_list
-        inputs["step_observations"] = step_observations
-        inputs["step_rewards"] = step_rewards
-        
-        if "mm_inputs" in inputs:
-            mm_inputs = inputs.pop("mm_inputs")
-            inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
-        batch = DataProto.from_single_dict(
-            inputs, meta_info={"use_agent": True, "repeat_times": repeat_times}
-        )
-
-        return batch

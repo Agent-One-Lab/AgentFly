@@ -59,13 +59,22 @@ It is in ShareGPT/OpenAI's input messages, and will look like something to this:
 }
 ```
 
-To help the training, we can obtain the tokenized trajectories by calling `tokenize_trajectories` method
+To inspect the tokenization of a recorded segment without building a training
+batch, use the standalone utility with explicit messages and a tokenizer:
+
 ```python
-inputs = agent.tokenize_trajectories()
->>> # 'input_ids': tokenized ids of trajectories
-    # 'attention_mask': attention_mask of ids
-    # 'labels': used for supervised finetuning
-    # 'action_mask': mask where llm generated response are set '1', otherwise '0'
+from agentfly.agents.utils.tokenizer import tokenize_trajectories
+
+inputs = tokenize_trajectories(
+    agent,
+    messages_list=[result.trajectories[0].segments[0].messages],
+    tokenizer=agent.tokenizer,
+)
+# input_ids, attention_mask, labels, action_mask, position_ids
 ```
+
+For a scored result, `agent.to_verl_dataproto(result)` performs the complete
+training conversion, including tokenization, rewards, and row alignment.
+There is no need to call the tokenizer separately before conversion.
 
 Now we have this built and run the agent. However, to run agent reinforcement learning, we still need several steps: define and get the tool to use, define reward functions, and finally, run the training.

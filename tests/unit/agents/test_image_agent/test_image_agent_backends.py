@@ -1,5 +1,6 @@
 import os
 from agentfly.agents import ImageEditingAgent
+from agentfly.agents.utils.inspection import print_trajectory
 import pytest
 
 
@@ -34,10 +35,10 @@ async def test_image_agent_client():
             ]
         }
     ]
-    await agent.run(
+    result = await agent.run(
         messages=messages_list, max_turns=4, num_chains=1
     )
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
 
 
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="requires OPENAI_API_KEY (calls the OpenAI API)")
@@ -72,10 +73,10 @@ async def test_image_agent_openai():
             ]
         }
     ]
-    await agent.run(
+    result = await agent.run(
         messages=messages_list, max_turns=5, num_chains=1
     )
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
 
 
 @pytest.mark.gpu
@@ -114,7 +115,7 @@ async def test_image_agent_async_vllm():
             ]
         }
     ]
-    await agent.run(
+    result = await agent.run(
         messages=messages_list, max_turns=4, num_chains=1
     )
-    agent.print_messages(index=0)
+    print_trajectory(result[0])

@@ -13,6 +13,8 @@ The following are predefined reward functions.
 
 ::: agentfly.rewards.webshop_reward.webshop_reward
 
+::: agentfly.rewards.webshop_reward.webshop_episode_reward
+
 ::: agentfly.rewards.alfworld_episode_reward
 
 ::: agentfly.rewards.scienceworld_reward.scienceworld_reward

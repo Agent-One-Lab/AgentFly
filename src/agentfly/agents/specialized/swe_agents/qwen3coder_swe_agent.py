@@ -15,8 +15,9 @@ import re
 from typing import Any, Dict, List, Optional
 
 from ....core.context import Context
+from ....tools.types import ToolResult
 from ...agent_base import BaseAgent
-from ...rollout.structures import Node
+from ...rollout.structures import Step
 from ..action_agent import (
     CONTEXT_TRIGGER_MESSAGE_DICT,
     CONTEXT_TRIGGER_MESSAGE_TYPE_ENV,
@@ -89,17 +90,17 @@ class Qwen3CoderSWEAgent(BaseAgent):
                 return str(first.get("text") or "")
         return ""
 
-    def _maybe_append_context_trigger_user_message(self, current_node: Node) -> None:
+    def maybe_append_context_trigger_user_message(self, current_step: Step) -> None:
         """After ``context_trigger_turns`` assistant messages, append a user nudge to force summarize."""
         if self.context_trigger_turns is None:
             return
-        turns = current_node.messages.messages
+        turns = current_step.messages.messages
         if self._count_assistant_turns(turns) != self.context_trigger_turns:
             return
         if turns and turns[-1].get("role") == "user":
             if self._turn_text(turns[-1]).strip() == self.context_trigger_message.strip():
                 return
-        current_node.messages.add("user", self.context_trigger_message)
+        current_step.messages.add("user", self.context_trigger_message)
 
     def _is_context_triggered_segment(self, current_segment: Optional[List[Dict]]) -> bool:
         """True when this segment ends with the injected summarize-trigger user message."""
@@ -205,7 +206,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
             return True
         return super().validate_tool_call(tool_call)
     
-    async def _execute_tool_call(
+    async def execute_tool_call(
         self,
         context,
         tool_call,
@@ -227,13 +228,13 @@ class Qwen3CoderSWEAgent(BaseAgent):
                 summary = str(parsed.get("summary") or "").strip()
             except (json.JSONDecodeError, TypeError, AttributeError):
                 summary = ""
-            return {
-                "name": "summarize",
-                "arguments": raw_args if isinstance(raw_args, str) else json.dumps(raw_args or {}),
-                "observation": summary,
-                "status": "continue",
-            }
-        return await super()._execute_tool_call(
+            return ToolResult(
+                name="summarize",
+                arguments=raw_args if isinstance(raw_args, str) else json.dumps(raw_args or {}),
+                observation=summary,
+                status="continue",
+            )
+        return await super().execute_tool_call(
             context,
             tool_call,
             newest_messages,

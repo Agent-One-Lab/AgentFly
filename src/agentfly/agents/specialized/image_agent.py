@@ -4,7 +4,8 @@ import random
 import re
 from typing import Dict, List
 
-import torch
+# NOTE: ``torch`` is imported lazily inside QwenImageEditTool's methods so that
+# ``import agentfly.agents`` (which imports this module) doesn't pull torch.
 from PIL import Image
 
 from ...tools import tool
@@ -27,11 +28,14 @@ class QwenImageEditTool:
     """
 
     def __init__(self, model_id="Qwen/Qwen-Image-Edit", device=None):
+        import torch  # lazy: heavy import
+
         self.model_id = model_id
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._pipeline = None
 
     def _lazy_init(self):
+        import torch  # lazy: heavy import
         from diffusers import QwenImageEditPipeline
 
         """Lazy initialization of the pipeline to save memory."""
@@ -68,6 +72,8 @@ class QwenImageEditTool:
         Returns:
             Edited PIL Image
         """
+        import torch  # lazy: heavy import
+
         self._lazy_init()
 
         inputs = {

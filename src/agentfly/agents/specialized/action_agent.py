@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, List, Optional
 from ...core.context import Context
 from ..agent_base import BaseAgent
-from ..rollout.structures import Node
+from ..rollout.structures import Step
 
 # Matches both <action>...</action> and <summarize>...</summarize> blocks.
 TOOL_TAG_PATTERN = re.compile(
@@ -82,9 +82,17 @@ class ActionAgent(BaseAgent):
         tools: List = [],
         context_trigger_turns: Optional[int] = None,
         context_trigger_message_type: Optional[str] = None,
+        truncate_history_at_action: bool = False,
         **kwargs,
     ):
         self.action_tool_name = tools[0].name
+        # What the assistant message's ``content`` holds. False (default): the FULL
+        # generated text, so the history the model sees next turn equals what it
+        # sampled (and what training splices via ``token_ids``) — the on-policy
+        # choice, and what verl-agent's format check / fallback also read. True: cut
+        # at the first ``</action>``/``</summarize>`` (an ablation; the tool call is
+        # always parsed from the truncated copy either way).
+        self.truncate_history_at_action = truncate_history_at_action
         if context_trigger_turns is None:
             env_turns = os.getenv(CONTEXT_TRIGGER_TURNS_ENV)
             if env_turns is not None and str(env_turns).strip() != "":
@@ -106,6 +114,10 @@ class ActionAgent(BaseAgent):
             message_type,
             CONTEXT_TRIGGER_MESSAGE_DICT["base"],
         )
+        # The action format puts the environment interface in the prompt text
+        # itself; the tool exists only to execute the parsed ``<action>``. So by
+        # default no tool schema is rendered into the prompt (matches verl-agent).
+        kwargs.setdefault("render_tools_in_prompt", False)
         super().__init__(
             model_name_or_path, tool_parser_name=tool_parser_name, tools=tools, **kwargs
         )
@@ -114,7 +126,7 @@ class ActionAgent(BaseAgent):
     _WEBSHOP_TOOLS = frozenset({"webshop_browser_action", "webshop_browser"})
     _ALFWORLD_TOOLS = frozenset({"alfworld_step"})
 
-    async def prepare_first_node(self, context: Context, node: Node) -> None:
+    async def prepare_first_step(self, context: Context, step: Step) -> None:
         """Seed the first user turn from the env at rollout start, where the env is the
         source of truth. No-op for tasks that don't need it.
 
@@ -128,20 +140,39 @@ class ActionAgent(BaseAgent):
           instead of triggering its own reset.
         """
         if self.action_tool_name in self._WEBSHOP_TOOLS:
-            await self._prepare_webshop_first_node(context, node)
+            await self._prepare_webshop_first_step(context, step)
         elif self.action_tool_name in self._ALFWORLD_TOOLS:
-            await self._prepare_alfworld_first_node(context, node)
+            await self._prepare_alfworld_first_step(context, step)
 
-    async def _prepare_webshop_first_node(self, context: Context, node: Node) -> None:
+    async def _prepare_webshop_first_step(self, context: Context, step: Step) -> None:
+        """Reset WebShop to this task and seed the first user turn with the env's own
+        instruction, the initial page and the admissible-action menu (rendered exactly
+        like every later ``webshop_browser_action`` observation). Also records what the
+        flat step-prompt builder needs (verl-agent's ``task_description`` / initial obs /
+        available actions) in ``context.metadata``."""
         from ...envs.webshop_text_env import WebShopSpec
+        from ...tools.src.webshop.tools import (
+            extract_task,
+            format_avail_actions,
+            format_observation,
+            format_page,
+        )
 
         env = await context.acquire_resource(
             spec=WebShopSpec, scope="global", backend="local"
         )
         await env.reset(env_args=context.metadata)
-        node.messages.set_first_user_content(env.get_instruction_text())
+        raw = env.observation
+        task = extract_task(raw) or env.get_instruction_text()
+        page = format_page(raw, task)
+        actions = format_avail_actions(env.get_available_actions())
+        step.messages.set_first_user_content(task)
+        step.messages.append_first_user_content(format_observation(page, actions))
+        context.metadata["_flat_initial_obs"] = page
+        context.metadata["_flat_initial_admissible"] = actions
+        context.metadata["_flat_task_description"] = task
 
-    async def _prepare_alfworld_first_node(self, context: Context, node: Node) -> None:
+    async def _prepare_alfworld_first_step(self, context: Context, step: Step) -> None:
         from ...envs.alfworld_env import ALFWorldSpec
         from ...tools.src.alfworld.tools import format_observation
 
@@ -152,7 +183,11 @@ class ActionAgent(BaseAgent):
         env_args = {"task_id": meta["task_id"]} if "task_id" in meta else None
         obs, info = await env.reset(env_args=env_args, split=meta.get("split", "train"))
         commands = info.get("admissible_commands") if info else None
-        node.messages.append_first_user_content(format_observation(obs, commands))
+        step.messages.append_first_user_content(format_observation(obs, commands))
+        # Stash the raw initial obs + admissible so a flat (verl-agent-style) step prompt
+        # builder can render step 0 from the same pieces the tool returns for later steps.
+        context.metadata["_flat_initial_obs"] = obs
+        context.metadata["_flat_initial_admissible"] = list(commands) if commands else []
 
     @staticmethod
     def _count_assistant_turns(turns: List[Dict[str, Any]]) -> int:
@@ -169,17 +204,17 @@ class ActionAgent(BaseAgent):
                 return str(first.get("text") or "")
         return ""
 
-    def _maybe_append_context_trigger_user_message(self, current_node: Node) -> None:
+    def maybe_append_context_trigger_user_message(self, current_step: Step) -> None:
         """After ``context_trigger_turns`` assistant messages, append a user nudge to force summarize."""
         if self.context_trigger_turns is None:
             return
-        turns = current_node.messages.messages
+        turns = current_step.messages.messages
         if self._count_assistant_turns(turns) != self.context_trigger_turns:
             return
         if turns and turns[-1].get("role") == "user":
             if self._turn_text(turns[-1]).strip() == self.context_trigger_message.strip():
                 return
-        current_node.messages.add("user", self.context_trigger_message)
+        current_step.messages.add("user", self.context_trigger_message)
 
     @staticmethod
     def _truncate_at_first_close_tag(response: str) -> str:
@@ -245,13 +280,17 @@ class ActionAgent(BaseAgent):
         If the parsed tool call is <summarize> and ``current_segment`` has no prior assistant
         tool call to the action tool, status is "terminal" (summarize without any action first).
         """
-        # Preprocess: drop anything after the first </action> or </summarize>
+        # Parse on a copy cut at the first </action> or </summarize> (first action wins).
+        # The stored content is the FULL text unless truncate_history_at_action is set,
+        # so history == what was sampled == what training splices (see __init__).
+        raw_response = response
         response = self._truncate_at_first_close_tag(response)
+        content_text = response if self.truncate_history_at_action else raw_response
 
         if not response or not isinstance(response, str):
             return {
                 "role": "assistant",
-                "content": [{"type": "text", "text": response or ""}],
+                "content": [{"type": "text", "text": content_text or ""}],
                 "tool_calls": [],
                 "loss": True,
                 "status": "terminal",
@@ -263,7 +302,7 @@ class ActionAgent(BaseAgent):
             if not summary_text:
                 return {
                     "role": "assistant",
-                    "content": [{"type": "text", "text": response}],
+                    "content": [{"type": "text", "text": content_text}],
                     "tool_calls": [],
                     "loss": True,
                     "status": "terminal",
@@ -281,7 +320,7 @@ class ActionAgent(BaseAgent):
             ]
             return {
                 "role": "assistant",
-                "content": [{"type": "text", "text": response}],
+                "content": [{"type": "text", "text": content_text}],
                 "tool_calls": formatted_tool_calls,
                 "loss": True,
                 "status": "terminal" if end_task_terminal else "continue",
@@ -330,7 +369,7 @@ class ActionAgent(BaseAgent):
 
         return {
             "role": "assistant",
-            "content": [{"type": "text", "text": response}],
+            "content": [{"type": "text", "text": content_text}],
             "tool_calls": formatted_tool_calls,
             "loss": True,
             "status": "terminal"
@@ -358,6 +397,7 @@ class ActionAgent(BaseAgent):
             for i, response in enumerate(responses)
         ]
 
+    # Retained for the experimental "truncate" and "filter" postprocessing modes.
     def _segment_is_terminal_summarize_without_prior_action(self, segment: List[Dict]) -> bool:
         """
         True iff this matches the parse-time rule: single summarize tool call and no earlier
@@ -388,10 +428,17 @@ class ActionAgent(BaseAgent):
 
     def postprocess_trajectories(self, trajectories: List[Dict]) -> List[Dict]:
         """
-        Mark trajectories whose segments contain summarize-without-action shortcuts.
-        We keep trajectory/segment shapes unchanged for downstream batch alignment.
+        Preserve rollout data by default, including empty/context-only views.
+        Training-row selection belongs to conversion, not agent execution.
+        The alternative policies below are retained for future experiments.
         """
-        strategy = "truncate_no_assistant"
+        # Deliberately keep this local experiment selector and all alternative
+        # branches: future experiments may use "truncate", "filter", or
+        # "truncate_no_assistant". Ordinary run() must not apply training cleanup.
+        # Inactive modes and their shared helper are not obsolete code.
+        # TODO(protocol migration): migrate the legacy "trajectory_segments"
+        # accesses in these branches without removing the experimental policies.
+        strategy = None
         if strategy is None:
             return trajectories
         elif strategy == "truncate":

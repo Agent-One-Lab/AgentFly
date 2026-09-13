@@ -1,4 +1,5 @@
 from agentfly.agents import ImageEditingAgent
+from agentfly.agents.utils.tokenizer import tokenize_trajectories
 import pytest
 
 
@@ -32,14 +33,20 @@ async def test_image_agent():
     ]
     # --8<-- [end:messages_list]
     # --8<-- [start:agent_run_print]
-    await agent.run(
+    from agentfly.agents.utils.inspection import print_trajectory
+
+    result = await agent.run(
         messages=messages_list,
         max_turns=4,
         num_chains=1,
     )
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
     # --8<-- [end:agent_run_print]
 
-    inputs, _ = agent.tokenize_trajectories()
+    # Inspect tokenization directly; no rollout object is needed.
+    inputs = tokenize_trajectories(
+        agent, [segment.messages for trajectory in result for segment in trajectory.segments],
+        tokenizer=agent.tokenizer,
+    )
     for k, v in inputs.items():
         print(f"{k}: {v.shape}")

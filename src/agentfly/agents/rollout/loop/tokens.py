@@ -1,8 +1,8 @@
 """Token accounting for the rollout loop.
 
-Self-contained token math that only needs the host's tokenizer/template/processor. Pulled
+Self-contained token math that only needs the agent's tokenizer/template/processor. Pulled
 out of ``ChainRollout`` so the loop isn't interleaved with tokenization arithmetic. Both
-functions take a :class:`~agentfly.agents.rollout.host.RolloutHost` (the rollout/agent) and
+functions take a :class:`~agentfly.agents.rollout.agent.RolloutAgent` (the rollout/agent) and
 read its ``tokenizer`` / ``template`` / ``processor`` / ``max_model_len``.
 """
 
@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Any, List, Optional
 from chat_bricks import Chat
 
 if TYPE_CHECKING:
-    from .host import RolloutHost
-    from .structures import Node
+    from ..agent import RolloutAgent
+    from ..structures import Step
 
 
-def observation_token_length(host: "RolloutHost", observation: Any) -> int:
-    """Token length of an observation's text. Uses ``host.tokenizer``; 0 if unavailable."""
-    tokenizer = getattr(host, "tokenizer", None)
+def observation_token_length(agent: "RolloutAgent", observation: Any) -> int:
+    """Token length of an observation's text. Uses ``agent.tokenizer``; 0 if unavailable."""
+    tokenizer = getattr(agent, "tokenizer", None)
     if tokenizer is None:
         return 0
     text = observation if isinstance(observation, str) else str(observation)
@@ -29,7 +29,7 @@ def observation_token_length(host: "RolloutHost", observation: Any) -> int:
 
 
 def estimate_chat_prompt_tokens(
-    host: "RolloutHost", current_node: "Node", tools: Optional[List] = None,
+    agent: "RolloutAgent", current_step: "Step", tools: Optional[List] = None,
     cap: bool = True,
 ) -> int:
     """Prompt token count via chat_bricks ``Chat`` + ``tokenize`` (same path as training).
@@ -39,18 +39,18 @@ def estimate_chat_prompt_tokens(
     detect a prompt that actually *exceeds* the context window (the capped value
     would mask it).
     """
-    tokenizer = getattr(host, "tokenizer", None)
+    tokenizer = getattr(agent, "tokenizer", None)
     if tokenizer is None:
         raise ValueError(
             "Tokenizer is required when using max_model_len to set max_tokens."
         )
-    template = getattr(host, "template", None)
+    template = getattr(agent, "template", None)
     if not template:
         raise ValueError(
             "template is required for the first prompt length estimate."
         )
-    messages = current_node.messages.messages
-    processor = getattr(host, "processor", None)
+    messages = current_step.messages.messages
+    processor = getattr(agent, "processor", None)
     # Backend-aware tool-call rendering. The estimate must render the tool call
     # exactly ONCE, matching what generation/training tokenize:
     #   * parser-based backends (a local tool_parser is set, e.g. qwen3_coder):
@@ -62,7 +62,7 @@ def estimate_chat_prompt_tokens(
     #     MUST render them (ignore_tool_calls=False) or the call vanishes.
     # Hardcoding either value is wrong for the other backend; derive it from
     # whether a local parser produced the (in-content) tool call.
-    ignore_tool_calls = getattr(host, "tool_parser", None) is not None
+    ignore_tool_calls = getattr(agent, "tool_parser", None) is not None
     chat = Chat(
         template,
         messages,
@@ -80,7 +80,7 @@ def estimate_chat_prompt_tokens(
         n = sum(am)
     else:
         n = int(am.sum().item())
-    max_model_len = getattr(host, "max_model_len", None)
+    max_model_len = getattr(agent, "max_model_len", None)
     if max_model_len is not None and cap:
         n = min(n, max_model_len)
     return n

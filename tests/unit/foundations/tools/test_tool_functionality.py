@@ -9,10 +9,9 @@ async def test_args_validation():
         return a + b
 
     result = await add(a=1, b=2, c=3)
-    assert result == {
-        "name": "add",
-        "arguments": {"a": 1, "b": 2, "c": 3},
-        "observation": 'Invalid argument "c" for tool add.',
-        "status": "success",
-        "metrics": {},
-    }
+    # A tool call now returns a typed ToolResult (not the legacy dict shape).
+    assert result.name == "add"
+    assert result.arguments == {"a": 1, "b": 2, "c": 3}
+    assert result.observation == 'Invalid argument "c" for tool add.'
+    assert result.status == "success"
+    assert result.metrics == {}

@@ -21,6 +21,9 @@ def main():
 
     command = sys.argv[1]
     if command == "train":
+        from .resources.containers import clear_agentfly_containers
+
+        clear_agentfly_containers()
         target_module = import_module(".verl.trainer.main_ppo", package="agentfly")
 
         # Rewrite sys.argv for the Hydra script. Hydra expects the first

@@ -1,5 +1,7 @@
 import torch
 from agentfly.agents import ReactAgent
+from agentfly.agents.utils.inspection import print_trajectory
+from agentfly.agents.utils.tokenizer import tokenize_trajectories
 from agentfly.tools import answer_qa
 import pytest
 
@@ -39,17 +41,19 @@ async def test_vision_agent():
         }
     ]
 
-    await react_agent.run(max_turns=3, messages=messages, num_chains=10)
-    messages_list = react_agent.get_messages()
-    messages = messages_list[0]["messages"]
-    for message in messages:
-        print(f"{message['role']}: {message['content']}")
-    inputs, other_info_list = react_agent.tokenize_trajectories()
+    result = await react_agent.run(max_turns=3, messages=messages, num_chains=10)
+    print_trajectory(result[0])
+    # Inspect tokenization directly; no rollout object is needed.
+    inputs = tokenize_trajectories(
+        react_agent, [segment.messages for trajectory in result for segment in trajectory.segments],
+        tokenizer=react_agent.tokenizer,
+    )
     for key, value in inputs.items():
         if isinstance(value, torch.Tensor):
             print(f"{key}: {value.shape}")
         else:
             print(f"{key}: {value}")
-    other_info = other_info_list[0]
-    for key, value in other_info.items():
-        print(f"{key}: {value}")
+    trajectory = result[0]
+    print(f"reward: {trajectory.reward}")
+    print(f"metrics: {trajectory.metrics}")
+    print(f"metadata: {trajectory.metadata}")

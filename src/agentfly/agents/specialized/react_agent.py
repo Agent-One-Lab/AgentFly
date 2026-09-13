@@ -104,6 +104,9 @@ class ReactAgent(BaseAgent):
             task_info=task_info, tools=tool_schemas
         )
 
+        # The schemas are already in the system prompt text above; don't ALSO
+        # render the chat template's tools block (that would show them twice).
+        kwargs.setdefault("render_tools_in_prompt", False)
         super().__init__(
             model_name_or_path=model_name_or_path,
             tools=tools,

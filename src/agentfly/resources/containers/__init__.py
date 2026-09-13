@@ -12,6 +12,11 @@ from typing import Any
 
 from .container_resource import ContainerResource
 from .docker_container import DockerContainer, start_docker_container
+from .enroot_containers import (
+    ENROOT_CONTAINER_PREFIX,
+    clear_agentfly_containers,
+    enroot_container_name,
+)
 from .ray_container_resource import (
     RayContainerResource,
     RayEnrootContainerActor,
@@ -37,6 +42,9 @@ __all__ = [
     "ContainerResource",
     "DockerContainer",
     "start_docker_container",
+    "ENROOT_CONTAINER_PREFIX",
+    "clear_agentfly_containers",
+    "enroot_container_name",
     "DaytonaContainer",
     "start_daytona_container",
     "ensure_snapshot",

@@ -1,8 +1,13 @@
 import traceback
 
 from ....core import Context
-from ....envs.alfworld_env import ALFWorldSpec
+from ....envs.alfworld_env import ALFWorldSpec, _scalar
 from ...decorator import tool
+
+# verl-agent's ALFWorld reward: 10 * won (agent_system/.../alfworld/envs.py:compute_reward).
+# The raw TextWorld env reward is ignored; the per-step reward is 10 on the winning
+# transition, 0 otherwise. The episode reward (alfworld_episode_reward) is the same 10 * won.
+ALFWORLD_WON_REWARD = 10.0
 
 
 async def _get_alfworld_env(context: Context):
@@ -47,30 +52,58 @@ async def alfworld_step(action: str, context: Context):
     Returns:
         dict: ``observation`` (raw text + admissible actions) shown to the model,
         the raw ``anchor`` (undecorated observation) used as the step-grouping key,
-        the first-class per-step ``step_reward`` (RL signal), and ``done`` /
+        the first-class per-step ``step_reward`` (the RAW env reward), and ``done`` /
         ``invalid_action`` metrics.
 
-    The per-step reward carries an invalid-action penalty (``-0.1`` when the env
-    rejects the action, i.e. returns ``"Nothing happens."``), matching verl-agent's
-    ALFWorld recipe (``use_invalid_action_penalty``, ``invalid_action_penalty_coef=0.1``).
-    ALFWorld's outcome reward is sparse (0 until the winning step), so early on almost
-    every anchor group is all-zero-return and the GiGPO step term goes silent; the
-    penalty injects reward variance into the large ``"Nothing happens."`` clusters so
-    the step advantage can learn to avoid wasted invalid turns. The penalty rides only
-    on ``step_reward`` (the GiGPO step signal) — the episode outcome reward comes from
-    the separate reward function and is unaffected.
+    ``step_reward`` is the **raw** ALFWorld env reward (sparse: 0 until the winning
+    step). The invalid-action penalty is NOT folded in here — it is applied by the
+    GiGPO estimator *after* discounting, as a local per-step deduction
+    (``return[t] -= coef * invalid[t]``), matching verl-agent's
+    ``apply_invalid_action_penalty`` (``invalid_action_penalty_coef=0.1``). Folding
+    it into ``step_reward`` before discounting (the old behavior) let future
+    penalties propagate backward and dominate the discounted return of failing
+    trajectories, drowning the sparse terminal-success signal — so the step term
+    credited turn-efficiency instead of success. The ``invalid_action`` flag in
+    ``metrics`` is what carries the signal downstream (harvested per turn into the
+    trainer batch as ``step_invalids``).
     """
     try:
         env = await _get_alfworld_env(context)
-        obs, reward, done, info = await env.step(action)
+        # verl-agent's alfworld_projection lowercases the extracted action before stepping
+        # (``extracted_action.strip().lower()``); the env's admissible commands are lowercase,
+        # so a capitalized action would otherwise miss the admissible set and read as invalid.
+        obs, reward, done, info = await env.step(action.strip().lower())
         commands = info.get("admissible_commands") if info else None
         invalid = str(obs).strip().lower().startswith("nothing happens")
-        step_reward = float(reward) - (0.1 if invalid else 0.0)
+        won = bool(_scalar(info.get("won", False))) if info else False
+        lost = bool(_scalar(info.get("lost", False))) if info else False
+        # Episode end is signalled by the task actually RESOLVING (won/lost), NOT by the env's
+        # ``done``. This env build's ``done`` is a broken constant — it reads True from step 1
+        # while the game keeps functioning (verified by direct probe), so honoring it would end
+        # every episode after one step. ``won`` is reliable in the same info dict (it drives the
+        # reward and reads correctly). Unresolved episodes run to the rollout's max_turns, which
+        # equals verl-agent's env.max_steps (50). See resolved-vs-done note above.
+        resolved = won or lost
         return {
             "observation": format_observation(obs, commands),
             "anchor": obs,  # raw state (no admissible-action menu) for GiGPO grouping
-            "step_reward": step_reward,
-            "metrics": {"done": float(done), "invalid_action": float(invalid)},
+            # Explicit ``end`` control on task resolution → the rollout ends the episode
+            # (both chain and step honor it). ``None`` while live leaves control to the policy.
+            "control": "end" if resolved else None,
+            # verl-agent reward = 10 * won (raw env reward ignored). Sparse: 10 on the
+            # winning step, 0 otherwise. Penalty is applied post-discount by the estimator.
+            "step_reward": ALFWORLD_WON_REWARD * float(won),
+            "metrics": {
+                # Trustworthy episode-resolution flag (won/lost), not the env's broken done.
+                "done": float(resolved),
+                "won": float(won),
+                "lost": float(lost),
+                "invalid_action": float(invalid),
+                # Raw admissible-command list (not the joined menu) so the flat verl-agent
+                # prompt builder can format it its own way. Non-numeric → skipped by metric
+                # averaging; carried on the tool result for the rollout to read.
+                "admissible_actions": list(commands) if commands else [],
+            },
         }
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"

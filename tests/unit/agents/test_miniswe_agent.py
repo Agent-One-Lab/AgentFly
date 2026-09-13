@@ -244,11 +244,69 @@ def test_tool_registry_resolution():
     assert tool is miniswe_bash or tool.name == miniswe_bash.name
 
 
+class _FakeContainer:
+    def __init__(self, stdout: str, rc: int = 0):
+        self._stdout, self._rc = stdout, rc
+
+    async def run_cmd(self, wrapped, timeout=None, workdir=None):
+        # Mirror the tool's wrapper: command output, then the rc marker line.
+        return f"{self._stdout}\n__MINISWE_RC__{self._rc}"
+
+
+def _ctx_with_container(stdout: str, rc: int = 0, monkeypatch=None):
+    ctx = Context(rollout_id="test-rollout", metadata={"image_id": "img:test"})
+
+    async def acquire_resource(**kwargs):
+        return _FakeContainer(stdout, rc)
+
+    ctx.acquire_resource = acquire_resource
+    return ctx
+
+
+def test_submit_command_ends_the_chain_via_control():
+    # The rollout only acts on ``control`` (status is a diagnosis); a submit must
+    # therefore carry control="end". Regression: status="terminal" alone was
+    # ignored and chains ran on past the submit until max_turns.
+    ctx = _ctx_with_container("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+    result = asyncio.run(miniswe_bash(command="echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", context=ctx))
+    assert result.control == "end"
+    assert result.status == "success"
+    assert json.loads(result.observation)["returncode"] == 0
+
+
+def test_bare_submit_is_recognized_without_executing():
+    # No image_id and no container: a bare submit must still end the chain.
+    ctx = Context(rollout_id="test-rollout", metadata={})
+    for cmd in ("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "  echo 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT' ; ",
+                'echo "MINI_SWE_AGENT_FINAL_OUTPUT"'):
+        result = asyncio.run(miniswe_bash(command=cmd, context=ctx))
+        assert result.control == "end", cmd
+        assert json.loads(result.observation)["returncode"] == 0
+
+
+def test_combined_submit_is_executed_and_detected_from_output():
+    # ``ls && echo <marker>`` is not bare: it runs, and the output check decides.
+    ctx = _ctx_with_container("file_a\nCOMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+    result = asyncio.run(miniswe_bash(command="ls && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", context=ctx))
+    assert result.control is None  # output does not START with the marker
+    ctx = _ctx_with_container("COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+    result = asyncio.run(miniswe_bash(command="true && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", context=ctx))
+    assert result.control == "end"
+
+
+def test_ordinary_command_does_not_steer_the_loop():
+    ctx = _ctx_with_container("file_a\nfile_b")
+    result = asyncio.run(miniswe_bash(command="ls", context=ctx))
+    assert result.control is None
+    assert result.status == "success"
+    assert json.loads(result.observation)["output"] == "file_a\nfile_b"
+
+
 def test_bash_tool_requires_image_id():
     ctx = Context(rollout_id="test-rollout", metadata={})
     result = asyncio.run(miniswe_bash(command="ls", context=ctx))
-    assert result["status"] == "error"
-    obs = json.loads(result["observation"])
+    assert result.status == "error"
+    obs = json.loads(result.observation)
     assert obs["returncode"] == 1
     assert "image_id" in obs["output"]
 
@@ -302,7 +360,7 @@ async def test_live_rollout_creates_file_and_submits():
     result = await agent.run(messages=messages, max_turns=8, num_chains=1)
 
     traj = result.trajectories[0]
-    segment = traj.segments[0]
+    segment = traj.segments[0].messages
     commands = [
         json.loads(tc["function"]["arguments"])["command"]
         if isinstance(tc["function"]["arguments"], str)

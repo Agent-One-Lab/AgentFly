@@ -92,16 +92,16 @@ async def test_create_read_edit_list_run_on_docker():
             content="print('hi from docker')\nX = 1\n",
             context=ctx,
         )
-        assert "Error" not in r["observation"], r["observation"]
+        assert "Error" not in r.observation, r.observation
 
         # read_file sees the content
         r = await read_file(path="hello.py", context=ctx)
-        body = _strip_line_numbers(r["observation"])
-        assert "hi from docker" in body, r["observation"]
+        body = _strip_line_numbers(r.observation)
+        assert "hi from docker" in body, r.observation
 
         # list_files sees the new file
         r = await list_files(path=".", context=ctx)
-        assert "hello.py" in r["observation"], r["observation"]
+        assert "hello.py" in r.observation, r.observation
 
         # edit_file replaces a block
         r = await edit_file(
@@ -110,13 +110,13 @@ async def test_create_read_edit_list_run_on_docker():
             replace_block="X = 2  # edited by docker test",
             context=ctx,
         )
-        assert "Error" not in r["observation"], r["observation"]
+        assert "Error" not in r.observation, r.observation
         r = await read_file(path="hello.py", context=ctx)
-        assert "X = 2" in _strip_line_numbers(r["observation"]), r["observation"]
+        assert "X = 2" in _strip_line_numbers(r.observation), r.observation
 
         # run_python executes the script (proves python3 + workspace cwd work)
         r = await run_python(path="hello.py", context=ctx)
-        assert "hi from docker" in r["observation"], r["observation"]
+        assert "hi from docker" in r.observation, r.observation
     finally:
         await ctx.end_resource(scope="rollout")
 
@@ -133,7 +133,7 @@ async def test_edit_missing_block_errors_on_docker():
             replace_block="replacement",
             context=ctx,
         )
-        obs = r["observation"]
+        obs = r.observation
         assert "Error" in obs, obs
         assert "not found" in obs.lower() or "exact" in obs.lower(), obs
     finally:
@@ -146,7 +146,7 @@ async def test_read_nonexistent_returns_error_on_docker():
     try:
         r = await read_file(path="does_not_exist.py", context=ctx)
         # file tools surface a readable error string rather than raising
-        assert "Error" in r["observation"] or "No such" in r["observation"], \
-            r["observation"]
+        assert "Error" in r.observation or "No such" in r.observation, \
+            r.observation
     finally:
         await ctx.end_resource(scope="rollout")

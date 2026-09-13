@@ -36,6 +36,273 @@ Currently, we adopt chain-based rollout. For each query, we initially generate *
 [2] GiGPO: Group-in-Group Policy Optimization for LLM Agent Training
 
 
+## Returned Data
+
+`agent.run(...)` returns a `RunResult` containing a list of `Trajectory` objects.
+Each trajectory represents one task attempt and contains ordered `Segment` objects.
+Each segment holds its message sequence in `segment.messages`:
+
+```python
+result = await agent.run(messages=messages, max_turns=10, num_chains=1)
+for trajectory in result:
+    for segment in trajectory.segments:
+        for message in segment.messages:
+            print(message)
+```
+
+The same `Segment` type is used by both strategies:
+
+| Rollout | Segments per trajectory |
+|---|---|
+| Chain without context folding | One full conversation |
+| Chain with context folding | Completed pre-fold views plus the final view |
+| Step | One bounded prompt plus response per generation |
+
+Segments may repeat earlier messages as context. They are not disjoint transcript
+slices, and concatenating them does not reconstruct the original episode.
+Message dictionaries retain their existing fields, including sampled `token_ids`,
+tool calls, and multimodal content. The segment wrapper does not change loss masks
+or reward assignment.
+
+To construct results directly, import `Segment`, `Trajectory`, and `RunResult` from
+`agentfly.agents`. Replace the former bare segment lists with
+`Segment(messages=[...])`; serialized segments now have the shape
+`{"messages": [...]}`. Consumers must use `.messages` rather than iterate the
+segment object itself.
+
+Both strategies preserve task fields in `Trajectory.metadata` (excluding reserved
+fields such as the separately stored trajectory/group identifiers). Execution time
+is recorded in `rollout_time_sec`, from episode setup through resource cleanup,
+excluding time waiting for a concurrency slot. With no reward function configured,
+`reward` is `None`; a computed zero reward remains `0.0`.
+
+The former `agent.timing_data` accessor is removed; read
+`result.trajectories[i].rollout_time_sec` for an episode's duration. This is not
+the total batch wall time.
+
+Both strategies report `agent/rollout/time/min`, `max`, and `avg` from these
+trajectory durations. Missing durations (`None`) are skipped, while `0.0` is valid.
+If no duration is available, timing summaries and slowest-trajectory logging are
+skipped; an empty batch emits no end-of-rollout summary events.
+
+The existing `agent/rollout/slowest_message` event now contains a serialized
+`Trajectory`, like `agent/rollout/sample_trajectory`, for both chain and step.
+Its payload uses `segments` instead of the former top-level `messages`; metadata,
+reward, metrics, and identifiers follow the `Trajectory` schema, and internal
+`steps` remain excluded. Duration ties select the first trajectory in result order.
+Log consumers expecting the old chain-specific payload must update accordingly.
+
+Execution counts are also stored on each trajectory: `num_turns` counts completed
+model generations, and `tool_call_counts` maps each tool-result name to its number
+of recorded attempts. Invalid/error results count; proposed calls that never
+execute do not. Total calls are `sum(trajectory.tool_call_counts.values())` when
+counts are available. No separate total is stored.
+
+Both rollouts derive these fields from runtime records, not segment messages:
+chain counts its generation nodes and tool results, while step counts its generation
+records and attached tool results. Repeated history, context folding, and observation
+roles do not affect the counts. They survive serialization even though `steps` do not.
+No tool-execution behavior changes: step still executes only the first proposed
+call in a generation, while chain can execute multiple calls.
+
+`agent/rollout/avg_turns`, `avg_tool_calls`, and `tool_calls/<name>` now aggregate
+these fields. `None` means unavailable (including older results) and is excluded
+from the corresponding average; `0` turns and `{}` tool counts are measured zeros
+and are included. Per-tool averages use all trajectories with known tool counts,
+including those with zero calls to that tool. If no counts are available, the
+corresponding events are omitted; reporting does not infer counts from messages.
+`agent/rollout/avg_segments` remains the average number of context segments.
+
+For a scored trajectory, both training converters broadcast the full outcome reward
+`R` to every retained training segment: `[R, ..., R]`, including earlier
+context-folded chain views.
+The reward is placed on each segment's reward-mask token; it is not divided by the
+number of segments or discounted here. Raw environment step rewards and downstream
+advantage computation are unchanged.
+
+`Trajectory.metrics` contains reward-function extras and numeric tool averages in
+both strategies. Tool metrics are grouped by tool name and metric key, using
+`tool/<name>/<key>`; missing and non-numeric values are ignored, and booleans count
+as 0/1. The first-class `ToolResult.step_reward` is included as a logging average
+when supplied; the original per-call rewards remain unchanged in the runtime
+records. Tool aggregates take precedence over reward extras with the same
+`tool/...` key, matching the existing chain convention. They are collected even
+when no episode reward function is configured.
+
+This migration unifies the conversation container, not the entire training-signal
+protocol. `Trajectory.steps` remains an internal, non-serialized compatibility
+channel for existing advantage estimators. Its rollout-specific semantics and the
+runtime step records are unchanged.
+
+Both exporters use the internal `rollout.conversion.build_segment_batch` helper
+for segment flattening, tokenization, equal outcome rewards, metric expansion,
+and row padding. It returns a single trajectory/segment index mapping, including
+padding copies, which each exporter uses to align its own step signals. The helper
+does not inspect runtime `steps` or rollout state, and introduces no new result
+types. Existing exporter-specific missing-value rules and trainer layouts remain
+unchanged. Multimodal metadata is repeated alongside its padded token row.
+
+### Explicit training conversion
+
+`RunResult.rollout` is the producer identifier: `"chain"` or `"step"`, never a
+rollout instance. Built-in rollouts set it, and agent postprocessing preserves it.
+
+```python
+result = await agent.run(messages=messages, max_turns=10, rollout="step")
+batch = agent.to_verl_dataproto(result, pad_to_multiple_of=8)
+```
+
+Conversion dispatches from this field, not the agent's latest-run caches. An
+earlier result can be converted after another run, including a different rollout.
+Keep the agent's tokenization configuration unchanged (tokenizer, processor,
+template, prompt tools, and maximum length).
+
+`run()` records execution, independently of training. Its result retains empty
+and context-only segments, including a freshly folded context that was never
+followed by a generation. ActionAgent's experimental postprocessing policies are
+retained but disabled by default.
+
+Only conversion selects training rows. It skips segments without assistant
+messages before tokenization, then skips rows whose action mask contains no
+policy tokens (for example, after truncation). Segments ending in a tool
+observation are still eligible if they contain assistant targets. Conversion
+does not mutate trajectories, segments, messages, or runtime steps.
+
+Row mappings retain the original trajectory/segment indices. `repeat_times`
+counts retained rows per original trajectory, with zero for those contributing
+none. Divisor padding repeats the last retained row and increases its owning
+trajectory's count, even when later trajectories have no training rows.
+Per-row multimodal data and step signals follow the same selection. If no
+trainable rows remain, conversion raises a clear `ValueError`; it does not
+silently return an empty training batch.
+
+The no-argument conversion API is no longer supported. Manually constructed
+results default to `rollout=None` for inference/inspection; training conversion
+rejects missing and unsupported identifiers explicitly. Custom execution
+strategies are still supported, but registering one does not automatically add a
+stateless training converter; its result must use a supported protocol or callers
+must provide their own conversion outside the rollout interface.
+
+The only required rollout method is `run()`, returning a `RunResult`.
+Inference-only custom rollouts do not need any training methods. The former
+`Rollout.to_dataproto` and `Rollout.tokenize_trajectories` methods, including the
+built-in strategy wrappers, have been removed. Training callers use
+`agent.to_verl_dataproto(result)`; tokenization-only inspection and tests can
+call `agentfly.agents.utils.tokenizer.tokenize_trajectories` directly with
+explicit conversations and the agent's tokenizer. The training converter
+already calls that utility internally; callers do not need to tokenize first.
+
+The marker survives serialization, but internal `Trajectory.steps` do not.
+Use the in-memory result for training; JSON is not a complete training snapshot.
+This removes conversion's last-run dependency, not all shared state from agent
+execution, and does not make concurrent calls to `agent.run` generally safe.
+
+## Loop Control
+
+Every rollout — chain or step — is a loop: *generate → (maybe) call a tool → observe → repeat*. **Loop control** decides, at each turn, whether the loop should **continue**, **end** the episode, or **raise** (fail fast). The decision lives in one place (the rollout) and uses a single vocabulary, so `chain` and `step` behave identically.
+
+### The control vocabulary
+
+| Control | The loop… | Trajectory outcome |
+|---|---|---|
+| `continue` | runs another turn | — |
+| `end` | ends the episode **gracefully** | kept, reward computed, trained on |
+| `raise` | throws, unwinds the rollout | discarded — not a training sample |
+
+### Who decides, and in what order
+
+At a turn boundary the rollout resolves exactly one control, with this precedence:
+
+1. **The tool wins.** If a tool result carries an explicit `control`, the rollout honors it verbatim (e.g. an environment tool that reached a terminal state returns `control="end"`).
+2. Otherwise the tool result's `status` — a pure *diagnosis* — routes to a run policy:
+    - malformed call (`status="invalid"`: bad tool name / arguments) → `on_invalid_tool_call`
+    - exception inside the tool body (`status="error"`) → `on_tool_error`
+    - a clean result → `continue`
+3. A turn with **no tool call at all** → `on_no_tool_call`.
+4. The model may also end explicitly through its message `status` (`"terminal"` / `"finish"`), e.g. an "end task" sentinel.
+
+Hard limits are independent of all of the above and are never overridable: the loop always ends at `max_turns`, and (for `chain`) when the prompt would exceed the model's context length. The `step` rollout uses a bounded prompt window, so `max_turns` is its only hard cap.
+
+### Termination labels
+
+Both strategies use the same `Trajectory.finish_reason` vocabulary. These labels
+describe a decision already made by the loop; they do not change control policies.
+
+| Label | Meaning |
+|---|---|
+| `terminal` | Explicit model stop through the terminal-message branch |
+| `tool_control_end` | A tool explicitly returned `control="end"`, regardless of its status |
+| `invalid_end` | An invalid tool call was routed to `end` by policy |
+| `tool_error_end` | A tool error was routed to `end` by policy |
+| `tool_end` | Other tool stop, for example from a custom control policy |
+| `no_tool_calls` | A response without tool calls was routed to `end` |
+| `max_turns` | The generation-turn budget was exhausted |
+| `max_model_len` | The chain context-length guard stopped execution |
+
+No-tool responses still follow `on_no_tool_call` before terminal-message handling.
+A `raise` control still raises an exception rather than returning a trajectory
+with an error label. A context-length stop in the chain retains `max_model_len`,
+even if the tool also requested an end.
+
+Previously, chain rollouts reported all tool stops as `terminal`. Consumers that
+used that label for tool/environment completion should now handle the specific
+tool-stop labels above. Existing step-rollout label strings are unchanged.
+
+### The run policies
+
+Three knobs, each `continue | end | raise`, set under `agent.run_config.rollout_config`:
+
+| Policy | Fires when | Default |
+|---|---|---|
+| `on_no_tool_call` | the turn produced no tool call | `end` |
+| `on_invalid_tool_call` | a malformed call (unknown name / bad args) | `end` |
+| `on_tool_error` | an exception was raised inside a tool body | `continue` |
+
+```yaml
+agent:
+  run_config:
+    rollout: step
+    rollout_config:
+      prompt_builder: alfworld_flat
+      on_no_tool_call: end          # e.g. "continue" to let the model take a tool-less "thinking" turn
+      on_invalid_tool_call: end
+      on_tool_error: continue       # feed the error text back as an observation and keep going
+```
+
+or programmatically:
+
+```python
+await agent.run(
+    messages=...,
+    max_turns=50,
+    rollout="step",
+    rollout_config={"on_no_tool_call": "continue", "on_tool_error": "raise"},
+)
+```
+
+### Tools that steer the loop
+
+By default a tool does **not** control the flow — it only reports what happened via `status` (`success` / `error` / `invalid`). A tool opts in to steering by returning `control` in its result dict:
+
+```python
+@tool(name="alfworld_step", stateful=True)
+async def alfworld_step(action: str, context: "Context"):
+    obs, reward, done, info = await env.step(action)
+    won = bool(info.get("won"))
+    return {
+        "observation": ...,
+        "control": "end" if won else None,   # end the episode once the task is solved
+    }
+```
+
+`None` (the default) means "don't steer" — the rollout's run policy decides. This keeps a clean separation: **tools diagnose and may declare intent; the rollout decides and acts.**
+
+
+## Training on What Was Sampled
+
+The rollout carries the **token ids the model actually generated** on each assistant message (`token_ids`), so `agent.to_verl_dataproto(result)` trains on the sampled sequence instead of re-tokenizing decoded text (which drifts — e.g. `<think>` re-encodes differently on Qwen2.5). It also takes the tool schemas rendered into the prompt from one agent-owned source (`agent.prompt_tools()`) for both generation and training, so the prompt the model was conditioned on is the prompt it is trained under. Both come with per-batch diagnostics (`token_drift`, `prompt_check`). See [Training / Inference Consistency](training_consistency.md).
+
+
 ## Asynchronous Implementation
 
 To make the full rollout pipeline asynchronous, there are three main components consuming time: *Generation*, *Tool Calling*, and *Reward Calculation*.

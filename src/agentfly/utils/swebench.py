@@ -36,6 +36,7 @@ from ..agents.specialized.swe_agents.prompts import (
     InstructionSystemPrompt,
     Qwen3CoderToolPrompt,
 )
+from ..agents.types import RunResult
 from ..core import ContextConfig
 from ..rewards.reward_base import get_reward_from_name
 from ..tools import create_file, edit_file, grep_search, read_file, run_python, undo_edit
@@ -116,7 +117,7 @@ async def _run_agent_async(
     max_concurrent_chains: int | None,
     temperature: float,
     resource_backend: str,
-) -> Any:
+) -> RunResult:
     reward_fn = get_reward_from_name(reward_name)
     tools = None
     if tools_mode == "file":
@@ -159,7 +160,7 @@ async def _run_agent_async(
     else:
         raise click.BadParameter(f"Unknown agent kind: {agent_kind!r}")
 
-    await agent.run(
+    return await agent.run(
         messages=messages,
         max_turns=max_turns,
         num_chains=num_chains,
@@ -167,15 +168,13 @@ async def _run_agent_async(
         max_concurrent_chains=max_concurrent_chains,
         context_config=ContextConfig(resource_backend=resource_backend),
     )
-    return agent
 
 
 def _save_per_sample_results(
     result_dir: Path,
-    agent: Any,
+    run_result: RunResult,
 ) -> tuple[float, int]:
     result_dir.mkdir(parents=True, exist_ok=True)
-    run_result = agent._require_last_run()
     trajectories = run_result.trajectories
     reward_scalars = run_result.rewards
     reward_extras = run_result.reward_extras
@@ -381,7 +380,7 @@ def main(
     messages = [_row_to_message_item(r) for r in rows]
     tools_mode = "file" if tool_set == "file" else "bash"
 
-    rollout_agent = asyncio.run(
+    run_result = asyncio.run(
         _run_agent_async(
             agent_kind=agent.lower(),
             model_name_or_path=model_name_or_path,
@@ -403,9 +402,9 @@ def main(
         )
     )
 
-    accuracy, n = _save_per_sample_results(result_dir, rollout_agent)
+    accuracy, n = _save_per_sample_results(result_dir, run_result)
     click.echo(
-        f"Wrote {len(rollout_agent._require_last_run())} sample(s) under {result_dir.resolve()} "
+        f"Wrote {len(run_result)} sample(s) under {result_dir.resolve()} "
         f"(see run_summary.json)."
     )
     if n:

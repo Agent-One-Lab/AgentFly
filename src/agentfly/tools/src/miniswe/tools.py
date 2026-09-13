@@ -12,9 +12,12 @@ the SFT distribution byte-for-byte:
       {"returncode": ..., "output_head": <first 5000>,
        "output_tail": <last 5000>, "elided_chars": <n>,
        "warning": "Output too long."}
-* The episode ends when a command's output starts with the submit marker
-  (the model runs ``echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT``): the tool
-  returns ``status="terminal"`` which the chain loop maps to a terminal node.
+* The episode ends on submission (``echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT``):
+  a bare submit command is recognized from its text and NOT executed (no
+  sandbox round-trip; the echo has no side effect), and a submit combined with
+  other commands is executed and recognized from its output as before. Either
+  way the tool returns ``control="end"`` (the rollout's explicit loop-control
+  signal, see ``ToolResult``). ``status`` stays a diagnosis.
 
 Deliberately NO CommandFilter: the collection ran unfiltered commands inside
 isolated task containers, and a filter would perturb the observation
@@ -98,6 +101,21 @@ def format_observation(returncode: int, output: str, exception_info: str = None)
     )
 
 
+# A bare submit command: ``echo <MARKER>`` (optional quotes / trailing ``;``),
+# nothing else. Recognized from the command text so the episode ends without a
+# sandbox round-trip: the echo has no side effect, and detecting the marker in the
+# returned output made the end of an episode depend on the remote-exec transport
+# (empty output, lost rc marker, or output reordered behind the marker).
+_BARE_SUBMIT_RE = re.compile(
+    r"^\s*echo\s+[\"']?(?:" + "|".join(re.escape(m) for m in SUBMIT_MARKERS) + r")[\"']?\s*;?\s*$"
+)
+
+
+def is_bare_submit_command(command: str) -> bool:
+    """True when ``command`` is exactly the submit echo and nothing else."""
+    return bool(_BARE_SUBMIT_RE.match(command or ""))
+
+
 def is_submission(output: str) -> bool:
     stripped = output.lstrip()
     return any(stripped.startswith(m) for m in SUBMIT_MARKERS)
@@ -115,6 +133,16 @@ async def miniswe_bash(command: str, context: Context):
         context (Context): Injected rollout context; used to acquire the
             per-rollout task container.
     """
+    if is_bare_submit_command(command):
+        # Submission: end the chain here. Not executed -- see _BARE_SUBMIT_RE.
+        marker = next(m for m in SUBMIT_MARKERS if m in command)
+        return ToolResult(
+            name="bash",
+            arguments={"command": command},
+            observation=format_observation(0, marker + "\n"),
+            status="success",
+            control="end",
+        )
     image_id = context.metadata.get("image_id")
     if not image_id:
         return ToolResult(
@@ -176,9 +204,13 @@ async def miniswe_bash(command: str, context: Context):
         returncode = -1
         output = text
 
+    submitted = is_submission(output)
     return ToolResult(
         name="bash",
         arguments={"command": command},
         observation=format_observation(returncode, output),
-        status="terminal" if is_submission(output) else "success",
+        status="success",
+        # The loop only acts on ``control`` (and on status invalid/error); a bare
+        # status="terminal" was silently ignored and chains ran on past the submit.
+        control="end" if submitted else None,
     )

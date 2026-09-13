@@ -85,7 +85,7 @@ agent_type=action
 template="action-agent"
 max_turns=50
 total_training_steps=200
-experiment_name="${model}-alfworld-lean-${max_turns}turns-${adv_estimator}-test"
+experiment_name="${model}-alfworld-lean-${max_turns}turns-${adv_estimator}-fix"
 project_name="Open"
 
 python3 -m agentfly.cli train \

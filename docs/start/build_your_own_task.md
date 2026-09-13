@@ -132,7 +132,7 @@ async def test_my_task_smoke():
 
 Things to verify here:
 
-- The agent **actually calls your tool** — `result.trajectories[0].segments[-1]` should contain at least one message with `role: "tool"`.
+- The agent **actually calls your tool** — for a chain rollout, `result.trajectories[0].segments[-1].messages` should contain at least one message with `role: "tool"`.
 - The reward gets called and returns a **non-degenerate value** — not stuck at 0.0 or 1.0 for every sample.
 - All your dataset's task-specific fields (`answer`, `task_id`, …) reach the reward — easy to confirm by adding a `print` inside the reward.
 

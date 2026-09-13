@@ -78,6 +78,19 @@ same acquire/release lifecycle managed by the engine.
 Typical usage is still through `Context.acquire_resource(...)` in tools/rewards; callers
 should not instantiate container resources directly.
 
+### enroot container names and startup cleanup
+
+Every enroot container AgentFly starts is named `agentfly-<resource id>` (or
+`agentfly-<random>` when no id is given), so AgentFly's containers are recognizable in
+`enroot list` next to anything else on the node. `agentfly train` uses that prefix to
+sweep leftovers before the trainer starts: a previous run that was killed (job time
+limit, OOM, lost Ray worker) never released its containers, and the sweep force-removes
+every `agentfly-*` container on the launching node
+(`enroot.clear_enroot_containers(prefix="agentfly-")`, enroot-py >= 0.1.2). It only sees the node it
+runs on; in a multi-node cluster each worker keeps its own leftovers. Set
+`AF_ENROOT_CLEANUP_ON_START=0` to skip the sweep, for example when two training jobs
+share a node.
+
 For API details, see:
 
 - `api_references/resources/resources.md` (`ResourceSpec`, `BaseResource`, `ContainerResource`)

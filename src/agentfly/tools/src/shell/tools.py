@@ -11,7 +11,6 @@ from enroot.errors import (
     MemoryError as EnrootMemoryError,
     TimeoutError as EnrootTimeoutError,
 )
-from ray.exceptions import RayTaskError
 
 from ....core import Context
 from ....resources import ContainerResourceSpec

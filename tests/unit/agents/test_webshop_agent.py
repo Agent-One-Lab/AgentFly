@@ -1,5 +1,6 @@
 import pytest
 from agentfly.agents import ReactAgent
+from agentfly.agents.utils.inspection import print_trajectory
 from agentfly.tools import webshop_browser
 from agentfly.rewards import webshop_reward
 
@@ -36,7 +37,6 @@ async def test_webshop_agent_call():
         },
     ]
 
-    await agent.run(max_turns=8, messages=messages, num_chains=4)
-
-    messages = agent.get_messages()
-    print(messages)
+    result = await agent.run(max_turns=8, messages=messages, num_chains=4)
+    for trajectory in result:
+        print_trajectory(trajectory)

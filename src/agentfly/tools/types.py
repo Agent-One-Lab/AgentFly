@@ -10,6 +10,15 @@ to help authors and type checkers — it has no runtime effect.
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, TypedDict, Union
 
+# The loop-control vocabulary a tool result / rollout policy resolves to.
+# ``continue`` run another turn; ``end`` end the episode gracefully (trajectory is
+# kept and trained on); ``raise`` fail-fast (throw, discard the rollout). These name
+# what the LOOP does — deliberately distinct from a tool ``status`` (a diagnosis).
+CONTROL_CONTINUE = "continue"
+CONTROL_END = "end"
+CONTROL_RAISE = "raise"
+CONTROL = frozenset({CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE})
+
 
 @dataclass
 class ToolResult:
@@ -27,6 +36,15 @@ class ToolResult:
     grouping key GiGPO clusters turns by). It is the *undecorated* state (e.g.
     the raw observation, without an appended admissible-action menu), so identical
     states hash equal. Falls back to ``observation`` when not set.
+
+    ``control`` is the tool's optional, explicit loop-control signal
+    (``"continue"`` / ``"end"`` / ``"raise"``; see :data:`CONTROL`). ``None``
+    (the default) means the tool does NOT steer the loop — the rollout's
+    run-configured policy decides based on ``status``. When a tool sets it (e.g.
+    an env tool that reached a terminal state writes ``control="end"``), the
+    rollout honors it verbatim (the tool wins over the policy). ``status`` stays a
+    pure *diagnosis* (``"success"`` / ``"error"`` / ``"invalid"``); the continue
+    / end / raise *decision* lives in the rollout, never in the tool.
     """
 
     name: str
@@ -37,6 +55,7 @@ class ToolResult:
     image: Optional[str] = None
     step_reward: Optional[float] = None
     anchor: Optional[Any] = None
+    control: Optional[str] = None
 
     @classmethod
     def from_raw(
@@ -79,9 +98,18 @@ class ToolResult:
             obs = raw.pop("observation")
             if max_length is not None and len(obs) > max_length:
                 obs = obs[:max_length] + "...(truncated)"
+            # A ``status`` key in the returned dict is the tool's own diagnosis and wins
+            # over the caller-supplied default (otherwise it would fall into ``metrics``).
+            status = raw.pop("status", status)
             image = raw.pop("image", None)
             step_reward = raw.pop("step_reward", None)
             anchor = raw.pop("anchor", None)
+            control = raw.pop("control", None)
+            if control is not None and control not in CONTROL:
+                raise ValueError(
+                    f"Tool {name!r} returned control={control!r}; "
+                    f"expected one of {sorted(CONTROL)} or None."
+                )
             explicit = raw.pop("metrics", None) or {}
             metrics = {**raw, **explicit}
             return cls(
@@ -93,6 +121,7 @@ class ToolResult:
                 image=image,
                 step_reward=None if step_reward is None else float(step_reward),
                 anchor=anchor,
+                control=control,
             )
         raise ValueError(
             f"Tool {name!r} returned {type(raw).__name__}; "
@@ -118,6 +147,8 @@ class ToolResult:
             d["step_reward"] = self.step_reward
         if self.anchor is not None:
             d["anchor"] = self.anchor
+        if self.control is not None:
+            d["control"] = self.control
         return d
 
 

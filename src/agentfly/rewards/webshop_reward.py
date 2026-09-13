@@ -23,8 +23,13 @@ async def webshop_reward(
     try:
         env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
         result = await env.step("get_reward", task_id)
+        score = float(result["reward"])
         return {
-            "reward": result["reward"],
+            # The dense WebShop score in [0, 1] is the training signal (verl-agent uses it
+            # unchanged). ``trajectory/accuracy`` is verl-agent's *success* (score == 1.0),
+            # the number their WebShop results report; aggregated per trajectory.
+            "reward": score,
+            "trajectory/accuracy": float(score == 1.0),
             "output": result["observation"],
         }
     except Exception as e:
@@ -33,3 +38,32 @@ async def webshop_reward(
             "output": f"Error webshop reward function: {e}",
         }
 # --8<-- [end:webshop_reward_example]
+
+
+@reward(name="webshop_episode_reward")
+async def webshop_episode_reward(context: Context, task_id: int) -> dict:
+    """WebShop episode reward on verl-agent's scale: ``10`` if the purchase fully satisfies the
+    goal (dense score == 1.0), else ``0``.
+
+    This is the reward behind verl-agent's reported WebShop success rates
+    (``envs.WebshopWorker.step`` binarizes the env score the same way), so it pairs with the
+    ``webshop_browser_action`` tool's per-step reward for GiGPO. ``webshop_reward`` keeps the
+    dense score as the training signal instead.
+
+    Returns ``reward`` (0 / 10), ``trajectory/accuracy`` (0 / 1 success, aggregated per
+    trajectory) and ``task_score`` (the dense score in [0, 1], a diagnostic).
+    """
+    from ..tools.src.webshop.tools import WEBSHOP_WON_REWARD
+
+    try:
+        env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
+        result = await env.step("get_reward", task_id)
+        score = float(result["reward"])
+    except Exception:  # noqa: BLE001 — no purchase / env error: an unsuccessful episode
+        score = 0.0
+    won = float(score == 1.0)
+    return {
+        "reward": WEBSHOP_WON_REWARD * won,
+        "trajectory/accuracy": won,
+        "task_score": score,
+    }

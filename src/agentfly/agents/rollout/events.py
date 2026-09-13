@@ -20,13 +20,21 @@ from typing import Any, Optional, Union
 
 
 class FinishReason(str, Enum):
-    """Canonical chain stop reasons. ``str``-Enum: compares and JSON-serializes as the
-    underlying string, so it interoperates with the plain ``chain.info["finish_reason"]``
-    strings used inside the loop."""
+    """Shared chain/step stop reasons, distinct from backend generation stop reasons.
+
+    ``str``-Enum: compares and JSON-serializes as the underlying string. ``TERMINAL``
+    denotes a model-requested stop; tool-requested and policy-driven stops have
+    their own diagnostic labels. The labels do not decide loop control.
+    """
     MAX_TURNS = "max_turns"
     NO_TOOL_CALLS = "no_tool_calls"
+    REPEATED_NO_TOOL_CALLS = "repeated_no_tool_calls"
     TERMINAL = "terminal"
     MAX_MODEL_LEN = "max_model_len"
+    TOOL_CONTROL_END = "tool_control_end"
+    INVALID_END = "invalid_end"
+    TOOL_ERROR_END = "tool_error_end"
+    TOOL_END = "tool_end"
 
 
 @dataclass(frozen=True)
@@ -59,8 +67,8 @@ class ToolObserved:
 
 @dataclass(frozen=True)
 class ChainEnded:
-    """Terminal event for a chain. Lightweight by design — the final ``Chain``/``Node``
-    live in ``ChainRollout.chains`` / ``.current_nodes`` (the loop writes them as it
+    """Terminal event for a chain. Lightweight by design — the final ``Chain``/``Step``
+    live in ``ChainRollout.chains`` / ``.current_steps`` (the loop writes them as it
     ends), not on the event."""
 
     chain_id: str

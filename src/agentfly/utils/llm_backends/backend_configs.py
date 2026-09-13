@@ -1,6 +1,14 @@
+# Defer annotation evaluation so the ``AsyncEngineArgs`` type hints (field +
+# signature) don't force ``vllm`` (~4s) at import; it's constructed lazily inside
+# __init__. This module is pulled in by agent_base, so a bare
+# ``import agentfly.agents`` must not pay for vllm.
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Optional
-from vllm import AsyncEngineArgs
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from vllm import AsyncEngineArgs
 
 
 @dataclass(init=False)
@@ -29,7 +37,10 @@ class AsyncVLLMConfig:
         """
         if engine_args is not None:
             self.engine_args = engine_args
-        elif kwargs:
+            return
+        from vllm import AsyncEngineArgs  # lazy: heavy import
+
+        if kwargs:
             self.engine_args = AsyncEngineArgs(**kwargs)
         else:
             self.engine_args = AsyncEngineArgs()
@@ -41,7 +52,16 @@ class AsyncVerlConfig:
     """Configuration for Async Verl backend.
 
     Attributes:
+        check_prompt_consistency: Periodically verify that the prompt verl sampled from
+            equals the chat-bricks render used for training (a few rows on the first
+            call, then every 200 calls; prints ``[AsyncVerlBackend] prompt_check: ...``,
+            warns with a decoded diff on mismatch), and that every sampled turn reappears
+            in later prompts as exactly its prompt followed by its sampled ids
+            (``splice_check``). On by default; disable with
+            ``agent.init_config.backend_config.check_prompt_consistency=false``.
     """
+
+    check_prompt_consistency: bool = True
 
 
 @dataclass

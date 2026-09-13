@@ -3,25 +3,43 @@
 import logging
 from typing import Any, Optional
 
+# Populated lazily by ensure_vllm_tool_parser() on first use. Importing vllm at
+# module load would pull the whole vllm stack into a bare ``import
+# agentfly.agents``; consumers must call ensure_vllm_tool_parser() and then read
+# these via the module (e.g. ``tool_parser.VLLM_TOOL_PARSER_AVAILABLE``) rather
+# than binding them as values at their own import time.
 ChatCompletionRequest = None
 ToolParserManager = None
 VLLM_TOOL_PARSER_AVAILABLE = False
+vllm_probed = False
 
-try:
-    from vllm.entrypoints.openai.chat_completion.protocol import (
-        ChatCompletionRequest,
-    )
-    from vllm.tool_parsers import ToolParserManager
 
-    VLLM_TOOL_PARSER_AVAILABLE = True
-except ImportError:
+def ensure_vllm_tool_parser() -> bool:
+    """Import the optional vLLM tool-parser classes once, on first use.
+
+    Populates the module globals ``ChatCompletionRequest`` /
+    ``ToolParserManager`` / ``VLLM_TOOL_PARSER_AVAILABLE`` and returns whether the
+    vLLM tool parser is available. Deferred because importing vllm is heavy.
+    """
+    global ChatCompletionRequest, ToolParserManager, VLLM_TOOL_PARSER_AVAILABLE
+    global vllm_probed
+    if vllm_probed:
+        return VLLM_TOOL_PARSER_AVAILABLE
+    vllm_probed = True
     try:
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-        from vllm.entrypoints.openai.tool_parsers import ToolParserManager
-
-        VLLM_TOOL_PARSER_AVAILABLE = True
+        from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
+        from vllm.tool_parsers import ToolParserManager
     except ImportError:
-        pass
+        try:
+            from vllm.entrypoints.openai.protocol import ChatCompletionRequest
+            from vllm.entrypoints.openai.tool_parsers import ToolParserManager
+        except ImportError:
+            return False
+    globals()["ChatCompletionRequest"] = ChatCompletionRequest
+    globals()["ToolParserManager"] = ToolParserManager
+    VLLM_TOOL_PARSER_AVAILABLE = True
+    _silence_tool_parsers()
+    return True
 
 
 def _silence_tool_parsers() -> None:
@@ -36,10 +54,6 @@ def _silence_tool_parsers() -> None:
         lg.propagate = False
 
 
-if VLLM_TOOL_PARSER_AVAILABLE:
-    _silence_tool_parsers()
-
-
 def create_tool_parser(tool_parser_name: str, tokenizer: Any) -> Optional[Any]:
     """Return a vLLM tool parser instance for ``tool_parser_name``.
 
@@ -51,7 +65,7 @@ def create_tool_parser(tool_parser_name: str, tokenizer: Any) -> Optional[Any]:
     """
     if tokenizer is None:
         return None
-    if not VLLM_TOOL_PARSER_AVAILABLE or ToolParserManager is None:
+    if not ensure_vllm_tool_parser() or ToolParserManager is None:
         raise ImportError(
             "vLLM tool parser is not available. Please install vllm to use tool_parser_name."
         )

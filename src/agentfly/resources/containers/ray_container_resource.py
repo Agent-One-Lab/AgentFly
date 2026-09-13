@@ -133,13 +133,15 @@ class _RayEnrootContainerActorBase:
         spec: ContainerResourceSpec,
         start_timeout: Optional[float] = 1800.0,
     ):
-        from enroot import from_env, random_name
+        from enroot import from_env
+
+        from .enroot_containers import enroot_container_name
 
         if spec.category != "container":
             raise ValueError(
                 f"RayEnrootContainerActor supports only category 'container', got {spec.category!r}"
             )
-        name = resource_id or random_name(prefix="res")
+        name = enroot_container_name(resource_id)
         image = spec.image or "ubuntu:22.04"
         timeout = start_timeout
         create_kwargs: dict[str, Any] = {

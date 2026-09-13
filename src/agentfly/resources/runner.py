@@ -14,6 +14,7 @@ import logging
 from enroot import from_env, random_name
 from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
 from .containers import ContainerResource, create_ray_container_resource
+from .containers.enroot_containers import enroot_container_name
 from .local_env_resource import LocalEnvResource
 from .models import APIModelResource, VLLMModelResource
 from .types import (
@@ -38,8 +39,13 @@ async def _start_enroot_container(
     containers_registry: Dict[str, Any],
     runner_label: str = "EnrootRunner",
 ) -> BaseResource:
-    """Create + start an enroot container on the local enroot client (this machine)."""
-    name = resource_id or random_name(prefix="res")
+    """Create + start an enroot container on the local enroot client (this machine).
+
+    The container is named ``agentfly-<resource_id>`` (see
+    :func:`~agentfly.resources.containers.enroot_containers.enroot_container_name`);
+    the returned resource's ``resource_id`` is that container name.
+    """
+    name = enroot_container_name(resource_id)
     image = spec.image or "ubuntu:22.04"
     timeout_sec = 1800.0 if timeout is None else timeout
     create_kwargs: Dict[str, Any] = {

@@ -10,7 +10,7 @@ async def test_science_world_explorer():
     result = await scienceworld_explorer(
         action="look around", context=ctx
     )
-    assert result['observation'].startswith("This room is called")
-    print(result['observation'])
+    assert result.observation.startswith("This room is called")
+    print(result.observation)
     
     await ctx.end_resource(scope="global")
