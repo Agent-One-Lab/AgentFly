@@ -79,14 +79,132 @@ def test_step_emits_each_summary_once_with_existing_values(monkeypatch):
         if event.name in expected_texts:
             assert event.kind == "text"
             assert json.loads(event.value) == before
-        # Reward extras retain their existing default axis; this cleanup does not change it.
-        if event.name == "agent/rollout/accuracy":
-            assert event.x is None
-            assert event.x_name == "x_axis"
-        else:
-            assert event.x == 4
-            assert event.x_name == "agent/rollout/step"
+        # Every summary shares the rollout's axis, reward extras included: an event
+        # without one is logged against wandb's own step and drifts from the rest.
+        assert event.x == 4
+        assert event.x_name == "agent/rollout/step"
     assert trajectory.model_dump() == before
+
+
+def sampled(rewards_by_task):
+    """One batch of trajectories: {task: [reward per sample]} in rollout order."""
+    return [
+        Trajectory(segments=[], group_id=task, chain_idx=index, reward=reward)
+        for task, rewards in rewards_by_task.items()
+        for index, reward in enumerate(rewards)
+    ]
+
+
+def group_values(events):
+    return {
+        event.name.removeprefix("agent/rollout/group/"): event.value
+        for event in events
+        if event.name.startswith("agent/rollout/group/")
+    }
+
+
+def test_pass_rate_distribution_separates_trainable_tasks_from_saturated_ones(monkeypatch):
+    events = []
+    monkeypatch.setattr(metrics, "emit", events.append)
+    # A U-shaped pool: two tasks never solved, one always solved, one mixed. Only the
+    # mixed task gives GRPO a non-zero advantage, which mean reward alone would hide.
+    trajectories = sampled({
+        "always_fails": [0.0, 0.0, 0.0, 0.0],
+        "also_fails": [0.0, 0.0, 0.0, 0.0],
+        "always_solved": [1.0, 1.0, 1.0, 1.0],
+        "mixed": [0.0, 1.0, 1.0, 0.0],
+    })
+
+    metrics.RolloutMetrics().record_step(global_step=6, trajectories=trajectories)
+
+    observed = group_values(events)
+    assert observed == {
+        "num_groups": 4,
+        "samples_per_task": 4.0,
+        "pass_rate_mean": 0.375,
+        "frac_all_fail": 0.5,
+        "frac_all_pass": 0.25,
+        "frac_mixed": 0.25,
+        "frac_zero_advantage": 0.75,
+        # Only the mixed task has any spread (std 0.5), averaged over the four tasks.
+        "reward_std_mean": 0.125,
+        "pass_rate_hist": [0.0, 0.0, 1.0, 0.5],
+    }
+    hist = next(event for event in events if event.name.endswith("pass_rate_hist"))
+    assert hist.kind == "hist"
+    assert all(
+        event.x == 6 and event.x_name == "agent/rollout/step"
+        for event in events
+        if event.name.startswith("agent/rollout/group/")
+    )
+    # The distribution is reported alongside — not instead of — the mean reward.
+    assert next(e.value for e in events if e.name == "agent/rollout/reward") == 0.375
+
+
+def test_pass_rate_distribution_skipped_without_repeated_samples(monkeypatch):
+    events = []
+    monkeypatch.setattr(metrics, "emit", events.append)
+    # Validation and num_chains=1 give one sample per task, where every pass rate is 0
+    # or 1 by construction and says nothing about difficulty.
+    single = sampled({"task_a": [1.0], "task_b": [0.0]})
+
+    metrics.RolloutMetrics().record_step(global_step=1, trajectories=single)
+
+    assert group_values(events) == {}
+
+
+def test_ungrouped_and_ungraded_rollouts_do_not_form_a_shared_task(monkeypatch):
+    events = []
+    monkeypatch.setattr(metrics, "emit", events.append)
+    trajectories = sampled({"task_a": [1.0, 0.0]}) + [
+        # No group_id: separate single-sample tasks, never pooled into one.
+        Trajectory(segments=[], reward=1.0),
+        Trajectory(segments=[], reward=0.0),
+        # Ungradable rollouts carry no reward and are not counted as failures.
+        Trajectory(segments=[], group_id="task_b", reward=None),
+        Trajectory(segments=[], group_id="task_b", reward=None),
+    ]
+
+    metrics.RolloutMetrics().record_step(global_step=2, trajectories=trajectories)
+
+    observed = group_values(events)
+    assert observed["num_groups"] == 3
+    assert observed["samples_per_task"] == 4 / 3
+    assert observed["pass_rate_hist"] == [0.5, 1.0, 0.0]
+
+
+@pytest.mark.parametrize("threshold,expected_pass_rates", [(1.0, [0.0, 0.5]), (0.5, [0.5, 1.0])])
+def test_success_threshold_selects_what_counts_as_a_pass(threshold, expected_pass_rates, monkeypatch):
+    events = []
+    monkeypatch.setattr(metrics, "emit", events.append)
+    trajectories = sampled({"partial": [0.2, 0.6], "good": [0.6, 1.0]})
+
+    metrics.RolloutMetrics(success_threshold=threshold).record_step(
+        global_step=5, trajectories=trajectories
+    )
+
+    observed = group_values(events)
+    assert observed["pass_rate_hist"] == expected_pass_rates
+    # Threshold-free signals are unaffected: neither task is degenerate here.
+    assert observed["frac_zero_advantage"] == 0.0
+    assert observed["reward_std_mean"] == pytest.approx(0.2)
+
+
+def test_identical_continuous_rewards_count_as_zero_advantage():
+    distribution = metrics.pass_rate_distribution(
+        {"flat": [0.4, 0.4, 0.4], "varied": [0.4, 0.9, 0.4]}, success_threshold=1.0
+    )
+    # Neither task ever reaches the pass threshold, so the pass-rate view calls both
+    # hopeless; only the raw-reward view shows one of them still carries signal.
+    assert distribution["frac_all_fail"] == 1.0
+    assert distribution["frac_zero_advantage"] == 0.5
+    assert distribution["reward_std_mean"] > 0.0
+
+
+def test_group_rewards_reconstructs_the_samples_of_each_task():
+    trajectories = sampled({"task_a": [0.0, 1.0], "task_b": [0.5]})
+    assert metrics.group_rewards(trajectories) == {"task_a": [0.0, 1.0], "task_b": [0.5]}
+    assert metrics.pass_rate_distribution({}) == {"pass_rates": [], "num_groups": 0}
 
 
 @pytest.mark.parametrize("results", [[], [None, None]])

@@ -56,8 +56,79 @@ def aggregate_tool_metrics(results: Iterable[Optional[ToolResult]]) -> Dict[str,
     return averages
 
 
+DEFAULT_SUCCESS_THRESHOLD = 1.0
+
+
+def group_rewards(trajectories: Iterable[Trajectory]) -> Dict[str, List[float]]:
+    """Group per-rollout rewards by task, keyed by ``group_id``.
+
+    Both strategies stamp every rollout of one task with a shared ``group_id``, so this
+    reconstructs the sample set per task. Rollouts without a reward (no reward function,
+    or an ungradable attempt) are skipped; a rollout with no ``group_id`` forms its own
+    single-sample group rather than being merged with other ungrouped rollouts.
+    """
+    grouped: Dict[str, List[float]] = defaultdict(list)
+    for index, trajectory in enumerate(trajectories):
+        if trajectory.reward is None:
+            continue
+        key = trajectory.group_id if trajectory.group_id is not None else f"__ungrouped_{index}"
+        grouped[key].append(float(trajectory.reward))
+    return dict(grouped)
+
+
+def pass_rate_distribution(
+    rewards_by_group: Dict[str, List[float]],
+    *,
+    success_threshold: float = DEFAULT_SUCCESS_THRESHOLD,
+) -> Dict[str, Any]:
+    """Summarize the per-task pass-rate distribution of one rollout batch.
+
+    With several rollouts per task, each task has a *pass rate* — the fraction of its
+    samples reaching ``success_threshold``. The shape of that distribution is what says
+    whether a task pool is trainable: a U-shape (mass at 0 and 1) means the pool is
+    mostly tasks the policy always fails and tasks it always solves, and a group whose
+    samples all score alike gives GRPO no advantage signal at all, so those steps
+    contribute nothing to the gradient regardless of how good the mean reward looks.
+
+    Returns the per-group pass rates plus summary fractions. ``frac_zero_advantage``
+    and ``reward_std_mean`` read the raw rewards and so stay meaningful for continuous
+    rewards, where the threshold-based fractions can be misleading.
+    """
+    pass_rates: List[float] = []
+    reward_stds: List[float] = []
+    zero_advantage = 0
+    for rewards in rewards_by_group.values():
+        passes = sum(1 for reward in rewards if reward >= success_threshold)
+        pass_rates.append(passes / len(rewards))
+        mean = sum(rewards) / len(rewards)
+        variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
+        reward_stds.append(variance ** 0.5)
+        if max(rewards) == min(rewards):
+            zero_advantage += 1
+
+    num_groups = len(pass_rates)
+    if not num_groups:
+        return {"pass_rates": [], "num_groups": 0}
+    return {
+        "pass_rates": pass_rates,
+        "num_groups": num_groups,
+        "samples_per_task": sum(len(r) for r in rewards_by_group.values()) / num_groups,
+        "pass_rate_mean": sum(pass_rates) / num_groups,
+        "frac_all_fail": sum(1 for rate in pass_rates if rate == 0.0) / num_groups,
+        "frac_all_pass": sum(1 for rate in pass_rates if rate == 1.0) / num_groups,
+        "frac_mixed": sum(1 for rate in pass_rates if 0.0 < rate < 1.0) / num_groups,
+        "frac_zero_advantage": zero_advantage / num_groups,
+        "reward_std_mean": sum(reward_stds) / num_groups,
+    }
+
+
 class RolloutMetrics:
     """Emit each report from its supplied data without accumulating chain state."""
+
+    def __init__(self, success_threshold: float = DEFAULT_SUCCESS_THRESHOLD) -> None:
+        """``success_threshold`` is the reward at which a single rollout counts as a
+        pass for the per-task pass-rate distribution."""
+        self.success_threshold = success_threshold
 
     def record_chain(
         self,
@@ -245,5 +316,66 @@ class RolloutMetrics:
                     kind="scalar",
                     name=f"agent/rollout/{key}",
                     value=avg_value,
+                    x=global_step,
+                    x_name="agent/rollout/step",
                 )
                 emit(evt)
+
+        self._record_pass_rate_distribution(
+            global_step=global_step, trajectories=trajectories
+        )
+
+    def _record_pass_rate_distribution(
+        self,
+        *,
+        global_step: int,
+        trajectories: List[Trajectory],
+    ) -> None:
+        """Report how this batch's per-task pass rates are distributed.
+
+        Emitted only when some task actually has several rollouts: with one sample per
+        task (validation, or ``num_chains=1``) every pass rate is 0 or 1 by construction
+        and the distribution would say nothing about task difficulty. The raw per-task
+        pass rates go out as a histogram so the shape — U-shaped means a pool of
+        always-failed and always-solved tasks, i.e. little to learn from — is visible
+        per step, alongside the scalar fractions that plot as curves over training.
+        """
+        rewards_by_group = group_rewards(trajectories)
+        if max((len(r) for r in rewards_by_group.values()), default=0) < 2:
+            return
+        distribution = pass_rate_distribution(
+            rewards_by_group, success_threshold=self.success_threshold
+        )
+        pass_rates = distribution.pop("pass_rates")
+
+        logger.info(
+            "Pass-rate distribution over %d tasks (%.1f samples each): "
+            "mean=%.3f all-fail=%.3f mixed=%.3f all-pass=%.3f zero-advantage=%.3f",
+            distribution["num_groups"],
+            distribution["samples_per_task"],
+            distribution["pass_rate_mean"],
+            distribution["frac_all_fail"],
+            distribution["frac_mixed"],
+            distribution["frac_all_pass"],
+            distribution["frac_zero_advantage"],
+        )
+
+        for key, value in distribution.items():
+            emit(
+                MetricEvent(
+                    kind="scalar",
+                    name=f"agent/rollout/group/{key}",
+                    value=value,
+                    x=global_step,
+                    x_name="agent/rollout/step",
+                )
+            )
+        emit(
+            MetricEvent(
+                kind="hist",
+                name="agent/rollout/group/pass_rate_hist",
+                value=pass_rates,
+                x=global_step,
+                x_name="agent/rollout/step",
+            )
+        )

@@ -163,6 +163,44 @@ async def test_reused_rollout_emits_one_summary_per_batch(strategy_cls, isolated
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("strategy_cls", [chain_rollout.ChainRollout, step_rollout.StepRollout])
+async def test_caller_supplied_step_drives_the_metrics_axis(strategy_cls, isolated_runtime):
+    """A training loop owns the step; a fresh strategy per call cannot count one.
+
+    ``agent.run`` resolves a new strategy instance for every call, so a strategy's own
+    counter restarts at 1 each time and every step of a run lands on one x value —
+    which wandb then draws as a single bar instead of a curve.
+    """
+    for trainer_step in (7, 8, 9):
+        isolated_runtime.clear()
+        await strategy_cls().run(
+            agent=FakeAgent([["act"]]),
+            messages=[{"role": "user", "content": "O0"}],
+            max_turns=1,
+            num_chains=2,
+            global_step=trainer_step,
+        )
+        # Every event of the run shares the caller's step, per-chain records included:
+        # the step is resolved before any chain starts, not after they drain.
+        assert {event.x for event in isolated_runtime} == {trainer_step}
+        step_event = next(e for e in isolated_runtime if e.name == "agent/rollout/step")
+        assert step_event.value == trainer_step
+
+    isolated_runtime.clear()
+    steps = []
+    for _ in range(3):
+        await strategy_cls().run(
+            agent=FakeAgent([["act"]]),
+            messages=[{"role": "user", "content": "O0"}],
+            max_turns=1,
+            num_chains=1,
+        )
+        steps.append(next(e.value for e in isolated_runtime if e.name == "agent/rollout/step"))
+        isolated_runtime.clear()
+    assert steps == [1, 1, 1]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("strategy_cls,expected_roles", [
     (chain_rollout.ChainRollout, [
         ["system", "user", "assistant", "tool", "assistant", "tool"],

@@ -88,7 +88,6 @@ class StepRollout(Rollout):
         # Rollout metric reporting (mirrors ChainRollout): emit agent/rollout/* to the
         # monitor once the whole rollout is drained.
         self.metrics = RolloutMetrics()
-        self.global_step = 0
 
     # ---- L3: control flow -------------------------------------------------
 
@@ -107,6 +106,7 @@ class StepRollout(Rollout):
         generation_config: Optional[Dict[str, Any]] = None,
         max_concurrent_chains: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
+        global_step: Optional[int] = None,
         **kwargs,
     ) -> RunResult:
         """Roll out ``num_chains`` trajectories per task, async-concurrently.
@@ -114,11 +114,13 @@ class StepRollout(Rollout):
         Returns a :class:`RunResult` of one :class:`~agentfly.agents.types.Trajectory`
         per rollout. Conversations live in ``segments``; runtime ``steps`` provide
         the corresponding environment signals. Trajectories come back in
-        ``(group_idx, chain_idx)`` order (the spec order).
+        ``(group_idx, chain_idx)`` order (the spec order). ``global_step`` sets the
+        metrics x-axis (see ``Rollout.resolve_global_step``).
         """
         self.validate_run_args(max_turns, num_chains, max_concurrent_chains)
         self.agent = agent
         Monitor.ensure_started()
+        step = self.resolve_global_step(global_step)
 
         messages_list = MessagesList.from_data(messages)
         # Build the (task x num_chains) trajectory specs, sharing a group uid per task.
@@ -161,9 +163,8 @@ class StepRollout(Rollout):
         trajectories = list(results)
         # Shared end-of-rollout reporting reads the completed trajectories, including
         # episode durations for timing summaries and slowest-trajectory logging.
-        self.global_step += 1
         self.metrics.record_step(
-            global_step=self.global_step,
+            global_step=step,
             trajectories=trajectories,
         )
         return RunResult(trajectories=trajectories, rollout="step")

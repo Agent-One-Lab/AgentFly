@@ -113,6 +113,53 @@ including those with zero calls to that tool. If no counts are available, the
 corresponding events are omitted; reporting does not infer counts from messages.
 `agent/rollout/avg_segments` remains the average number of context segments.
 
+### The metrics step
+
+Every `agent/rollout/*` event is logged against the custom axis `agent/rollout/step`.
+A rollout strategy is constructed per `agent.run(...)` call, so it cannot count
+training steps on its own; a caller that has a step counter passes it:
+
+```python
+result = await agent.run(messages=messages, max_turns=10, global_step=trainer_step)
+```
+
+The verl trainer passes its `global_steps` for both training and validation rollouts,
+so the agent's curves share the trainer's axis, validation does not advance it, and a
+resumed run continues from its checkpoint's step. Without `global_step` the strategy
+falls back to counting its own runs — for a per-call strategy that is always `1`, and
+a metric with a single x value renders as a bar rather than a line. The step is fixed
+before any chain starts, so per-chain records (`agent/rollout/trajectory`,
+`agent/rollout/info`) and the end-of-rollout summaries share one x.
+
+### Per-task pass-rate distribution
+
+When a batch contains several rollouts per task, each task has a *pass rate*: the
+fraction of its samples whose reward reaches `RolloutMetrics.success_threshold`
+(default `1.0`). The shape of that distribution over tasks says whether the pool is
+worth training on — mass piled at 0 and 1 (a U-shape) means the sampled tasks are
+mostly always-failed or always-solved, and a task whose samples all score alike gives
+GRPO no advantage signal at all, however healthy the mean reward looks.
+
+| Metric | Meaning |
+| --- | --- |
+| `agent/rollout/group/pass_rate_hist` | Histogram of per-task pass rates for this step |
+| `agent/rollout/group/pass_rate_mean` | Mean per-task pass rate |
+| `agent/rollout/group/frac_all_fail` | Share of tasks no sample solved |
+| `agent/rollout/group/frac_all_pass` | Share of tasks every sample solved |
+| `agent/rollout/group/frac_mixed` | Share of tasks with both outcomes — the ones that produce gradient |
+| `agent/rollout/group/frac_zero_advantage` | Share of tasks whose samples all scored identically |
+| `agent/rollout/group/reward_std_mean` | Mean within-task reward spread |
+| `agent/rollout/group/num_groups`, `samples_per_task` | Size of the batch this was computed over |
+
+Samples are grouped by `Trajectory.group_id`, which both strategies stamp on every
+rollout of a task. Rollouts without a reward are skipped rather than counted as
+failures, and a rollout with no `group_id` forms its own single-sample task. The block
+is emitted only when some task actually has more than one sample: with one rollout per
+task (validation, or `num_chains=1`) every pass rate is 0 or 1 by construction and the
+distribution carries no information about difficulty. `frac_zero_advantage` and
+`reward_std_mean` read raw rewards, so they stay meaningful for continuous rewards
+that never reach the pass threshold.
+
 For a scored trajectory, both training converters broadcast the full outcome reward
 `R` to every retained training segment: `[R, ..., R]`, including earlier
 context-folded chain views.

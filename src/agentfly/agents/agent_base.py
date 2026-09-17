@@ -386,6 +386,7 @@ class BaseAgent(ABC):
         rollout_config: Optional[Dict[str, Any]] = None,
         generation_config: Optional[Dict[str, Any]] = {},
         context_config: Optional[ContextConfig] = None,
+        global_step: Optional[int] = None,
         **kwargs,
     ) -> RunResult:
         """Run the agent on a batch of messages and return the rollout result.
@@ -403,6 +404,13 @@ class BaseAgent(ABC):
                 reference (``"pkg.mod:MyRollout"``), or a ``Rollout`` instance.
             generation_config: The generation configuration.
             context_config: Optional settings for :class:`~agentfly.core.context.Context` (resource backend).
+            global_step: The caller's step counter, used as the x value of this run's
+                ``agent/rollout/*`` metrics. A training loop should pass its own global
+                step so the agent's curves share the trainer's axis, validation doesn't
+                advance the training axis, and a resumed run continues from its
+                checkpoint's step. Left ``None``, the strategy counts its own runs —
+                and since a strategy is constructed per call, that yields a constant
+                step unless the caller reuses one strategy instance.
             **kwargs: Additional keyword arguments forwarded to the rollout strategy
                 (e.g. ``num_chains``, ``max_concurrent_chains`` for the chain rollout).
 
@@ -427,6 +435,7 @@ class BaseAgent(ABC):
             max_turns=max_turns,
             generation_config=generation_config,
             context_config=context_config,
+            global_step=global_step,
             **kwargs,
         )
 

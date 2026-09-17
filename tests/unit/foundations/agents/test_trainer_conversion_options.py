@@ -97,6 +97,7 @@ def test_trainer_routes_diagnostic_only_to_conversion(
         agent_wrapper=SimpleNamespace(run=run, to_verl_dataproto=convert),
         actor_rollout_wg=SimpleNamespace(world_size=2),
         run_on_bg=lambda value: value,
+        global_steps=12,
     )
     trainer._agent_rollout_options = lambda: split_options(trainer)
     input_batch = SimpleNamespace(non_tensor_batch={"messages": ["task"]})
@@ -113,4 +114,7 @@ def test_trainer_routes_diagnostic_only_to_conversion(
         key: value for key, value in raw_options.items() if key != "log_token_drift"
     }
     assert calls[0][1]["rollout_config"] == expected_options
+    # The rollout is constructed per call and cannot count training steps itself, so
+    # both the training and validation paths must hand it the trainer's own step.
+    assert calls[0][1]["global_step"] == 12
     assert OmegaConf.to_container(config, resolve=True) == before

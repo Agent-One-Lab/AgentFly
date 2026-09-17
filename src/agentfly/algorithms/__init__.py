@@ -17,10 +17,32 @@ from .registry import (
     register_estimator,
 )
 from . import gigpo  # noqa: E402,F401  (registers the GiGPO estimators)
+from .opd import (  # noqa: E402  (teacher step, OPD estimator + metrics)
+    compute_opd_metrics,
+    compute_teacher_log_probs,
+)
+from .teacher import (  # noqa: E402  (teacher-scoring client for on-policy distillation)
+    ScoreStats,
+    SequenceTooLongError,
+    TeacherClient,
+    TeacherEndpoints,
+    TeacherError,
+    TeacherIdentityError,
+    TeacherUnavailableError,
+)
 
 __all__ = [
     "ESTIMATOR_REGISTRY",
     "LAYOUTS",
+    "ScoreStats",
+    "SequenceTooLongError",
+    "TeacherClient",
+    "TeacherEndpoints",
+    "TeacherError",
+    "TeacherIdentityError",
+    "TeacherUnavailableError",
+    "compute_opd_metrics",
+    "compute_teacher_log_probs",
     "estimator_layouts",
     "get_estimator",
     "has_estimator",

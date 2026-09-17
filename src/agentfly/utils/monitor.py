@@ -176,6 +176,11 @@ class WandbSink(BaseSink):
         if wandb.run is not None:
             payload = {evt.name: evt.value, **evt.tags}
             if evt.x is not None:
+                # Carry the axis value in the SAME payload as the metric. The monitor
+                # drains its queue asynchronously, so logging the axis as a separate
+                # wandb.log call lets another logger's commit land in between, which
+                # silently pairs each value with the previous step's axis value.
+                payload[evt.x_name] = evt.x
                 if evt.kind == "list":
                     data = [[x, y] for x, y in zip(evt.x, evt.value)]
                     table = wandb.Table(data=data, columns=[evt.x_name, evt.name])
@@ -200,6 +205,10 @@ class WandbSink(BaseSink):
                         wandb.define_metric(evt.x_name)
                         wandb.define_metric(evt.name, step_metric=evt.x_name)
                         self._defined_axes.add(key)
+                    if evt.kind == "hist":
+                        # A distribution over the run's samples (e.g. per-task pass
+                        # rates); wandb renders one histogram per x value.
+                        payload[evt.name] = wandb.Histogram(evt.value)
                     wandb.log(payload, commit=evt.commit)
             else:
                 wandb.log(payload, step=evt.step, commit=evt.commit)

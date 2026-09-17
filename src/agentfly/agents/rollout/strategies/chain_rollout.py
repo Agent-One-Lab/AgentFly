@@ -84,7 +84,6 @@ class ChainRollout(Rollout):
         self.reset()
         self.chains: Dict[str, Chain] = {}
         self.current_steps: Dict[str, Step] = {}
-        self.global_step = 0
         self.metrics = RolloutMetrics()
         self.agent = None
 
@@ -150,12 +149,14 @@ class ChainRollout(Rollout):
         generation_config: Optional[Dict[str, Any]] = None,
         max_concurrent_chains: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
+        global_step: Optional[int] = None,
         **kwargs,
     ) -> RunResult:
         """Drive the chain-based rollout and return its :class:`RunResult`.
 
         ``agent`` (the agent) is stashed for the run so the internal loop can reach
         agent state/hooks; the transient run-state is rebuilt each call.
+        ``global_step`` sets the metrics x-axis (see ``Rollout.resolve_global_step``).
         """
         self.agent = agent
         # Drain the rollout event stream. Training ignores the events themselves; the
@@ -168,6 +169,7 @@ class ChainRollout(Rollout):
             generation_config=generation_config,
             max_concurrent_chains=max_concurrent_chains,
             context_config=context_config,
+            global_step=global_step,
         ):
             pass
         return RunResult(trajectories=self.build_trajectories(agent), rollout="chain")
@@ -180,6 +182,7 @@ class ChainRollout(Rollout):
         generation_config: Optional[Dict[str, Any]] = None,
         max_concurrent_chains: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
+        global_step: Optional[int] = None,
         show_progress: bool = True,
     ):
         """Run all chains concurrently and yield their merged :mod:`.events` stream.
@@ -187,8 +190,9 @@ class ChainRollout(Rollout):
         This is the single shared rollout path: the per-chain generator :meth:`_run_chain` is the loop,
         and this method fans the per-chain event streams into one ``chain_id``-tagged
         stream via a queue. Each chain populates ``self.chains`` / ``self.current_steps``
-        as it ends; this method just relays events and, when drained, advances the
-        global step and emits step metrics.
+        as it ends; this method just relays events and, when drained, emits step metrics.
+        The metrics x is resolved before any chain starts so per-chain records and the
+        end-of-run summaries share one step.
 
         Args:
             show_progress: render a ``tqdm`` bar over chain completion. Disable when a
@@ -197,6 +201,7 @@ class ChainRollout(Rollout):
         self.validate_run_args(max_turns, num_chains, max_concurrent_chains)
         Monitor.ensure_started()
         self.reset()
+        step = self.resolve_global_step(global_step)
 
         messages_list = MessagesList.from_data(messages)
         chains, first_steps = self.initialize_chains(messages_list, num_chains)
@@ -261,9 +266,8 @@ class ChainRollout(Rollout):
             # chain error rather than silently dropping trajectories.
             raise errors[0]
 
-        self.global_step += 1
         self.metrics.record_step(
-            global_step=self.global_step,
+            global_step=step,
             trajectories=self.build_trajectories(self.agent),
         )
 

@@ -183,6 +183,28 @@ class Rollout(ABC):
             )
         self.max_consecutive_no_tool_calls = max_consecutive_no_tool_calls
         self.no_tool_call_message = no_tool_call_message or None
+        # Metrics x-axis; see resolve_global_step. A strategy instance is constructed per
+        # run, so this counter only ever carries one run's step unless a caller supplies
+        # its own — which is why callers that have a step counter should pass it.
+        self.global_step = 0
+
+    def resolve_global_step(self, global_step: Optional[int] = None) -> int:
+        """Fix this run's metrics x value, *before* any metric is recorded.
+
+        A caller that owns a step counter (the trainer's ``global_steps``) passes it and
+        it is used verbatim, so the agent's curves share the trainer's axis, validation
+        does not advance the training axis, and a resumed run continues from its
+        checkpoint's step instead of restarting at 1. ``None`` (standalone use: eval
+        scripts, notebooks) advances this instance's own counter instead.
+
+        Resolving up front — rather than incrementing once the rollout has drained —
+        also puts the per-chain records and the end-of-run summaries on the same x.
+        """
+        if global_step is None:
+            self.global_step += 1
+        else:
+            self.global_step = int(global_step)
+        return self.global_step
 
     def render_no_tool_call_message(self, *, truncated: bool = False) -> Optional[str]:
         """The nudge text for a tool-less turn, or ``None`` when nudging is disabled.
@@ -592,7 +614,12 @@ class Rollout(ABC):
         max_turns: int,
         generation_config: Optional[Dict[str, Any]] = None,
         context_config: Optional[Any] = None,
+        global_step: Optional[int] = None,
         **kwargs,
     ) -> RunResult:
-        """Drive the rollout for a batch of tasks and return a :class:`RunResult`."""
+        """Drive the rollout for a batch of tasks and return a :class:`RunResult`.
+
+        ``global_step`` is the caller's step counter for the metrics x-axis; see
+        :meth:`resolve_global_step`.
+        """
         ...

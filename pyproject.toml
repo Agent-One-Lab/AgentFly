@@ -70,6 +70,8 @@ dependencies = [
     "diffusers",
     "google-genai",
     "chess",
+    # Teacher-scoring client (agentfly.algorithms.teacher) for on-policy distillation.
+    "aiohttp",
 ]
 
 [project.scripts]

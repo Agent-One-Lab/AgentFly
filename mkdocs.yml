@@ -112,6 +112,7 @@ nav:
     - features/system_architecture.md
     - features/agent_rollout.md
     - features/training_consistency.md
+    - features/on_policy_distillation.md
     - features/tool_system.md
     - features/tool_for_class_method.md
     - features/reward_system.md
