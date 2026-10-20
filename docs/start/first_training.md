@@ -47,10 +47,18 @@ The script itself:
 
 Execute the training script. This training script run agent RL in a single node with one GPU. We have wrapped up everything, including tools, rewards, and training data. Run the following command to start training.
 
+```bash
+# from the repository root (the scripts use paths relative to it)
+bash examples/train_scripts/train_example.sh
 ```
-cd verl
-bash run_agents/train_example.sh
-```
+
+!!! warning "Shared nodes"
+    The example scripts begin with `ray stop` and start a fresh Ray head, which also stops any
+    other Ray cluster your user runs on the node, and `agentfly train` first removes this node's
+    stale `agentfly-*` enroot containers. When other jobs share the node, set
+    `AF_ENROOT_CLEANUP_ON_START=0`, remove the `ray stop` / `ray start` lines, and run with
+    `RAY_ADDRESS=local`: the trainer then starts a private Ray cluster that ends with it
+    (restrict its GPUs with `CUDA_VISIBLE_DEVICES`).
 
 The training progress will be logged to Weights & Biases if configured. You can monitor metrics like reward, loss, and KL divergence during training.
 

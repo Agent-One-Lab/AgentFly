@@ -283,6 +283,28 @@ def test_options_defaults_and_overrides():
     assert opd_options({"opd": {"clamp": 2}}) == {**OPD_DEFAULTS, "clamp": 2.0}
 
 
+def test_metrics_report_component_scales():
+    """Both advantage terms are logged on their own RMS scale — even at task_reward_coef = 0 —
+    so the coefficient can be read off as distill_rms / grpo_rms before enabling it."""
+    import numpy as np
+
+    ids, action_mask, _ = multi_turn_rows()
+    trained = action_mask > 0
+    old = torch.zeros(ids.shape)
+    teacher = torch.full(ids.shape, -0.25)                       # ratio = -0.25 on every position
+    rewards = torch.zeros(ids.shape)
+    rewards[0, -1], rewards[1, -1] = 1.0, 0.0                    # one pass, one fail in the group
+    uid = np.array(["g0", "g0"])
+    batch = opd_batch(ids, action_mask, teacher, old, token_level_rewards=rewards, uid=uid)
+    batch.batch["advantages"], _ = compute_opd_advantage(batch, {}, "per_segment")
+    metrics = compute_opd_metrics(batch, {})
+
+    assert metrics["opd/distill_rms"] == pytest.approx(0.25)     # |clamped ratio| on trained tokens
+    assert metrics["opd/grpo_rms"] > 0.0                         # logged although the coef is 0
+    assert metrics["opd/adv_rms"] == pytest.approx(
+        float(batch.batch["advantages"][trained].pow(2).mean().sqrt()))
+
+
 def test_metrics_split_kl_by_thinking():
     ids, action_mask, think = multi_turn_rows()
     trained = action_mask > 0

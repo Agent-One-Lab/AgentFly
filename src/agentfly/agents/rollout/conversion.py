@@ -5,15 +5,18 @@ runtime-step projections and trainer-specific fields differ. No converter reads
 the agent's last-run caches or constructs a rollout strategy.
 """
 
+import logging
+from collections import Counter
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-from collections import Counter
 
 from ...utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
 from ..types import RunResult
-from ..utils.action_format import action_format_valid, message_text
+from ..utils.action_format import action_format_valid, generation_opens_think, message_text
 from ..utils.tokenizer import tokenize_trajectories
+
+logger = logging.getLogger(__name__)
 
 
 def result_to_dataproto(
@@ -176,9 +179,11 @@ def chain_to_dataproto(
     full ``batch`` / ``non_tensor_batch`` / ``meta_info`` contract this produces.
     """
     import torch  # lazy: heavy import, only needed when building tensors
+
     from ...verl.protocol import DataProto  # lazy: pulls the verl/torch/ray stack
 
     tokenize = tokenize or tokenize_trajectories
+    think_opened = generation_opens_think(agent)
     trajectories = run_result.trajectories
     inputs, row_indices, repeat_times, pad_size = build_segment_batch(
         agent,
@@ -198,7 +203,7 @@ def chain_to_dataproto(
             ]
             drift = token_drift_stats(agent, conversations, inputs, tokenize=tokenize)
         except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
-            print(f"[ChainRollout] token-drift diagnostic failed: {e}", flush=True)
+            logger.warning(f"[ChainRollout] token-drift diagnostic failed: {e}")
 
     # Per-turn rollout signals projected from each row's trajectory ``steps``
     # (turn order; each Step carries its ToolResult). Only these clean arrays
@@ -239,7 +244,7 @@ def chain_to_dataproto(
         # no-tool-call turn is invalid here too (``Step.is_action_valid`` would say 1.0).
         step_invalids_list.append(
             [
-                1.0 - action_format_valid(message_text(s.messages.messages[-1]))
+                1.0 - action_format_valid(message_text(s.messages.messages[-1]), think_opened)
                 if s.messages.messages
                 else 1.0
                 for s in steps
@@ -291,15 +296,12 @@ def chain_to_dataproto(
         capped, no_tool, nudges = (
             _meta_sum("capped_turns"), _meta_sum("no_tool_call_turns"), _meta_sum("no_tool_call_nudges"),
         )
-        print(
-            f"[ChainRollout] batch: rows={n_real} (+{pad_size} pad) trajs={len(trajectories)} "
+        logger.info(f"[ChainRollout] batch: rows={n_real} (+{pad_size} pad) trajs={len(trajectories)} "
             f"won={won}/{len(trajectories)} finish={dict(finishes)} "
-            f"capped_turns={capped} no_tool_call_turns={no_tool} nudges={nudges}{drift_str}",
-            flush=True,
-        )
+            f"capped_turns={capped} no_tool_call_turns={no_tool} nudges={nudges}{drift_str}")
         rollout_stats = {"capped_turns": capped, "no_tool_call_turns": no_tool, "no_tool_call_nudges": nudges}
     except Exception as e:  # noqa: BLE001 — debug print must never break the run
-        print(f"[ChainRollout] batch summary failed: {e}", flush=True)
+        logger.warning(f"[ChainRollout] batch summary failed: {e}")
     meta_info = {"use_agent": True, "layout": "per_segment", "repeat_times": repeat_times}
     if drift:
         meta_info["token_drift"] = drift
@@ -336,6 +338,7 @@ def step_to_dataproto(
     from ...verl.protocol import DataProto  # lazy: pulls the verl/torch/ray stack
 
     tokenize = tokenize or tokenize_trajectories
+    think_opened = generation_opens_think(agent)
 
     # The step-only invariant and pre-action anchors remain in this exporter.
     # Shared conversion uses segments, never these runtime records.
@@ -391,7 +394,7 @@ def step_to_dataproto(
             else:
                 drift = token_drift(agent, conversations, inputs)
         except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
-            print(f"[StepRollout] token-drift diagnostic failed: {e}", flush=True)
+            logger.warning(f"[StepRollout] token-drift diagnostic failed: {e}")
 
     inputs["traj_uid"] = np.array([t.chain_id for t in row_traj], dtype=object)
     anchors = np.empty(len(row_anchor), dtype=object)
@@ -415,7 +418,7 @@ def step_to_dataproto(
     # format-invalid here as well (subsumes the earlier tool_result-None override).
     inputs["is_action_valid"] = np.array(
         [
-            action_format_valid(message_text(segment.messages[-1]))
+            action_format_valid(message_text(segment.messages[-1]), think_opened)
             if segment.messages
             else 0.0
             for segment in row_segment
@@ -446,17 +449,14 @@ def step_to_dataproto(
             ) + "}"
         # Format-valid fraction over real rows (verl-agent's ``valid_action_ratio``).
         valid_frac = float(np.mean(inputs["is_action_valid"][:n_real])) if n_real else 0.0
-        print(
-            f"[StepRollout] per_step batch: rows={n_real} (+{pad_size} pad) "
+        logger.info(f"[StepRollout] per_step batch: rows={n_real} (+{pad_size} pad) "
             f"trajs={n_traj} training_rows/traj[min/mean/max]="
             f"{min(lens)}/{sum(lens)/max(1,n_traj):.1f}/{max(lens)} "
             f"won={won}/{n_traj} ({100.0*won/max(1,n_traj):.1f}%) "
             f"valid_frac={valid_frac:.3f} finish={dict(finishes)}"
-            f"{drift_str}",
-            flush=True,
-        )
+            f"{drift_str}")
     except Exception as e:  # noqa: BLE001 — debug print must never break the run
-        print(f"[StepRollout] batch summary failed: {e}", flush=True)
+        logger.warning(f"[StepRollout] batch summary failed: {e}")
 
     meta_info = {"use_agent": True, "layout": "per_step", "repeat_times": repeat_times}
     if drift:
@@ -465,13 +465,14 @@ def step_to_dataproto(
 
 
 def token_drift_stats(
-    agent, conversations, inputs, max_rows: int = 64, *, tokenize: Optional[Callable] = None,
+    agent, conversations, inputs, max_rows: Optional[int] = None, *, tokenize: Optional[Callable] = None,
 ):
     """Diagnostic: how much the spliced (sampled) assistant ids differ from what
     re-tokenizing the decoded text would have produced — i.e. the retokenization
     drift that training silently absorbed before ``token_ids`` were carried.
 
-    For up to ``max_rows`` rows whose assistant turn carries ``token_ids``, compare
+    For every row whose assistant turn carries ``token_ids`` (or the first
+    ``max_rows`` of them), compare
     the action-masked span of the real ``inputs`` (spliced) against a fresh
     tokenization of the same conversation with ``token_ids`` removed (pure text
     path). ``frac_tokens_differ`` is ``1 - SequenceMatcher.ratio()`` (an

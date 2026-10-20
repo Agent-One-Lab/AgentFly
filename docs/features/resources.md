@@ -17,12 +17,13 @@ In this system, environments are one type of resource alongside other runtime un
 
 ## Resource Types
 
-AgentFly currently exposes four spec dataclasses from `agentfly.resources`:
+AgentFly exposes these spec dataclasses from `agentfly.resources`:
 
-- **`ContainerResourceSpec`** — Enroot-backed containers, including pre-built environment images. Tools/rewards request these to get an isolated runtime they can `step()` or `run_cmd()` against. The `category` field discriminates between generic containers (`"container"`) and built-in environment categories (`"python_env"`, `"alfworld"`, `"webshop"`, `"scienceworld"`). Configurable fields include `image`, `cpu_count`, `mem_limit`, `gpus`, `ports`, `mount`, etc.
+- **`ContainerResourceSpec`** — Containers, including pre-built environment images. They run on enroot by default; set `container_engine` to `"docker"` or `"daytona"` (or the `AF_CONTAINER_ENGINE` environment variable) to use those instead. Tools/rewards request these to get an isolated runtime they can `step()` or `run_cmd()` against. The `category` field discriminates between generic containers (`"container"`) and built-in environment categories (`"python_env"`, `"alfworld"`, `"webshop"`, `"scienceworld"`). Configurable fields include `image`, `cpu_count`, `mem_limit`, `gpus`, `ports`, `mount`, etc.
 - **`VLLMModelResourceSpec`** — Locally launched vLLM model service. Used when a tool/reward needs to call out to a model served from the same cluster (e.g., a separate judge model). Fields include `model_name_or_path`, `tensor_parallel_size`, `pipeline_parallel_size`, `data_parallel_size`, `gpu_memory_utilization`, `template`.
 - **`APIModelResourceSpec`** — A pre-existing OpenAI-compatible HTTP endpoint. No process is launched; the engine just records connection details (`base_url`, `host`, `api_key`, `request_timeout`). Use this when calling an external service (OpenAI, Anthropic, in-house API) from a tool or reward.
-- **`BaseResourceSpec`** — Base class. You normally use one of the three above; subclass `BaseResourceSpec` only when adding a new resource kind.
+- **`LocalEnvResourceSpec`** — An in-process Python environment: no container and no extra process. `env_cls_path` is the dotted path of a `BaseEnv` subclass, which is created with `init_kwargs` and started; the engine pools instances the same way as containers (`max_global_num`). This is the lightest way to give a tool state, e.g. the chess tools' `ChessPuzzleSpec = LocalEnvResourceSpec(env_cls_path="agentfly.envs.chess_env.ChessPuzzleEnv", max_global_num=8)` in `agentfly.envs.chess_env`.
+- **`BaseResourceSpec`** — Base class. You normally use one of the specs above; subclass `BaseResourceSpec` only when adding a new resource kind.
 
 Predefined environment specs (built on `ContainerResourceSpec`) are exported by the corresponding env modules:
 
@@ -30,6 +31,7 @@ Predefined environment specs (built on `ContainerResourceSpec`) are exported by 
 - `ALFWorldSpec` — `agentfly.envs.alfworld_env`
 - `WebShopSpec` — `agentfly.envs.webshop_text_env`
 - `ScienceWorldSpec` — `agentfly.envs.scienceworld_env`
+- `ChessPuzzleSpec` — `agentfly.envs.chess_env` (a `LocalEnvResourceSpec`)
 
 These are the typical specs you pass to `context.acquire_resource(spec=...)` from tools and rewards.
 
@@ -128,7 +130,7 @@ Both `code_interpreter` (tool) and `code_reward_test` (reward) call `context.acq
 `webshop_reward` queries the WebShop environment's reward via the same resource the WebShop tools use:
 
 ```python
---8<-- "src/agentfly/rewards/webshop_reward.py:webshop_reward_example"
+--8<-- "src/agentfly/rewards/webshop_rewards.py:webshop_reward_example"
 ```
 
 Same pattern: `acquire_resource(spec=WebShopSpec, ...)` → `await env.step(...)`. The reward never needs to know how the tools acquired or set up the env.

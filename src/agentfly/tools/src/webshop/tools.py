@@ -1,3 +1,11 @@
+"""WebShop tools: browse a containerized WebShop store.
+
+``webshop_browser`` performs a search or a click; ``webshop_browser_action`` takes one
+``search[...]`` / ``click[...]`` action in verl-agent's format and returns the page with the
+admissible-action menu, reporting ``won`` and the per-step reward. The formatting helpers
+mirror verl-agent's so observations match its prompts.
+"""
+
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -179,7 +187,3 @@ async def webshop_browser_action(action: str, context: Context):
         }
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-if __name__ == "__main__":
-    print(webshop_browser.schema)

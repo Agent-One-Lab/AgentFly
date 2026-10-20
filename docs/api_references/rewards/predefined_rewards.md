@@ -11,10 +11,10 @@ The following are predefined reward functions.
 
 ::: agentfly.rewards.math_equal_reward_tool
 
-::: agentfly.rewards.webshop_reward.webshop_reward
+::: agentfly.rewards.webshop_rewards.webshop_reward
 
-::: agentfly.rewards.webshop_reward.webshop_episode_reward
+::: agentfly.rewards.webshop_rewards.webshop_episode_reward
 
 ::: agentfly.rewards.alfworld_episode_reward
 
-::: agentfly.rewards.scienceworld_reward.scienceworld_reward
+::: agentfly.rewards.scienceworld_rewards.scienceworld_reward

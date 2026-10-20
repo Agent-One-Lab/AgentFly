@@ -47,7 +47,7 @@ The README's "Customized Training" section has a minimal skeleton.
 
 ## Step 3: Define Tools (or Reuse Existing Ones)
 
-If an existing tool fits — `calculator`, `code_interpreter`, `asyncdense_retrieve`, `webshop_browser_action`, the alfworld/scienceworld tools — just import it from `agentfly.tools`. No new code needed.
+If an existing tool fits — `calculator`, `code_interpreter`, `async_dense_retrieve`, `webshop_browser_action`, the alfworld/scienceworld tools — just import it from `agentfly.tools`. No new code needed.
 
 For a new tool, decorate a function with `@tool`:
 
@@ -140,7 +140,7 @@ If the reward never sees a tool call or always returns the same value, fix that 
 
 ## Step 6: Wire Up a Training Script
 
-Copy an existing training script (e.g. [`examples/train_scripts/webshop/train_webshop.sh`](https://github.com/Agent-One-Lab/AgentFly/blob/main/examples/train_scripts/webshop/train_webshop.sh)) and change the parts specific to your task:
+Copy an existing training script (e.g. [`examples/train_scripts/webshop/train_webshop_chain.sh`](https://github.com/Agent-One-Lab/AgentFly/blob/main/examples/train_scripts/webshop/train_webshop_chain.sh)) and change the parts specific to your task:
 
 | Override | What to set it to |
 |---|---|

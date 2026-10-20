@@ -20,10 +20,10 @@ creates /run_tests.sh so reward_from_container can run it. For "swesmith", setup
 requires ds to build the test script.
 """
 
+import asyncio
+import concurrent.futures
 import json
 import re
-import concurrent.futures
-import asyncio
 from types import SimpleNamespace
 
 # Match R2E-Gym Docker runtime PATH for /run_tests.sh
@@ -142,6 +142,7 @@ def setup_container_for_reward(
         if ds is None:
             raise ValueError("setup_container_for_reward(..., dataset='swesmith') requires ds")
         import base64
+
         from r2egym.swesmith.utils import get_test_command
 
         test_command, _ = get_test_command(ds)
@@ -574,6 +575,7 @@ async def setup_container_for_reward_async(
             raise ValueError("swebench_verified setup needs ds to build /run_tests.sh")
 
         import base64
+
         from swebench.harness.test_spec.test_spec import make_test_spec
 
         test_spec = make_test_spec(ds)
@@ -589,6 +591,7 @@ async def setup_container_for_reward_async(
         if ds is None:
             raise ValueError("setup_container_for_reward_async(..., dataset='swesmith') requires ds")
         import base64
+
         from r2egym.swesmith.utils import get_test_command
 
         test_command, _ = get_test_command(ds)

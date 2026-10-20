@@ -125,14 +125,3 @@ async def chess_get_legal_moves(context: Context):
         return result
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-if __name__ == "__main__":
-    print("Chess Tools Schemas:")
-    print("=" * 50)
-    print("\nchess_move schema:")
-    print(chess_move.schema)
-    print("\nchess_get_state schema:")
-    print(chess_get_state.schema)
-    print("\nchess_get_legal_moves schema:")
-    print(chess_get_legal_moves.schema)

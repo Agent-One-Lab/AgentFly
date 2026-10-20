@@ -1,7 +1,8 @@
+"""ScienceWorld reward: ``scienceworld_reward`` gives 10 when the rollout's ScienceWorld task is completed (score 1), else 0."""
+
 from ..core import Context
 from ..envs.scienceworld_env import ScienceWorldSpec
 from .reward_base import reward
-from typing import List
 
 
 @reward(name="scienceworld_reward")
@@ -18,7 +19,13 @@ async def scienceworld_reward(final_response: str, context: Context) -> dict:
         dict: A dictionary containing the reward and the observation output after taking the 'get_reward' step.
     """
     trajectory = context.trajectory
-    if len(trajectory) < 4:
+    # With context folding, the trajectory is a list of segments (each a list of
+    # messages), so len(trajectory) would count segments rather than messages.
+    if context.trajectory_format == "segmented":
+        num_messages = sum(len(segment) for segment in trajectory)
+    else:
+        num_messages = len(trajectory)
+    if num_messages < 4:
         return {
             "reward": 0.0,
             "acc": 0.0,

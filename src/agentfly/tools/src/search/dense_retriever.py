@@ -1,14 +1,25 @@
-import os
+"""Dense Wikipedia retrieval, simple variant: a synchronous-model E5 + FAISS retriever and the ``dense_retrieve`` tool.
 
-import datasets
-from torch import Tensor
-from transformers import AutoModel, AutoTokenizer
+Same data as :mod:`.async_dense_retriever` (wiki-18 corpus, E5 embeddings, FAISS index) without
+its background loading and caching.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING
 
 from ...decorator import tool
 from .faiss_indexer import Indexer
 
+# torch / transformers / datasets are imported where a retriever is built (see async_dense_retriever).
+if TYPE_CHECKING:
+    from torch import Tensor
+
 
 def load_corpus(corpus_path: str):
+    import datasets
+
     corpus = datasets.load_dataset(
         "json", data_files=corpus_path, split="train", num_proc=4
     )
@@ -25,6 +36,8 @@ class DenseRetriever:
         self.corpus = load_corpus(corpus_file)
         ids = [int(id) for id in self.corpus["id"]]
         self.indexer = Indexer(index_file=index_file, ids=ids)
+        from transformers import AutoModel, AutoTokenizer
+
         self.tokenizer = AutoTokenizer.from_pretrained("intfloat/e5-base-v2")
         self.model = AutoModel.from_pretrained("intfloat/e5-base-v2")
 
@@ -65,6 +78,9 @@ async def dense_retrieve(query: str):
         query = "query: " + query
     global GLOBAL_RETRIEVER
     if GLOBAL_RETRIEVER is None:
+        from ....utils.download import ensure_tool_data
+
+        ensure_tool_data("async_dense_retrieve")  # same corpus + index, if missing (approval-gated)
         GLOBAL_RETRIEVER = DenseRetriever(
             corpus_file=os.path.join(
                 AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"

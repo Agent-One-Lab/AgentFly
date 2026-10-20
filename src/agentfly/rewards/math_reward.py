@@ -1,3 +1,12 @@
+"""Math rewards: compare a final answer with the reference.
+
+Answers are extracted (``\\boxed{}`` or the last number), normalized, and compared symbolically
+(SymPy, including LaTeX). The rewards differ in what else they require: ``math_equal_reward``
+(the answer only), ``math_equal_reward_tool`` and ``math_string_equal_reward_tool`` (a tool call
+too), ``math_reward_thought_with_tool`` and ``math_equal_reward_think`` (thinking and tool use).
+"""
+
+import logging
 import re
 import sys
 from itertools import islice, zip_longest
@@ -9,6 +18,8 @@ from tenacity import retry, stop_after_delay
 
 from .reward_base import reward
 
+logger = logging.getLogger(__name__)
+
 try:
     from math_verify import parse, verify
 except ImportError:
@@ -19,7 +30,6 @@ sys.modules["sympy.mpmath"] = mpmath
 
 
 def extract_final_answers_batch(responses: List[str]) -> List[str]:
-    # pattern = re.compile(r"(\\boxed{.*})")
     pattern = re.compile(r"<answer>.*?(\\boxed{.*}).*?</answer>", re.DOTALL)
     results = []
     for response in responses:
@@ -135,7 +145,6 @@ def normalize_final_answer(final_answer: str) -> str:
     Normalize a final answer to a quantitative reasoning question.
     This code comes from https://arxiv.org/pdf/2206.14858.pdf, page18.
     """
-    # final_answer = final_answer.split("=")[-1]
 
     for before, after in SUBSTITUTIONS:
         final_answer = final_answer.replace(before, after)
@@ -285,25 +294,20 @@ def _fix_sqrt(string):
 def _strip_string(string):
     # linebreaks
     string = string.replace("\n", "")
-    # print(string)
 
     # remove inverse spaces
     string = string.replace("\\!", "")
-    # print(string)
 
     # replace \\ with \
     string = string.replace("\\\\", "\\")
-    # print(string)
 
     # replace tfrac and dfrac with frac
     string = string.replace("tfrac", "frac")
     string = string.replace("dfrac", "frac")
-    # print(string)
 
     # remove \left and \right
     string = string.replace("\\left", "")
     string = string.replace("\\right", "")
-    # print(string)
 
     # Remove circ (degrees)
     string = string.replace("^{\\circ}", "")
@@ -356,7 +360,7 @@ def _strip_string(string):
 
 def is_equiv(str1, str2, verbose=False) -> bool:
     if str1 is None and str2 is None:
-        print("WARNING: Both None")
+        logger.warning("is_equiv: both answers are None")
         return True
     if str1 is None or str2 is None:
         return False
@@ -365,7 +369,7 @@ def is_equiv(str1, str2, verbose=False) -> bool:
         ss1 = _strip_string(str1)
         ss2 = _strip_string(str2)
         if verbose:
-            print(ss1, ss2)
+            logger.debug("is_equiv: %s vs %s", ss1, ss2)
         try:
             return float(ss1) == (float(ss2))
         except Exception:  # noqa
@@ -658,6 +662,11 @@ def math_equal_reward_think(
 def math_string_equal_reward_tool(
     final_response: str, answer: str, trajectory: List[Dict]
 ) -> float:
+    """Reward a math answer that was reached using a tool.
+
+    Returns 0.0 if the trajectory has no tool call, 1.0 if the last number in
+    ``final_response`` equals ``answer`` (compared as strings), and 0.1 otherwise.
+    """
     def extract_last_number(s: str):
         matches = re.findall(r"\d+", s)  # find all sequences of digits
         return matches[-1] if matches else None
@@ -676,10 +685,3 @@ def math_string_equal_reward_tool(
             return 1.0
         else:
             return 0.1
-
-
-if __name__ == "__main__":
-    result = symbolic_math_equal(
-        "I got answer is \\boxed{2/3}", "May be it's \\boxed{\\frac{2}{3}}"
-    )
-    print(result)

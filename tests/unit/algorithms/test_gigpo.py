@@ -96,6 +96,39 @@ def test_per_step_matches_verl_agent(verl_agent, mode):
     assert torch.equal(adv, ret)
 
 
+def test_zero_step_weight_with_std_is_verl_agent_grpo(verl_agent, monkeypatch):
+    """The WebShop ``grpo`` arm (``step_advantage_w=0``, ``mean_std_norm``) is verl-agent's GRPO.
+
+    verl-agent's GRPO baseline runs ``adv_estimator=grpo`` (``norm_adv_by_std_in_grpo=True``)
+    on the same penalised rewards; its ``core_algos`` is loaded from file with its one verl
+    import stubbed.
+    """
+    import importlib.util
+
+    utils = types.ModuleType("verl.utils")
+    monkeypatch.setitem(sys.modules, "verl.utils", utils)
+    monkeypatch.setitem(sys.modules, "verl.utils.torch_functional", types.ModuleType("verl.utils.torch_functional"))
+    utils.torch_functional = sys.modules["verl.utils.torch_functional"]
+    spec = importlib.util.spec_from_file_location(
+        "verl_agent_core_algos", f"{_VERL_AGENT}/verl/trainer/ppo/core_algos.py")
+    core_algos = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core_algos)
+
+    d = _synthetic_steps()
+    adv, _ = per_step(
+        token_level_rewards=d["tlr"], response_mask=d["response_mask"], step_env_rewards=d["step_r"],
+        anchor_obs=d["anchor"], uid=d["uid"], traj_uid=d["traj"], is_action_valid=d["valid"],
+        gamma=0.95, step_advantage_w=0.0, mode="mean_std_norm", invalid_action_penalty_coef=0.1,
+    )
+    tlr = d["tlr"].clone()
+    tlr[torch.arange(d["B"]), -1] -= torch.tensor(0.1 * (1.0 - d["valid"]))
+    ref, _ = core_algos.compute_grpo_outcome_advantage(
+        token_level_rewards=tlr, response_mask=d["response_mask"], index=d["uid"], traj_index=d["traj"],
+        norm_adv_by_std_in_grpo=True,
+    )
+    assert torch.allclose(adv, ref, atol=1e-5), f"max diff {(adv - ref).abs().max()}"
+
+
 def test_common_normalisers_are_verl_agent_verbatim(verl_agent):
     """The shared normalisers give verl-agent's numbers on the same inputs."""
     V = verl_agent

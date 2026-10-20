@@ -31,14 +31,9 @@ def _install():
 
 
 
-# Apply patch BEFORE importing eval_api, so swebench/swesmith see patched docker when they import it.
-# Do not run for now as it will replace docker with enroot, and we are not using swesmith now.
-# try:
-#     _install()
-# except ImportError as e:
-#     raise e
+# _install() must run BEFORE importing eval_api, so swebench/swesmith see the patched docker.
+# It is not called for now: it replaces docker with enroot process-wide, and swesmith is unused.
 
-from .eval_api import evaluate_swesmith
-
+from .eval_api import evaluate_swesmith  # noqa: E402  (must follow the patch helpers above)
 
 __all__ = ["evaluate_swesmith"]

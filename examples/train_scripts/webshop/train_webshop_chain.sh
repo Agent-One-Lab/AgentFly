@@ -6,8 +6,9 @@
 #   bash train_webshop_chain.sh gigpo [1.5B|3B|7B]   # multi-turn GiGPO (step advantage on turn spans)
 #
 # Everything the ENVIRONMENT and estimator see is matched to train_webshop_gigpo.sh (the step
-# arm): image, goals, val ids 0-499, reward (verl-agent's: 10 x success), penalty 0.1,
-# gamma 0.95, gigpo_mode=mean_norm, n=8, train_batch=16, 150 steps, max_turns=15, max_response=512,
+# arm): image, verl-agent-replayed train/val tasks, reward (verl-agent's: 10 x success), penalty 0.1,
+# gamma 0.95, gigpo_mode (gigpo: mean_norm; grpo: mean_std_norm = verl-agent's GRPO with
+# norm_adv_by_std_in_grpo=True), n=8, train_batch=16, 150 steps, max_turns=15, max_response=512,
 # train temp 1.0 / val temp 0.4, always-step projection, native Qwen template.
 #
 # The ONE manipulated factor is the ROLLOUT: one training row per trajectory, the model sees
@@ -19,16 +20,27 @@
 
 arm=${1:-grpo}
 size=${2:-1.5B}
-if   [[ "$arm" == "gigpo" ]]; then step_advantage_w=1.0
-elif [[ "$arm" == "grpo"  ]]; then step_advantage_w=0.0
+tag=${3:-}                          # optional suffix, e.g. "rerun": keeps a repeat run's
+                                    # wandb name and checkpoints separate from the original
+if   [[ "$arm" == "gigpo" ]]; then step_advantage_w=1.0; gigpo_mode=mean_norm
+elif [[ "$arm" == "grpo"  ]]; then step_advantage_w=0.0; gigpo_mode=mean_std_norm
 else echo "usage: $0 [grpo|gigpo] [1.5B|3B|7B]"; exit 1; fi
 if [[ "$size" != "1.5B" && "$size" != "3B" && "$size" != "7B" ]]; then
     echo "usage: $0 [grpo|gigpo] [1.5B|3B|7B]"; exit 1; fi
 
 export VLLM_USE_V1=1
+# See train_webshop_gigpo.sh: vLLM holds its fraction during training, so 7B (16k context, vocab-sized
+# logits) gets a smaller KV cache to leave the actor room. Rollout cache only, not the training math.
+gpu_memory_utilization=0.75
+[[ "$size" == "7B" ]] && gpu_memory_utilization=0.6
 export WEBSHOP_IMAGE=reasonwang/webshop-env:small   # before ray start (workers inherit it)
-train_dataset="./data/rlhf/webshop/webshop_train_small.json"
-eval_dataset="./data/rlhf/webshop/webshop_val_small.json"
+# Tasks replayed from verl-agent's own env workers and draws (see
+# examples/data_preprocess/prepare_webshop_verl_agent.py): the train file is verl-agent's exact
+# training tasks in order (16 per step x 150 steps, read with data.shuffle=False); the val file is
+# the 512 tasks of its first two evaluations. Each row carries its goal + product prices, served per
+# session by the mounted simulator server (AF_WEBSHOP_SERVER_MOUNT).
+train_dataset="./data/rlhf/webshop/webshop_train_verl_agent_small.json"
+eval_dataset="./data/rlhf/webshop/webshop_val_verl_agent_small.json"
 set -x
 
 head_node_ip=$(hostname --ip-address)
@@ -42,11 +54,10 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port --num-cpus 192 -
 model=Qwen/Qwen2.5-${size}-Instruct
 lr=5e-7
 gamma=0.95
-gigpo_mode=mean_norm
 penalty_coef=0.1
 num_chains=8
 train_batch_size=16                 # x8 chains = 128 trajectories per step
-val_batch_size=500                  # all val task ids 0-499
+val_batch_size=512                  # verl-agent's first two evaluations (2 x 256)
 ppo_mini_batch_size=8               # TRAJECTORY rows: 16 optimizer steps per training step
 max_turns=15
 max_response_length=512
@@ -68,7 +79,7 @@ system_prompt="You are an expert autonomous agent operating in the WebShop e‑c
 You should first reason step-by-step about the current situation, then think carefully which admissible action best advances the shopping goal. This reasoning process MUST be enclosed within <think> </think> tags. Once you've finished your reasoning, you should choose an admissible action for the current step and present it within <action> </action> tags."
 
 total_training_steps=150            # matched to the step arm (verl-agent total_epochs=150)
-experiment_name="Qwen2.5-${size}-webshop-chain-${arm}-v2"
+experiment_name="Qwen2.5-${size}-webshop-chain-${arm}-v3${tag:+-$tag}"
 project_name="Open"
 
 python3 -m agentfly.cli train \
@@ -81,6 +92,7 @@ python3 -m agentfly.cli train \
     data.val_files=${eval_dataset} \
     data.val_batch_size=$val_batch_size \
     data.train_batch_size=$train_batch_size \
+    data.shuffle=False \
     agent.use_agent=True \
     agent.init_config.agent_type=$agent_type \
     agent.init_config.model_name_or_path=$model \
@@ -110,7 +122,7 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.75 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=$gpu_memory_utilization \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.val_kwargs.temperature=0.4 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \

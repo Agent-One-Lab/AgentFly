@@ -14,7 +14,6 @@ import chess.engine
 from ..resources import LocalEnvResourceSpec
 from .env_base import BaseEnv
 
-
 ChessPuzzleSpec = LocalEnvResourceSpec(
     env_cls_path="agentfly.envs.chess_env.ChessPuzzleEnv",
     max_global_num=8,

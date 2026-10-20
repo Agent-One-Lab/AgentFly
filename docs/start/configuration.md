@@ -15,7 +15,7 @@ All per-user state lives under `AF_HOME` (default `~/.agentfly`), following the
 | `AF_HOME` | `~/.agentfly` | Root for all per-user state. Set this to relocate everything at once. |
 | `AF_CACHE_DIR` | `$AF_HOME/cache` | Downloaded artifacts (search corpus + FAISS index, enroot images, jinja templates). |
 | `AF_DATA_DIR` | `$AF_HOME/data` | Runtime data (e.g. Redis data dir). |
-| `AF_CONFIG_DIR` | `$AF_HOME/config` | User-editable config files. Packaged defaults (`search.yaml`, `redis/redis.conf`, `vllm.yaml`, `code.yaml`) are seeded here on first run if missing — edit `~/.agentfly/config/search.yaml` to set your search API keys. |
+| `AF_CONFIG_DIR` | `$AF_HOME/config` | User-editable config files. Packaged defaults (`search.yaml`, `redis/redis.conf`) are seeded here on first run if missing — edit `~/.agentfly/config/search.yaml` to set your search API keys. |
 
 !!! note "Config lives under `AF_HOME` now"
     In earlier versions `AF_CONFIG_DIR` pointed *inside the installed package*.

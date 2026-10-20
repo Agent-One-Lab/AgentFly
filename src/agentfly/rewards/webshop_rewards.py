@@ -1,3 +1,10 @@
+"""WebShop rewards from the environment's purchase score.
+
+``webshop_episode_reward`` is verl-agent's scale (10 when the purchase fully matches the goal,
+otherwise 0); ``webshop_reward`` returns the dense score in [0, 1] for the ``task_id`` goal, with
+success (score 1) logged as ``trajectory/accuracy``.
+"""
+
 from ..core import Context
 from ..envs.webshop_text_env import WebShopSpec
 from .reward_base import reward

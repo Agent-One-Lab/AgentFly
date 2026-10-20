@@ -98,8 +98,8 @@ import os
 os.environ["VLM_MODELS"] = "Qwen/Qwen3-VL-235B-A22B-Instruct"
 os.environ["VLM_SERVER_IPS"] = "vlm-host-1"
 
-from agentfly.rewards.vlm_as_judge.simuscene_reward import _vlm_specs_from_globals
-specs = _vlm_specs_from_globals()
+from agentfly.rewards.vlm_as_judge.simuscene_reward import vlm_specs_from_globals
+specs = vlm_specs_from_globals()
 assert specs, "VLM specs are empty — check VLM_MODELS / VLM_SERVER_IPS"
 print(specs)
 ```

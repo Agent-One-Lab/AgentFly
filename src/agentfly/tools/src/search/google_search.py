@@ -1,3 +1,9 @@
+"""Google search through the Serper API (currently disabled).
+
+``google_search_serper`` still uses the old stateful-tool API (``env_cls=``) and is not imported
+by the built-in tools; ``req`` / ``req_async`` are its HTTP helpers.
+"""
+
 import http.client
 import json
 import os

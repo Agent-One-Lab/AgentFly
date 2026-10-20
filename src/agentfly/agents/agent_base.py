@@ -1,44 +1,49 @@
+""":class:`BaseAgent`: the base class every agent derives from.
+
+An agent holds the model backend, chat template, tools, skills and reward function, and runs
+them through a rollout strategy with :meth:`BaseAgent.run`. Subclasses customize how responses
+are parsed into tool calls (:meth:`BaseAgent.parse`). It also converts finished runs into
+training batches for the verl trainer (:meth:`BaseAgent.to_verl_dataproto`).
+"""
+
 import inspect
 import json
 import logging
 import os
 from abc import ABC
-from math import lcm
-from collections import defaultdict
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
+
+from ..core.context import Context
+from ..core.context_config import ContextConfig
+
 # NOTE: ``torch`` is imported lazily inside the two methods that use it
 # (``tokenize_trajectories`` / ``to_verl_dataproto``) so a bare
 # ``import agentfly.agents`` doesn't pull torch (~3s). It's only needed when
 # actually building tensors for the trainer.
-from chat_bricks import (
-    split_messages_with_assistant,
-    tokenize_conversations,
-)
-
 from ..templates import *  # noqa: F403
-from ..rewards.types import RewardResult
-from ..tools.tool_base import BaseTool, submit_tool_call
 from ..tools.src.skills import Skill
-from ..core.context import Context
-from ..core.context_config import ContextConfig
-from ..utils.monitor import JsonlSink, Monitor, WandbSink
-from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
-from .rollout.registry import resolve_rollout
-from .rollout.conversion import result_to_dataproto
-from .types import RunResult, Trajectory
+from ..tools.tool_base import BaseTool, submit_tool_call
 from ..utils.llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
 from ..utils.llm_backends.backend_configs import BACKEND_CONFIGS
-from .utils.messages import MessagesList
-from .utils.tokenizer import create_processor, create_tokenizer, get_jinja_template
+from ..utils.monitor import JsonlSink, Monitor, WandbSink
+from .rollout.conversion import result_to_dataproto
+from .rollout.registry import resolve_rollout
+from .types import RunResult, Trajectory
+
 # Import the module (not the vLLM-derived values) so the vLLM stack loads lazily:
 # read ``tool_parser.ChatCompletionRequest`` / ``VLLM_TOOL_PARSER_AVAILABLE`` at
 # runtime, after ``tool_parser.ensure_vllm_tool_parser()``, rather than binding
 # them here at import time.
 from .utils import tool_parser
+from .utils.messages import MessagesList
+from .utils.tokenizer import create_processor, create_tokenizer, get_jinja_template
 from .utils.tool_parser import create_tool_parser
+
+if TYPE_CHECKING:
+    from .rollout.base import Rollout
 
 # NOTE: ``DataProto`` (from the verl trainer) is imported lazily inside
 # ``to_verl_dataproto`` — it pulls the whole verl/torch/ray stack, which a bare
@@ -89,6 +94,9 @@ class BaseAgent(ABC):
             skills: Optional list of ``Skill`` objects (or skill names) to advertise to the model in the system
                 prompt's ``<available_skills>`` section. The skill content (SKILL.md body, scripts, references)
                 is loaded on demand via the ``load_skill`` tool — only ``name`` + ``description`` are surfaced here.
+            reward_fn: The reward function (e.g. a ``@reward``), available as ``agent.reward_fn``. After
+                each rollout it is called with ``final_response``, ``trajectory``, and the dataset fields of
+                the task; ``None`` skips reward computation.
             debug: Whether to enable debug mode.
             backend_config: Dict specifying the backend and its parameters. Must include "backend" (e.g. "async_vllm", "client").
                 Other keys are passed as kwargs to that backend (e.g. "gpu_memory_utilization" for async_vllm).
@@ -139,10 +147,10 @@ class BaseAgent(ABC):
         self.debug = debug
         self.backend_config = backend_config
         self.backend = backend_config["backend"]
-        self.tools = tools
+        self.tools = self._bind_method_tools(tools)
         self.max_model_len = max_model_len
         self.default_tool_call_source = default_tool_call_source
-        self.tool_names = [tool.name for tool in tools]
+        self.tool_names = [tool.name for tool in self.tools]
         self.render_tools_in_prompt = render_tools_in_prompt
         self.skills = self._normalize_skills(skills)
         self.skill_names = [s.name for s in self.skills]
@@ -156,7 +164,7 @@ class BaseAgent(ABC):
         self.tokenizer = create_tokenizer(model_name_or_path)
         self.processor = create_processor(model_name_or_path)
 
-        self._reward_fn = reward_fn
+        self.reward_fn = reward_fn
 
         # We use model name as template if no template is provided
         # For a model name, chat-bricks will use HF's template by default
@@ -219,14 +227,25 @@ class BaseAgent(ABC):
                 "Cannot specify both tool_parser and tool_parser_name. Use only one."
             )
 
-    def _bind_method_tools(self):
-        tool_methods = []
-        for name, method in inspect.getmembers(self):
-            if isinstance(method, BaseTool):
-                tool_methods.append(method)
-        for tool_method in tool_methods:
-            if hasattr(tool_method, "is_method") and tool_method.is_method:
-                tool_method.instance = self
+    def _bind_method_tools(self, tools: List) -> List:
+        """Give this agent its own instance of each ``@tool``-decorated method of its class.
+
+        ``@tool`` on a method yields a tool class shared by every instance of the agent class,
+        and calling it as-is has no ``self``. Each agent gets a fresh tool instance bound to it,
+        set as an instance attribute (so ``self.<method>`` is this agent's tool), and ``tools``
+        entries that refer to the shared class are replaced by it.
+        """
+        bound = {}
+        for attr, value in inspect.getmembers(type(self)):
+            func = value.__dict__.get("_func") if isinstance(value, type) else None
+            if isinstance(value, type) and issubclass(value, BaseTool) and func is not None:
+                params = list(inspect.signature(func).parameters)
+                if params and params[0] == "self":
+                    tool = type.__call__(value)  # a new instance, not the class's shared singleton
+                    tool.instance = self
+                    setattr(self, attr, tool)
+                    bound[value] = tool
+        return [bound.get(t, t) if isinstance(t, type) else t for t in tools]
 
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         if isinstance(model_name_or_path, str):
@@ -387,6 +406,7 @@ class BaseAgent(ABC):
         generation_config: Optional[Dict[str, Any]] = {},
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
+        use_token_ids: bool = True,
         **kwargs,
     ) -> RunResult:
         """Run the agent on a batch of messages and return the rollout result.
@@ -411,6 +431,11 @@ class BaseAgent(ABC):
                 checkpoint's step. Left ``None``, the strategy counts its own runs —
                 and since a strategy is constructed per call, that yields a constant
                 step unless the caller reuses one strategy instance.
+            use_token_ids: Carry the backend's sampled token ids on each generated
+                assistant message, so tokenization (chat-bricks) splices them instead of
+                re-encoding the text — the sampling prompts and training rows then use
+                exactly the sampled tokens. False leaves them off: every turn is
+                re-encoded from text (sampling and training still render alike).
             **kwargs: Additional keyword arguments forwarded to the rollout strategy
                 (e.g. ``num_chains``, ``max_concurrent_chains`` for the chain rollout).
 
@@ -436,6 +461,7 @@ class BaseAgent(ABC):
             generation_config=generation_config,
             context_config=context_config,
             global_step=global_step,
+            use_token_ids=use_token_ids,
             **kwargs,
         )
 
@@ -541,22 +567,6 @@ class BaseAgent(ABC):
         tool_name = tool_call["function"]["name"]
         tool_input = tool_call["function"]["arguments"]
 
-        # Set up tools if needed (reset resources that may have been acquired at chain start)
-        if not have_set_resources:
-            env_args = {
-                k: context.metadata[k]
-                for k in ("task_name", "variation_idx")
-                if k in context.metadata
-            }
-            # We have moved reset to the tool call
-            # if env_args:
-            #     await context.reset_resource(scope="rollout", env_args=env_args)
-            #     await context.reset_resource(scope="global", env_args=env_args)
-            # else:
-            #     await context.reset_resource(scope="rollout")
-            #     await context.reset_resource(scope="global")
-            # have_set_resources = True
-
         # Execute tool call. A malformed call comes back as a ``status="invalid"`` result
         # (not raised); the rollout applies its ``on_invalid_tool_call`` policy.
         result = await submit_tool_call(
@@ -564,6 +574,8 @@ class BaseAgent(ABC):
             tool_input,
             context=context,
             allowed_tool_names=self.tool_names,
+            # The agent's own tool objects, so method tools run bound to this agent.
+            tools={tool.name: tool for tool in self.tools},
         )
 
         return result

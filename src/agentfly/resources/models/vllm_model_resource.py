@@ -17,6 +17,7 @@ import sys
 import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
+
 from ...utils.llm_backends.llm_backends import ClientBackend
 from ..types import BaseResource, ResourceStatus, VLLMModelResourceSpec
 
@@ -77,7 +78,7 @@ class VLLMModelResource(BaseResource):
             sys.executable,
             "-m",
             "agentfly.utils.deploy",
-            "--model_name_or_path",
+            "--model-name-or-path",
             model_name_or_path,
             "--tp",
             str(tp),
@@ -85,9 +86,9 @@ class VLLMModelResource(BaseResource):
             str(pp),
             "--dp",
             str(dp),
-            "--gpu_memory_utilization",
+            "--gpu-memory-utilization",
             str(gpu_memory_utilization),
-            "--tool_call_parser",
+            "--tool-call-parser",
             tool_call_parser,
         ]
         if template is not None:

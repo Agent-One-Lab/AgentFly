@@ -1,3 +1,5 @@
+"""Image helpers: open images from paths, URLs or base64, convert between formats (PIL, data URIs), and display images and messages in terminals or Jupyter."""
+
 import base64
 import io
 from pathlib import Path
@@ -38,9 +40,6 @@ def open_image_from_any(src: str | Image.Image, *, timeout: int = 10) -> Image.I
         resp.raise_for_status()
         return Image.open(io.BytesIO(resp.content))
 
-        # --- urllib version (uncomment if you can’t pip-install requests)
-        # with urllib_request.urlopen(src, timeout=timeout) as fp:
-        #     return Image.open(fp)
 
     # 2) Detect a base-64 string ------------------------------------------------------
     #    • data-URI style:  "data:image/png;base64,……"
@@ -161,12 +160,6 @@ def _is_jupyter() -> bool:
 
 
 def _unicode_half_block(image: Image.Image, width: int):
-    # if columns is None:
-    #     try:
-    #         columns = shutil.get_terminal_size((80, 24)).columns
-    #     except Exception:
-    #         columns = 80
-
     img = image.convert("RGB")
     target_w = min(width, img.width)
     aspect = img.height / img.width if img.width else 1.0

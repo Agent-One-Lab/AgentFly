@@ -1,6 +1,13 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
+"""GUI grounding reward (UI-R1 style): ``gui_reward``.
+
+Scores a predicted GUI action against the ground truth: a format score plus an accuracy score
+(half for the action type, half for its parameters: click coordinates inside the target box, or
+the F1 of typed text).
+"""
+
 import ast
 import json
 import logging
@@ -386,9 +393,6 @@ async def gui_reward(
                     )
                     break
 
-        # if not prediction or prediction.strip() == "":
-        #     prediction = "Thought: No response generated.\nAction: wait()"
-        #     print(f"[gui_reward] Using default prediction")
 
     # Handle None values for parameters
     if gt_bbox is None:

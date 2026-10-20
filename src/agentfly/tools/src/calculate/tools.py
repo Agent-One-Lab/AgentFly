@@ -1,3 +1,5 @@
+"""Calculator tool: ``calculator`` evaluates a mathematical expression with SymPy."""
+
 from sympy import Rational, simplify, sympify
 
 from ...decorator import tool

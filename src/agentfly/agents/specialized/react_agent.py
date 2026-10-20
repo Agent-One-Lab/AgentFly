@@ -1,3 +1,9 @@
+""":class:`ReactAgent`: an agent that follows the ReAct format.
+
+Responses are ``Thought:`` / ``Action:`` / ``Input:`` steps; :func:`parse_react_step` turns each
+step into a tool call.
+"""
+
 import json
 import logging
 import re
@@ -9,7 +15,6 @@ from ..agent_base import BaseAgent
 from ..parsers import extract_tool_calls
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def parse_react_step(text: str) -> Dict[str, Optional[str]]:
@@ -135,12 +140,10 @@ class ReactAgent(BaseAgent):
                         }
                     }
         """
-        # print(f"responses: {responses}")
         thought_actions = [parse_react_step(response) for response in responses]
 
         new_messages_list = []
         for response, thought_action in zip(responses, thought_actions):
-            # thought = thought_action["thought"]
             action = thought_action["action"]
             action_input = thought_action["input"]
             if action is None:
@@ -186,7 +189,3 @@ class ReactAgent(BaseAgent):
             new_messages_list.append(message)
 
         return new_messages_list
-
-
-if __name__ == "__main__":
-    pass

@@ -5,7 +5,6 @@ This module is used to collect trajectories from the agent.
 import asyncio
 import json
 import os
-from typing import Dict, List
 
 import click
 

@@ -1,10 +1,21 @@
-import asyncio
+"""Tool base class and tool-call execution.
+
+:class:`BaseTool` wraps a sync or async function (or a ``call`` method) as a tool: schema,
+argument checks, context injection, resource handling for stateful tools, and normalizing any
+return value into a :class:`~agentfly.tools.types.ToolResult`. :func:`submit_tool_call` runs a
+model's tool call by name, turning malformed calls into ``status="invalid"`` results.
+"""
+
 import inspect
 import json
 import logging
 import traceback
-from typing import Any, Callable, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
+
+if TYPE_CHECKING:
+    from .types import ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -372,10 +383,6 @@ class BaseTool:
         if register_name is None:
             register_name = getattr(tool_obj, "__name__", str(tool_obj))
 
-        # TODO: Should we warn for re-registration?
-        # if register_name in TOOL_REGISTRY:
-        #     warnings.warn(f"Tool {register_name!r} re-registered; overriding.")
-
         TOOL_REGISTRY[register_name] = tool_obj
 
         return tool_obj
@@ -412,6 +419,7 @@ async def submit_tool_call(
     tool_input: str,
     context: Optional[Any] = None,
     allowed_tool_names: Optional[List[str]] = None,
+    tools: Optional[Dict[str, Any]] = None,
 ) -> "ToolResult":
     """
     Submit a tool call to the environment.
@@ -422,6 +430,9 @@ async def submit_tool_call(
         context: Optional Context instance for rollout-scoped data and resources.
                  Injected into tools that accept a `context` parameter.
         allowed_tool_names: Optional list of allowed tool names.
+        tools: Optional mapping of tool name to the tool object to call (an agent's own
+            tools, e.g. method tools bound to that agent). Names not in it are looked up in
+            the global tool registry.
 
     Returns:
         ToolResult: Typed tool result (observation, status, metrics, ...). A *malformed*
@@ -458,7 +469,7 @@ async def submit_tool_call(
             tool_input if isinstance(tool_input, dict) else {"raw": tool_input},
         )
 
-    tool_obj = TOOL_REGISTRY.get(tool_name, None)
+    tool_obj = (tools or {}).get(tool_name) or TOOL_REGISTRY.get(tool_name, None)
     assert tool_obj is not None, f"Tool {tool_name} not found"
 
     if isinstance(tool_input, str):

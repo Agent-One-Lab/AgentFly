@@ -6,6 +6,11 @@
 #   bash train_alfworld_chain.sh grpo  [1.5B|3B|7B]   # multi-turn GRPO
 #   bash train_alfworld_chain.sh gigpo [1.5B|3B|7B]   # multi-turn GiGPO (step advantage
 #                                                     #   scattered onto turn spans)
+#   bash train_alfworld_chain.sh ppo|reinforce_plus_plus|rloo [1.5B|3B|7B]
+#       verl's estimators on the same chain rows. PPO adds a critic (GAE, lam=1). PPO and
+#       REINFORCE++ discount per TOKEN, so they use gamma=1.0 (gamma=0.95 is GiGPO's per-STEP
+#       discount); RLOO ignores gamma. The invalid-action penalty is applied inside the
+#       GRPO/GiGPO estimator only, so these three arms train on the episode reward alone.
 #
 # Everything the OPTIMIZER and ENVIRONMENT see is matched to train_alfworld_gigpo.sh
 # (the step arm): model, lr=1e-6, KL 0.01 low_var_kl, entropy 0.001, clip 0.2, gamma=0.95,
@@ -32,11 +37,17 @@
 
 arm=${1:-grpo}
 size=${2:-1.5B}
-if   [[ "$arm" == "gigpo" ]]; then step_advantage_w=1.0
-elif [[ "$arm" == "grpo"  ]]; then step_advantage_w=0.0
-else echo "usage: $0 [grpo|gigpo] [1.5B|3B|7B]"; exit 1; fi
+usage="usage: $0 [grpo|gigpo|ppo|reinforce_plus_plus|rloo] [1.5B|3B|7B]"
+gamma=0.95                          # per-step discount (GiGPO / GRPO arms)
+step_advantage_w=0.0
+if   [[ "$arm" == "gigpo" ]]; then adv_estimator=gigpo; step_advantage_w=1.0
+elif [[ "$arm" == "grpo"  ]]; then adv_estimator=gigpo
+elif [[ "$arm" == "ppo" ]]; then adv_estimator=gae; gamma=1.0
+elif [[ "$arm" == "reinforce_plus_plus" ]]; then adv_estimator=reinforce_plus_plus; gamma=1.0
+elif [[ "$arm" == "rloo" ]]; then adv_estimator=rloo
+else echo "$usage"; exit 1; fi
 if [[ "$size" != "1.5B" && "$size" != "3B" && "$size" != "7B" ]]; then
-    echo "usage: $0 [grpo|gigpo] [1.5B|3B|7B]"; exit 1; fi
+    echo "$usage"; exit 1; fi
 
 export VLLM_USE_V1=1
 set -x
@@ -51,7 +62,6 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port --num-cpus 192 -
 # --- matched to the step arm ---------------------------------------------------------
 model=Qwen/Qwen2.5-${size}-Instruct
 lr=5e-7
-gamma=0.95
 gigpo_mode=mean_std_norm
 penalty_coef=0.1
 num_chains=8                        # group size
@@ -85,8 +95,9 @@ experiment_name="Qwen2.5-${size}-alfworld-chain-${arm}-v2"
 project_name="Open"
 
 python3 -m agentfly.cli train \
-    algorithm.adv_estimator=gigpo \
+    algorithm.adv_estimator=$adv_estimator \
     algorithm.gamma=$gamma \
+    algorithm.lam=1.0 \
     algorithm.step_advantage_w=$step_advantage_w \
     algorithm.gigpo_mode=$gigpo_mode \
     algorithm.invalid_action_penalty_coef=$penalty_coef \
@@ -108,6 +119,7 @@ python3 -m agentfly.cli train \
     agent.run_config.generation_config.temperature=1.0 \
     agent.run_config.max_turns=${max_turns} \
     agent.run_config.num_chains=$num_chains \
+    agent.run_config.use_token_ids=true \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
@@ -138,7 +150,7 @@ python3 -m agentfly.cli train \
     trainer.experiment_name=${experiment_name} \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=300 \
+    trainer.save_freq=50 \
     trainer.test_freq=10 \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=True

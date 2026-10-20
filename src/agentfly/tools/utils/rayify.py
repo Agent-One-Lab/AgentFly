@@ -1,3 +1,5 @@
+"""Turn a tool into a Ray actor without pickling the tool object itself (:func:`rayify`)."""
+
 import inspect
 import types
 

@@ -16,8 +16,10 @@ Stdlib only (importlib): the agent layer must not depend on the training layer.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -28,16 +30,42 @@ def is_reference(ref: str) -> bool:
     return ":" in ref or ref.endswith(".py") or "/" in ref
 
 
+def _loaded_module_for(path: Path):
+    """A module already imported from ``path``, by a normal import or a dotted reference."""
+    for module in list(sys.modules.values()):
+        file = getattr(module, "__file__", None)
+        if file and Path(file).name == path.name and Path(file).resolve() == path:
+            return module
+    return None
+
+
 def _import_from_file(path: str):
-    p = Path(path).expanduser()
+    p = Path(path).expanduser().resolve()
     if not p.is_file():
         raise FileNotFoundError(f"reference file not found: {p}")
-    module_name = f"_agentfly_ref_{p.stem}"
+    # One module per file: later references reuse it instead of executing the file again,
+    # which would re-run its decorators and split its module state. The path hash keeps two
+    # files with the same name (e.g. two ``tools.py``) apart.
+    module_name = f"_agentfly_ref_{p.stem}_{hashlib.sha1(str(p).encode()).hexdigest()[:10]}"
+    module = sys.modules.get(module_name) or _loaded_module_for(p)
+    if module is not None:
+        return module
     spec = importlib.util.spec_from_file_location(module_name, str(p))
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load module from file: {p}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[module_name] = module  # registered before executing, as importlib does
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)  # a failed load can be retried after a fix
+        raise
+    # The module is importable only in this process; keep cloudpickle (and Ray's copy of it)
+    # shipping its functions by value, as they were before it was registered in sys.modules.
+    for name in ("cloudpickle", "ray.cloudpickle"):
+        pickler = sys.modules.get(name)
+        if pickler is not None and hasattr(pickler, "register_pickle_by_value"):
+            pickler.register_pickle_by_value(module)
     return module
 
 

@@ -11,6 +11,7 @@ The remaining helpers adapt AgentFly batches to those functions: batch-field acc
 turn spans inside a multi-turn row, and the terminal response token.
 """
 
+import logging
 import uuid
 from collections import defaultdict
 from difflib import SequenceMatcher
@@ -18,6 +19,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------------------------ #
@@ -284,13 +287,10 @@ def print_group_diagnostics(tag: str, step_group_uids: np.ndarray, episode_adv: 
         ep_mag = float(episode_adv[resp].abs().mean()) if resp.any() else 0.0
         st_mag = float(step_adv[resp].abs().mean()) if resp.any() else 0.0
         nz = 100.0 * float((step_adv[resp].abs() > 1e-8).float().mean()) if resp.any() else 0.0
-        print(
-            f"[{tag}] {extra + ' | ' if extra else ''}"
+        logger.debug(f"[{tag}] {extra + ' | ' if extra else ''}"
             f"step-groups={len(sizes)} over {n} steps non-singleton={non_singleton:.1f}% "
             f"avg_size={n / max(1, len(sizes)):.2f} max={max(sizes) if sizes else 0} | "
             f"|episode_adv|={ep_mag:.4f} w*|step_adv|={step_advantage_w * st_mag:.4f} "
-            f"step/episode={(step_advantage_w * st_mag) / (ep_mag + 1e-8):.2f} nonzero-step={nz:.1f}%",
-            flush=True,
-        )
+            f"step/episode={(step_advantage_w * st_mag) / (ep_mag + 1e-8):.2f} nonzero-step={nz:.1f}%")
     except Exception as e:  # noqa: BLE001 — diagnostics must never break training
-        print(f"[{tag}] diagnostics failed: {e}", flush=True)
+        logger.warning(f"[{tag}] diagnostics failed: {e}")

@@ -1,11 +1,47 @@
+"""AgentFly: agent rollouts and reinforcement learning for LLM agents with tools and resources.
+
+Importing the package sets up its per-user directories and container settings, each
+overridable with an environment variable of the same name:
+
+- ``AF_HOME`` (``~/.agentfly``): the root of AgentFly's state.
+- ``AF_CACHE_DIR`` / ``AF_DATA_DIR``: downloaded tool data, enroot images and datasets.
+- ``AF_CONFIG_DIR``: user-editable config, seeded from the packaged defaults on first run.
+- ``ENROOT_HOME``: enroot's data directory (images under ``images/``).
+- ``AF_CONTAINER_HOME``: AgentFly's directory inside task containers (skills and tool helpers).
+
+The public API lives in the subpackages: :mod:`agentfly.agents`, :mod:`agentfly.tools`,
+:mod:`agentfly.rewards`, :mod:`agentfly.resources`, :mod:`agentfly.envs` and
+:mod:`agentfly.algorithms`.
+"""
+
+import logging
 import os
 import shutil
+import sys
 
 __version__ = "0.2.0"
 
-"""
-Set the environment variables here.
-"""
+
+def configure_logging(level: str = "INFO") -> None:
+    """Print AgentFly's log messages at ``level`` and above to stdout, as plain lines.
+
+    AgentFly logs through the standard ``logging`` module (logger ``"agentfly"``) and shows only
+    warnings by default. ``agentfly train`` calls this with ``"INFO"`` so training logs include the
+    per-batch summaries; setting the ``AF_LOG_LEVEL`` environment variable does the same in every
+    process that imports AgentFly (including Ray workers).
+    """
+    logger = logging.getLogger("agentfly")
+    logger.setLevel(level.upper())
+    if not any(getattr(h, "_agentfly", False) for h in logger.handlers):
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler._agentfly = True
+        logger.addHandler(handler)
+    logger.propagate = False  # avoid printing twice when the application configures the root logger
+
+
+if os.getenv("AF_LOG_LEVEL"):
+    configure_logging(os.environ["AF_LOG_LEVEL"])
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 

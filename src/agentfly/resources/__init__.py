@@ -61,16 +61,16 @@ def __dir__():
 
 
 if TYPE_CHECKING:  # let type checkers/IDEs still see the lazily-exported symbols
-    from .runner import BaseRunner, LocalRunner, RayRunner, CloudRunner, K8sRunner
     from .containers import (
         ContainerResource,
         RayContainerResource,
         RayEnrootContainerActor,
         create_ray_container_resource,
     )
+    from .engine import ResourceEngine
     from .local_env_resource import LocalEnvResource
     from .models import APIModelResource, VLLMModelResource
-    from .engine import ResourceEngine
+    from .runner import BaseRunner, CloudRunner, K8sRunner, LocalRunner, RayRunner
 
 __all__ = [
     "BaseResource",

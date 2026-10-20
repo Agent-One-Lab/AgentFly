@@ -1,3 +1,10 @@
+"""Question-answering rewards based on exact match (EM) and token F1.
+
+``qa_f1_reward`` / ``qa_em_reward`` compare the final response with the answer;
+``*_tool`` / ``qa_em_reward_tool_call`` also require a tool call, ``qa_em_format_reward``
+requires the ``<answer>`` format, and ``ok_vqa_reward`` / ``infoseek_reward`` serve VQA tasks.
+"""
+
 import re
 import string
 from collections import Counter
@@ -112,11 +119,9 @@ def qa_f1_reward_tool(final_response: str, answer: str, trajectory: List[str]) -
             - precision (float): The precision score
             - recall (float): The recall score
     """
-    # has_called_tool = False
     call_tool_count = 0
     for msg in trajectory:
         if msg["role"] == "tool":
-            # has_called_tool = True
             call_tool_count += 1
 
     rewards_dict = {}

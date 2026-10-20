@@ -75,6 +75,8 @@ inputs = tokenize_trajectories(
 
 For a scored result, `agent.to_verl_dataproto(result)` performs the complete
 training conversion, including tokenization, rewards, and row alignment.
-There is no need to call the tokenizer separately before conversion.
+There is no need to call the tokenizer separately before conversion. It builds
+verl's training batch, so it needs the training extra (`uv sync --extra verl`, or
+`uv pip install "agentfly-rl[verl]"`).
 
 Now we have this built and run the agent. However, to run agent reinforcement learning, we still need several steps: define and get the tool to use, define reward functions, and finally, run the training.

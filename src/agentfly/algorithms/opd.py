@@ -206,6 +206,12 @@ def compute_opd_metrics(batch: Any, config: Any) -> Dict[str, float]:
     def mean(values, where):
         return float(values[where].mean()) if where.any() else 0.0
 
+    def rms(values, where):
+        """Root-mean-square over trained positions — the per-token scale the update sees."""
+        if not where.any():
+            return 0.0
+        return float(values[where].to(torch.float32).pow(2).mean().sqrt())
+
     metrics = {
         "opd/kl_k1_mean": mean(k1, mask),
         "opd/kl_k1_think": mean(k1, think),
@@ -215,5 +221,33 @@ def compute_opd_metrics(batch: Any, config: Any) -> Dict[str, float]:
         "opd/adv_clamp_frac": mean((k1.abs() > options["clamp"]).to(torch.float32), mask),
     }
     if "advantages" in batch.batch.keys():
-        metrics["opd/adv_abs_mean"] = mean(batch.batch["advantages"].to(torch.float32).abs(), mask)
+        advantages = batch.batch["advantages"].to(torch.float32)
+        metrics["opd/adv_abs_mean"] = mean(advantages.abs(), mask)
+        metrics["opd/adv_rms"] = rms(advantages, mask)
+
+    # --- component scales -------------------------------------------------
+    # The two advantage terms live on different scales: the distillation term is a per-token
+    # log-ratio (order 0.1 once the student is close to the teacher), while a GRPO advantage is
+    # standardized per group (order 1) and constant within a rollout. Their RMS is the per-token
+    # size the update actually sees, so logging both — even at task_reward_coef = 0 — makes the
+    # coefficient choosable from data (parity is distill_rms / grpo_rms) and shows the balance
+    # drifting as KL shrinks.
+    weights = torch.ones_like(k1)
+    if options["think_weight"] != 1.0:
+        weights = torch.where(think, torch.full_like(k1, options["think_weight"]), weights)
+    metrics["opd/distill_rms"] = rms(
+        weights * torch.clamp(teacher - old, -options["clamp"], options["clamp"]), mask)
+
+    try:
+        from ..verl.trainer.ppo.core_algos import compute_grpo_outcome_advantage
+
+        grpo, _ = compute_grpo_outcome_advantage(
+            token_level_rewards=batch.batch["token_level_rewards"],
+            response_mask=batch.batch["action_mask"].to(torch.float32),
+            index=batch.non_tensor_batch["uid"],
+            norm_adv_by_std_in_grpo=bool(config_value(config, "norm_adv_by_std_in_grpo", True)),
+        )
+        metrics["opd/grpo_rms"] = rms(grpo, mask)
+    except Exception:  # noqa: BLE001 — metrics must never break a training step
+        pass
     return metrics

@@ -19,11 +19,13 @@ import base64
 import os
 import shlex
 import time
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 import ray
-from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
-from ray.exceptions import ActorDiedError, GetTimeoutError as RayGetTimeoutError
+from enroot.errors import APIError, EnrootError
+from enroot.errors import TimeoutError as EnrootTimeoutError
+from ray.exceptions import ActorDiedError
+from ray.exceptions import GetTimeoutError as RayGetTimeoutError
 
 from ..types import BaseResource, ContainerResourceSpec, ResourceStatus
 
@@ -315,6 +317,8 @@ class _RayEnrootContainerActorBase:
 
 
 RayEnrootContainerActor = ray.remote(num_cpus=1)(_RayEnrootContainerActorBase)
+"""Ray actor (1 CPU) that owns one enroot container on a Ray worker; the ``RayRunner`` starts
+one per container resource. See :class:`_RayEnrootContainerActorBase` for its methods."""
 
 
 class RaySyncExecRunProxy:

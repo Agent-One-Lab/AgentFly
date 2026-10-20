@@ -5,12 +5,20 @@ import pytest
 
 @pytest.mark.gpu
 @pytest.mark.asyncio
-async def test_image_agent():
+async def test_image_agent(release_image_agent):
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend_config={"backend": "async_vllm"},
+        # Leaves room on the GPU for the image-edit model the tool loads.
+        backend_config={"backend": "async_vllm", "gpu_memory_utilization": 0.4},
     )
+    try:
+        await _run_and_inspect(agent)
+    finally:
+        release_image_agent(agent)
+
+
+async def _run_and_inspect(agent):
     # --8<-- [start:messages_list]
     messages_list = [
         {

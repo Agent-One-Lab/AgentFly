@@ -1,3 +1,11 @@
+"""The ``@tool`` decorator: turn a function into a registered tool.
+
+``tool(name=..., description=...)`` builds a :class:`~agentfly.tools.tool_base.BaseTool` subclass
+around the function, derives the JSON schema from its signature and docstring, and registers it
+in the tool registry under ``name``. The resulting class is callable like the function
+(``calculator(expression="1+1")``) through a lazily created singleton instance.
+"""
+
 import inspect
 import logging
 from typing import Any
@@ -87,7 +95,6 @@ def tool(
         final_name = name or func_name
         if name and name != func_name:
             logger.debug(f"Tool name {func_name!r} overridden by {name!r}")
-            # warnings.warn(f"Tool name {func_name!r} overridden by {name!r}")
 
         signature = extract_signatures(func)
         docs = parse_docstring(inspect.getdoc(func))

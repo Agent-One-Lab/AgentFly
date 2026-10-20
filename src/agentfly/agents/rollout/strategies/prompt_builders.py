@@ -23,7 +23,6 @@ from typing import Any, Dict, List
 
 from ....utils.references import resolve_reference
 
-
 # ---- verl-agent ALFWorld templates (verbatim; agent_system/environments/prompts/alfworld.py) --
 ALFWORLD_TEMPLATE_NO_HIS = """
 You are an expert agent operating in the ALFRED Embodied Environment.

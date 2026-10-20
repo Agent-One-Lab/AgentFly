@@ -1,3 +1,11 @@
+"""The global tool registry and name/reference lookups.
+
+``TOOL_REGISTRY`` maps tool names to tools. :func:`get_tools_from_names` resolves registered
+names and import references (``"pkg.mod:tool"``, ``"/path/file.py:tool"``); the built-in tools
+are imported only when a requested name is not registered yet, and tools the user registered
+take precedence over built-ins with the same name.
+"""
+
 from typing import List
 
 from ..tool_base import BaseTool
@@ -39,11 +47,20 @@ def register_tool(tool_name, tool_func):
     TOOL_REGISTRY[tool_name] = tool_func
 
 
+def _ensure_builtins_for(tool_names: List[str]) -> None:
+    """Load the built-in tools only if a requested name is neither registered nor an import
+    reference, so looking up the user's own tools never pays for importing every built-in."""
+    from ...utils.references import is_reference
+
+    if any(n.lower() not in TOOL_REGISTRY and not is_reference(n) for n in tool_names):
+        ensure_builtins_loaded()
+
+
 def get_tool_from_name(tool_name: str) -> BaseTool:
     """
     Get a tool instance from its name.
     """
-    ensure_builtins_loaded()
+    _ensure_builtins_for([tool_name])
     return TOOL_REGISTRY[tool_name]
 
 
@@ -61,7 +78,7 @@ def get_tools_from_names(tool_names: List[str]) -> List[BaseTool]:
         KeyError: If a tool name is not found in the registry
     """
     from ...utils.references import resolve_reference
-    ensure_builtins_loaded()
+    _ensure_builtins_for(tool_names)
     # Each entry is a registered name OR an import reference
     # ("module:tool", "/path.py:tool"); names and refs may be mixed.
     return [resolve_reference(name, TOOL_REGISTRY, "tool") for name in tool_names]

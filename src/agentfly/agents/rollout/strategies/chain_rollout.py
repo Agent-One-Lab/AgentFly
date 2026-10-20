@@ -1,3 +1,11 @@
+"""Chain rollout: one growing conversation per trajectory.
+
+:class:`ChainRollout` runs many chains concurrently. Each turn generates a response, parses
+and executes its tool calls, and appends the results to the same conversation, so the model is
+trained on all of its turns in one sequence. Loop control (when a chain continues, ends or
+raises) follows the rollout's run policy.
+"""
+
 import asyncio
 import logging
 import os
@@ -17,10 +25,10 @@ from ...types import RunResult
 from ...utils.messages import MessagesList
 from ..base import (
     NO_TOOL_CALL_MESSAGE_MINISWE,
-    Rollout,
-    ToolLoopResult,
     TOKEN_SAFETY_MARGIN,
     TOOL_OBS_PREFIX_TOKENS,
+    Rollout,
+    ToolLoopResult,
 )
 from ..events import (
     ChainEnded,
@@ -30,9 +38,8 @@ from ..events import (
 )
 from ..loop.generation import generate_response, prepare_generation_config
 from ..loop.metrics import RolloutMetrics
-from ..structures import Chain, Step
 from ..loop.tokens import estimate_chat_prompt_tokens, observation_token_length
-
+from ..structures import Chain, Step
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +157,7 @@ class ChainRollout(Rollout):
         max_concurrent_chains: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
+        use_token_ids: bool = True,
         **kwargs,
     ) -> RunResult:
         """Drive the chain-based rollout and return its :class:`RunResult`.
@@ -157,8 +165,10 @@ class ChainRollout(Rollout):
         ``agent`` (the agent) is stashed for the run so the internal loop can reach
         agent state/hooks; the transient run-state is rebuilt each call.
         ``global_step`` sets the metrics x-axis (see ``Rollout.resolve_global_step``).
+        ``use_token_ids`` see ``Rollout.run``.
         """
         self.agent = agent
+        self.use_token_ids = bool(use_token_ids)
         # Drain the rollout event stream. Training ignores the events themselves; the
         # final state (``self.chains`` / ``self.current_steps``) is populated by each
         # chain as it ends. We build the RunResult from that state afterwards.
@@ -438,14 +448,11 @@ class ChainRollout(Rollout):
                 if (_exact >= max_model_len - _margin
                         or _incr >= max_model_len - _margin
                         or (_exact >= 0 and abs(_exact - _incr) > 100)):
-                    print(
-                        f"[TOKDBG] chain={chain_id} depth={depth} incr={_incr} "
+                    logger.info(f"[TOKDBG] chain={chain_id} depth={depth} incr={_incr} "
                         f"exact={_exact} drift={(_exact - _incr) if _exact >= 0 else 'NA'} "
                         f"max={max_model_len} guard_fires={_incr >= max_model_len} "
                         f"exact_over={(_exact > max_model_len) if _exact >= 0 else 'NA'} "
-                        f"slips_through={_exact >= 0 and _exact > max_model_len and _incr < max_model_len}",
-                        flush=True,
-                    )
+                        f"slips_through={_exact >= 0 and _exact > max_model_len and _incr < max_model_len}")
 
         # 1. Pre-check: stop before generating if already at/over the context limit.
         if (
@@ -473,6 +480,7 @@ class ChainRollout(Rollout):
                 chain_id=chain_id,
                 generation_config=generation_config,
                 context=context,
+                use_token_ids=self.use_token_ids,
             )
         except Exception as e:  # noqa: BLE001
             # Backstop for an over-length prompt reaching vLLM: it RAISES
@@ -485,12 +493,9 @@ class ChainRollout(Rollout):
             if ("maximum context length" in _m
                     or "Prompt length" in _m
                     or "max_tokens must be at least 1" in _m):
-                print(
-                    f"[TOKDBG] OVER-LENGTH at generation (chain={chain_id} "
+                logger.warning(f"[TOKDBG] OVER-LENGTH at generation (chain={chain_id} "
                     f"depth={depth}) — aborting chain, not raising. incr="
-                    f"{current_step.total_token_length} max={max_model_len} :: {_m[:180]}",
-                    flush=True,
-                )
+                    f"{current_step.total_token_length} max={max_model_len} :: {_m[:180]}")
                 current_step.is_terminal = True
                 chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
                 yield TurnResult(current_step, have_set_resources, False)

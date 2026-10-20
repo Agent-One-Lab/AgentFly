@@ -2,11 +2,13 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+
 import pytest
 
 
 from agentfly.agents.specialized.gui_agent import GUIAgent
-from agentfly.rewards.gui_reward import gui_reward
+from agentfly.rewards.gui_rewards import gui_reward
 from agentfly.utils.ui_action_parser import (
     parse_action_to_structure_output,
     IMAGE_FACTOR,
@@ -51,7 +53,9 @@ class TestGUIAgent:
         assert messages[0]["role"] == "assistant"
         assert messages[0]["content"][0]["text"] == responses[0]
         assert len(messages[0]["tool_calls"]) == 1
-        assert messages[0]["status"] == "continue"
+        # Single-step grounding: every turn ends the episode (GUIAgent has no "finished" action
+        # in its action set, so it terminates after one action).
+        assert messages[0]["status"] == "terminal"
 
     def test_gui_agent_parse_terminal_action(self):
         """Test GUI agent recognizes terminal actions."""
@@ -87,8 +91,10 @@ class TestGUIAgent:
         messages = agent.parse(responses, tools=[])
 
         assert len(messages) == 1
-        assert "wait" in messages[0]["content"][0]["text"].lower()
-        assert messages[0]["status"] == "continue"
+        # An empty response falls back to a click at the screen center.
+        action = json.loads(messages[0]["tool_calls"][0]["function"]["arguments"])["action"]
+        assert action["action_type"] == "click"
+        assert messages[0]["status"] == "terminal"
 
 
 class TestGUIReward:

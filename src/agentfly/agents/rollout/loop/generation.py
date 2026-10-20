@@ -145,8 +145,14 @@ async def generate_response(
     chain_id,
     generation_config,
     context: "Context",
+    use_token_ids: bool = True,
 ) -> Tuple[Any, Optional[int]]:
-    """Generate one assistant message. Returns ``(message, total_token_length)``."""
+    """Generate one assistant message. Returns ``(message, total_token_length)``.
+
+    ``use_token_ids``: attach the backend's sampled ids to the message (see
+    :func:`attach_token_ids`). False leaves them off, so every later render re-encodes
+    the message from text.
+    """
     effective_config = prepare_generation_config(
         agent, generation_config, current_step, tools=tools
     )
@@ -174,6 +180,12 @@ async def generate_response(
         context=context,
     )
     overlay_raw_message_fields(new_msg, responses)
-    attach_token_ids(new_msg, responses)
+    if use_token_ids:
+        attach_token_ids(new_msg, responses)
+    else:
+        # Also drop ids a server may have returned on the raw message (overlaid above).
+        for msg in new_msg or []:
+            if isinstance(msg, dict):
+                msg.pop("token_ids", None)
     total_length = extract_total_length(responses)
     return (new_msg[0], total_length)

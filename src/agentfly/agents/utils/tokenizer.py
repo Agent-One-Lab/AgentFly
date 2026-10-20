@@ -1,3 +1,10 @@
+"""Tokenizers, processors and chat-template helpers for agents.
+
+Creates the Hugging Face tokenizer/processor for a model, returns a template's Jinja form,
+and tokenizes trajectories with the agent's template (:func:`tokenize_trajectories`), the same
+way training does.
+"""
+
 from typing import Optional
 
 from chat_bricks import get_template, tokenize_conversations

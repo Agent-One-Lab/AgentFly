@@ -1,7 +1,8 @@
 """Unit tests for alfworld_episode_reward.
 
-The reward reads the terminal ``won`` flag from the rollout env and coerces it
-to a binary {0.0, 1.0} float. We stub the env/context so the coercion logic is
+The reward reads the terminal ``won`` flag from the rollout env, coerces it to
+{0.0, 1.0}, and returns ``10 * won`` as the reward (verl-agent scale) plus ``won``
+as ``trajectory/accuracy``. We stub the env/context so the coercion logic is
 tested without standing up the ALFWorld Docker environment.
 """
 import pytest
@@ -30,7 +31,7 @@ class _FakeContext:
 
 
 @pytest.mark.parametrize(
-    "info, expected",
+    "info, won",
     [
         ({"won": True}, 1.0),
         ({"won": False}, 0.0),
@@ -41,14 +42,14 @@ class _FakeContext:
     ],
 )
 @pytest.mark.asyncio(loop_scope="session")
-async def test_alfworld_reward_binary(info, expected):
+async def test_alfworld_reward_binary(info, won):
     ctx = _FakeContext(info)
     result = await alfworld_episode_reward(context=ctx)
 
-    assert result == {"reward": expected}
-    # reward must be a plain float (not a numpy scalar / list), and exactly 0/1.
+    assert result == {"reward": 10.0 * won, "trajectory/accuracy": won}
+    # Values must be plain floats (not numpy scalars / lists).
     assert isinstance(result["reward"], float)
-    assert result["reward"] in (0.0, 1.0)
+    assert isinstance(result["trajectory/accuracy"], float)
 
 
 @pytest.mark.asyncio(loop_scope="session")

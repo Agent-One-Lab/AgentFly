@@ -1,7 +1,15 @@
+""":class:`ActionAgent`: agents that answer in the ``<think>...</think><action>...</action>`` format.
+
+Used for environment tasks such as ALFWorld and WebShop: the text inside ``<action>`` is passed
+to the agent's single environment tool. Optionally adds a context reminder after a number of
+turns.
+"""
+
 import json
 import os
 import re
 from typing import Any, Dict, List, Optional
+
 from ...core.context import Context
 from ..agent_base import BaseAgent
 from ..rollout.structures import Step
@@ -361,7 +369,7 @@ class ActionAgent(BaseAgent):
         if len(formatted_tool_calls) > 1:
             formatted_tool_calls = [formatted_tool_calls[0]]
 
-        summarize_without_prior_action = (
+        summarize_without_prior_action = (  # noqa: F841  (kept on purpose; not used by the status logic yet)
             len(formatted_tool_calls) == 1
             and formatted_tool_calls[0]["function"]["name"] == "summarize"
             and not self._segment_has_prior_action(current_segment)

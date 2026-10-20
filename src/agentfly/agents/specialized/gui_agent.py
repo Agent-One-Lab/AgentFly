@@ -1,6 +1,12 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
+""":class:`GUIAgent`: a single-step GUI grounding agent.
+
+Parses UI-TARS-style ``Thought: ... Action: ...`` responses into structured actions and turns
+them into PyAutoGUI tool calls; every turn ends the episode.
+"""
+
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -68,22 +74,6 @@ class GUIAgent(BaseAgent):
         )
         self.action_counter = 0  # Track number of actions taken
         self.max_retries = 3  # Maximum retries for empty responses
-
-    # def _init_llm_engine(self, model_name_or_path: str, backend: str = "vllm"):
-    #     """
-    #     Override to handle vision-language models properly.
-
-    #     For GUI agents using vision-language models like Qwen2.5-VL,
-    #     we need special handling since they're not standard causal LM models.
-    #     """
-    #     # For unit tests or when model loading should be skipped
-    #     # if model_name_or_path == "ByteDance-Seed/UI-TARS-1.5-7B":
-    #     #     # Return mock objects for testing
-    #     #     print(f"[GUIAgent] Skipping actual model load for testing: {model_name_or_path}")
-    #     #     return None, None, None
-
-    #     # Otherwise use parent's initialization
-    #     return super()._init_llm_engine(model_name_or_path, backend)
 
     def parse(
         self,

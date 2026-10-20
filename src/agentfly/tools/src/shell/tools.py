@@ -8,7 +8,11 @@ import logging
 
 from enroot.errors import (
     MemGuardError,
+)
+from enroot.errors import (
     MemoryError as EnrootMemoryError,
+)
+from enroot.errors import (
     TimeoutError as EnrootTimeoutError,
 )
 

@@ -14,7 +14,7 @@ import random
 import time
 import uuid
 from functools import partial
-from typing import Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import httpx
 import numpy as np
@@ -28,8 +28,10 @@ from chat_bricks import Chat
 #   * ``openai`` (~1s)                         — ClientBackend methods
 #   * ``torch`` (~3s), ``transformers``        — AsyncVerlBackend only
 # (``AutoModelForCausalLM`` was imported but unused, so it's dropped.)
-
 from ...utils.vision import image_to_data_uri
+
+if TYPE_CHECKING:
+    from vllm import SamplingParams
 
 logger = logging.getLogger(__name__)
 
@@ -132,20 +134,16 @@ class LLMBackend:
                     f"first diff at {d}: prompt={self.tokenizer.decode(cur[d : d + 24])!r} "
                     f"expected={self.tokenizer.decode(exp[d : d + 24])!r}"
                 )
-                print(msg, flush=True)
                 logger.warning(msg)
                 if self.check_prompt_consistency == "strict":
                     raise RuntimeError(msg)
             elif checked:
-                print(
-                    f"[AsyncVerlBackend] splice_check: {checked}/{checked} rows continuous "
-                    "(prompt == turn prompt + sampled ids)",
-                    flush=True,
-                )
+                logger.info(f"[AsyncVerlBackend] splice_check: {checked}/{checked} rows continuous "
+                    "(prompt == turn prompt + sampled ids)")
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
-            print(f"[AsyncVerlBackend] splice continuity check failed: {e}", flush=True)
+            logger.warning(f"[AsyncVerlBackend] splice continuity check failed: {e}")
             logger.warning("[AsyncVerlBackend] splice continuity check failed: %s", e)
 
     def preprocess(self):
@@ -265,6 +263,10 @@ class AsyncVLLMBackend(LLMBackend):
                 sampling_params["max_tokens"] = kwargs.get("max_tokens")
             else:
                 sampling_params["max_tokens"] = kwargs.get("max_new_tokens")
+        else:
+            # No limit given: generate up to the context length, as vLLM's OpenAI server does.
+            # SamplingParams' own default (16 tokens) would silently truncate every reply.
+            sampling_params["max_tokens"] = None
 
         # Force SamplingParams.n=1 and instead duplicate inputs to get n
         # completions per prompt. vLLM v1's AsyncLLM with n>1 has a generator-
@@ -281,7 +283,7 @@ class AsyncVLLMBackend(LLMBackend):
             self._convert_to_chat_without_tool_call_processing(messages)
             for messages in messages_list
         ]
-        print(f"[AsyncVLLMBackend.generate_async] applying chat template")
+        logger.debug("[AsyncVLLMBackend.generate_async] applying chat template")
         prompts, vision_inputs = await self._apply_chat_template_async(
             messages_list, tools=tools, skills=skills
         )
@@ -291,7 +293,7 @@ class AsyncVLLMBackend(LLMBackend):
         logger.debug("[AsyncVLLMBackend] prepared %d input(s)", len(inputs))
         tasks = [self._generate_single(_input, sampling_params) for _input in inputs]
 
-        print(f"[AsyncVLLMBackend.generate_async] generating ...")
+        logger.debug("[AsyncVLLMBackend.generate_async] generating ...")
         request_outputs = await asyncio.gather(*tasks)
         # Flatten candidate texts across requests.
         response_texts = [
@@ -480,21 +482,17 @@ class AsyncVerlBackend(LLMBackend):
                     f"sampled={self.tokenizer.decode(s[k : k + 40])!r} "
                     f"rendered={self.tokenizer.decode(r[k : k + 40])!r}"
                 )
-                print(msg, flush=True)
                 logger.warning(msg)
                 if self.check_prompt_consistency == "strict":
                     raise RuntimeError(msg)
             else:
                 # print (not logger.info) so it is greppable next to the [StepRollout] batch line
-                print(
-                    f"[AsyncVerlBackend] prompt_check: {n}/{n} rows identical "
-                    f"(sampling == training render; assistant turns={depths})",
-                    flush=True,
-                )
+                logger.info(f"[AsyncVerlBackend] prompt_check: {n}/{n} rows identical "
+                    f"(sampling == training render; assistant turns={depths})")
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
-            print(f"[AsyncVerlBackend] prompt consistency check failed: {e}", flush=True)
+            logger.warning(f"[AsyncVerlBackend] prompt consistency check failed: {e}")
             logger.warning("[AsyncVerlBackend] prompt consistency check failed: %s", e)
 
     def preprocess(self):
@@ -558,6 +556,7 @@ class AsyncVerlBackend(LLMBackend):
         # We need to build a DataProto from the prompts
 
         import torch  # lazy: heavy import
+
         from ...verl.protocol import DataProto  # lazy: pulls the verl/torch/ray stack
 
         generation_config = {}
@@ -572,11 +571,8 @@ class AsyncVerlBackend(LLMBackend):
         prompt_ids = self._render_prompt_ids(messages_list, tools)
         if prompt_ids is None and not self._warned_vision_fallback:
             self._warned_vision_fallback = True
-            print(
-                "[AsyncVerlBackend] prompt carries vision inputs: verl renders the prompt "
-                "itself (pre-tokenized ids are text-only for now)",
-                flush=True,
-            )
+            logger.debug("[AsyncVerlBackend] prompt carries vision inputs: verl renders the prompt "
+                "itself (pre-tokenized ids are text-only for now)")
         messages_list = [self._process_messages(messages) for messages in messages_list]
         messages_list = [
             self._convert_to_openai_chat_without_tool_call_processing(messages)
@@ -1256,7 +1252,6 @@ class ClientBackend(LLMBackend):
         else:
             messages_list = messages  # batch
         logger.debug(f"[ClientBackend] messages_list: {messages_list}")
-        # messages_list = [self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list]
         messages_list, kwargs = self._preprocess_messages_and_args(
             messages_list, **kwargs
         )

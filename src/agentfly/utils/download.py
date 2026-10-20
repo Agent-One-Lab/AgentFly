@@ -9,7 +9,7 @@ Two entry points:
   * ``ensure_training_data(config)`` — called by the trainer preflight; resolves the
     ``data.train_files`` / ``data.val_files`` paths against the ``Agent-One/AgentFly-Train``
     HF dataset and downloads any that are missing.
-  * ``download_tool_data(tool_name)`` — fetches large tool assets (e.g. the search
+  * ``ensure_tool_data(tool_name)`` — fetches large tool assets (e.g. the search
     corpus + FAISS index) on demand.
 
 Approval:
@@ -176,66 +176,80 @@ def ensure_training_data(config) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _ensure_hf_files(
-    repo_id: str,
-    filenames: Sequence[str],
+def _download_hf_files(
+    files: Sequence[Tuple[str, str]],
     dest_dir: str,
     *,
     repo_type: str = "dataset",
     what: str,
 ) -> None:
-    """Download any of ``filenames`` from ``repo_id`` missing under ``dest_dir``,
-    after a single approval prompt."""
-    os.makedirs(dest_dir, exist_ok=True)
-    missing = [f for f in filenames if not os.path.exists(os.path.join(dest_dir, f))]
-    if not missing:
+    """Download ``(repo_id, filename)`` pairs into ``dest_dir`` after one approval prompt
+    listing all of them and their total size."""
+    if not files:
         return
-    plan = [(f"{repo_id}/{f}", _hf_file_size(repo_id, f, repo_type)) for f in missing]
+    os.makedirs(dest_dir, exist_ok=True)
+    plan = [(f"{repo}/{name}", _hf_file_size(repo, name, repo_type)) for repo, name in files]
     if not confirm(plan, what=what):
         raise RuntimeError(
             f"Download of {what} declined. Set AF_ASSUME_YES=1 to allow non-interactively."
         )
-    for f in missing:
-        hf_hub_download(repo_id=repo_id, filename=f, repo_type=repo_type, local_dir=dest_dir)
+    for repo, name in files:
+        hf_hub_download(repo_id=repo, filename=name, repo_type=repo_type, local_dir=dest_dir)
 
 
-def download_tool_data(tool_name: str) -> None:
-    """Download large assets a tool needs, gated by an approval prompt."""
-    if tool_name == "asyncdense_retrieve":
-        data_dir = os.path.join(AF_CACHE_DIR, "data", "search")
-        corpus_file = os.path.join(data_dir, "wiki-18.jsonl")
-        index_file = os.path.join(data_dir, "e5_Flat.index")
+def _write_atomically(path: str, write) -> None:
+    """Write ``path`` via a temporary file, so an interrupted write never leaves a partial
+    file that later runs would take as complete."""
+    tmp = path + ".partial"
+    with open(tmp, "wb") as out:
+        write(out)
+    os.replace(tmp, path)
 
-        if not os.path.exists(corpus_file) and not os.path.exists(
-            os.path.join(data_dir, "wiki-18.jsonl.gz")
-        ):
-            _ensure_hf_files(
-                "PeterJinGo/wiki-18-corpus",
-                ["wiki-18.jsonl.gz"],
-                data_dir,
-                what="search corpus (wiki-18)",
-            )
-        gz_path = os.path.join(data_dir, "wiki-18.jsonl.gz")
-        if not os.path.exists(corpus_file) and os.path.exists(gz_path):
-            import gzip
 
-            print(f"[AgentFly] unzipping {gz_path}", file=sys.stderr)
-            with gzip.open(gz_path, "rb") as f_in, open(corpus_file, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-
-        if not os.path.exists(index_file):
-            if not os.path.exists(os.path.join(data_dir, "part_aa")):
-                _ensure_hf_files(
-                    "PeterJinGo/wiki-18-e5-index",
-                    ["part_aa", "part_ab"],
-                    data_dir,
-                    what="search FAISS index (e5_Flat)",
-                )
-            print(f"[AgentFly] concatenating index parts -> {index_file}", file=sys.stderr)
-            os.system(f"cat {os.path.join(data_dir, 'part_*')} > {index_file}")
-    else:
+def ensure_tool_data(tool_name: str) -> None:
+    """Download the large assets a tool needs that are missing locally, after an approval prompt."""
+    if tool_name != "async_dense_retrieve":
         raise ValueError(f"Unknown tool data set: {tool_name!r}")
+
+    data_dir = os.path.join(AF_CACHE_DIR, "data", "search")
+    corpus_file = os.path.join(data_dir, "wiki-18.jsonl")
+    corpus_gz = corpus_file + ".gz"
+    index_file = os.path.join(data_dir, "e5_Flat.index")
+    index_parts = [os.path.join(data_dir, part) for part in ("part_aa", "part_ab")]
+
+    # Everything missing goes into one plan, so the prompt shows the true total.
+    needed: List[Tuple[str, str]] = []
+    if not os.path.exists(corpus_file) and not os.path.exists(corpus_gz):
+        needed.append(("PeterJinGo/wiki-18-corpus", os.path.basename(corpus_gz)))
+    if not os.path.exists(index_file):
+        needed += [
+            ("PeterJinGo/wiki-18-e5-index", os.path.basename(part))
+            for part in index_parts
+            if not os.path.exists(part)
+        ]
+    _download_hf_files(needed, data_dir, what="search corpus (wiki-18) and FAISS index (e5_Flat)")
+
+    if not os.path.exists(corpus_file):
+        import gzip
+
+        print(f"[AgentFly] unzipping {corpus_gz}", file=sys.stderr)
+
+        def unzip(out):
+            with gzip.open(corpus_gz, "rb") as src:
+                shutil.copyfileobj(src, out)
+
+        _write_atomically(corpus_file, unzip)
+
+    if not os.path.exists(index_file):
+        print(f"[AgentFly] concatenating index parts -> {index_file}", file=sys.stderr)
+
+        def concatenate(out):
+            for part in index_parts:
+                with open(part, "rb") as src:
+                    shutil.copyfileobj(src, out)
+
+        _write_atomically(index_file, concatenate)
 
 
 if __name__ == "__main__":
-    download_tool_data("asyncdense_retrieve")
+    ensure_tool_data("async_dense_retrieve")

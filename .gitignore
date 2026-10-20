@@ -191,3 +191,5 @@ examples/train_scripts/context/
 /release_readiness.md
 # testing deploy scripts
 examples/utils/
+# Merged/exported model weights (hundreds of GB)
+merged_models/

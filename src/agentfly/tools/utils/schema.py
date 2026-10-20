@@ -1,3 +1,10 @@
+"""Build a tool's JSON schema from its function.
+
+:func:`extract_signatures` reads parameter names, types and defaults; :func:`parse_docstring`
+reads the description and per-argument docs from a Google-style docstring; :func:`validate_schema`
+assembles and checks the OpenAI-style function schema.
+"""
+
 import inspect
 import logging
 import re
@@ -138,29 +145,9 @@ def parse_docstring(docstring):
     return {"description": description, "params": params}
 
 
-# Example function with a Google-style docstring.
-def add(a, b):
-    """
-    Adds two numbers together.
-
-    This is a simple function that takes two numeric inputs and returns their sum.
-    It demonstrates how to document a function using Google-style docstrings.
-
-    Args:
-        a (int): The first number.
-        b: The second number, which can be an int or float.
-
-    Returns:
-        The sum of a and b.
-    """
-    return a + b
-
-
 def validate_schema(name, description, signature, docs):
     docs_description = docs["description"]
     if description and docs_description and docs_description != description:
-        # raise ValueError(f"Description mismatch: {description} != {docs_description}")
-        # warnings.warn(f"Description mismatch: {description} != {docs_description}, use the specified description by default.")
         # TODO: currently we don't do anything here and prioritize the specified description by default.
         pass
     docs_params = docs["params"]
@@ -193,7 +180,6 @@ def validate_schema(name, description, signature, docs):
         else:
             # May be should raise an error
             properties[param]["type"] = "unknown"
-            # logger.warning(f"Parameter {param} has no type in signature or docstring.")
 
         if "default" in signature[param]:
             properties[param]["default"] = signature[param]["default"]
@@ -250,16 +236,3 @@ def validate_schema(name, description, signature, docs):
             del arguments[key]
 
     return {"schema": schema, "args": arguments}
-
-
-if __name__ == "__main__":
-    # Retrieve and parse the docstring using inspect.
-    doc = inspect.getdoc(add)
-    result = parse_docstring(doc)
-    print("Function description:")
-    print(result["description"])
-    print("\nParameters:")
-    for param, details in result["params"].items():
-        print(f"  {param}:")
-        print(f"    Type: {details['type']}")
-        print(f"    Description: {details['description']}")

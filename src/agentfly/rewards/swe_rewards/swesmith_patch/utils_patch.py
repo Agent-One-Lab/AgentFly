@@ -24,8 +24,8 @@ def _patch_run_patch_in_container():
     from swesmith.constants import TEST_OUTPUT_END, TEST_OUTPUT_START
     from swesmith.harness import utils as utils_mod
     from swesmith.profiles import registry
-    from unidiff import PatchSet
     from swesmith.profiles.base import _find_ssh_key
+    from unidiff import PatchSet
 
     _apply_patch = utils_mod._apply_patch
     _ssh_copy_lock = utils_mod._ssh_copy_lock
@@ -72,7 +72,7 @@ def _patch_run_patch_in_container():
                 with _ssh_copy_lock:
                     copy_to_container(container, key_file, Path("/github_key"))
                 container.exec_run("chmod 600 /github_key", user=DOCKER_USER)
-                ssh_env = {
+                ssh_env = {  # noqa: F841  (used by the disabled git fetch below)
                     "GIT_SSH_COMMAND": "ssh -i /github_key -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes"
                 }
 

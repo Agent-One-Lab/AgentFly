@@ -7,19 +7,41 @@ from datetime import datetime
 import pytest
 
 
-@pytest.mark.gpu
-async def test_image_editing():
-    """
-    测试ImageEditingAgent的图像编辑功能
-    """
+def assert_image_edited(trajectory):
+    """The trajectory ran the image-edit tool successfully at least once (a new image id)."""
+    tool_texts = [
+        item.get("text", "")
+        for segment in trajectory.segments
+        for msg in segment.messages
+        if msg.get("role") == "tool"
+        for item in (msg.get("content") or [])
+        if isinstance(item, dict)
+    ]
+    assert tool_texts, "the model made no tool call"
+    assert not any("Instance not set" in t for t in tool_texts), tool_texts  # tool not bound to the agent
+    # The model may also make a bad call (e.g. a missing argument); one successful edit is required.
+    assert any("Image Id:" in t for t in tool_texts), tool_texts
 
-    # 1. 初始化Agent
-    print("🚀 初始化ImageEditingAgent...")
+
+@pytest.fixture(scope="module")
+def agent(release_image_agent):
+    """One agent for the module: one vLLM engine and one image-edit model on the GPU."""
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend_config={"backend": "async_vllm"},
+        # Leaves room on the same GPU for the image-edit model the tool loads.
+        backend_config={"backend": "async_vllm", "gpu_memory_utilization": 0.4},
     )
+    yield agent
+    release_image_agent(agent)  # engine + image-edit model, so later tests get the GPU back
+
+
+@pytest.mark.gpu
+@pytest.mark.asyncio(loop_scope="module")
+async def test_image_editing(agent):
+    """
+    测试ImageEditingAgent的图像编辑功能
+    """
 
     # 2. 准备测试用例
     test_cases = [
@@ -63,77 +85,65 @@ async def test_image_editing():
             }
         ]
 
-        try:
-            # 运行Agent
-            print("⏳ 处理中...")
-            result = await agent.run(
-                messages=messages_list,
-                max_turns=4,  # 最多4步完成任务
-                num_chains=1,
-            )
+        # 运行Agent
+        print("⏳ 处理中...")
+        result = await agent.run(
+            messages=messages_list,
+            max_turns=4,  # 最多4步完成任务
+            num_chains=1,
+        )
 
-            # 打印结果
-            print("\n✅ 处理完成！")
+        # 打印结果
+        print("\n✅ 处理完成！")
 
-            # 获取最终的消息
-            if result and result[0].segments:
-                last_messages = result[0].segments[-1].messages
+        # 获取最终的消息
+        if result and result[0].segments:
+            last_messages = result[0].segments[-1].messages
 
-                # 查找最终生成的图片ID
-                for msg in last_messages:
-                    if msg.get("role") == "tool":
-                        content = msg.get("content", [])
-                        for item in content:
-                            if isinstance(item, dict) and "Image Id:" in item.get(
-                                "text", ""
-                            ):
-                                # 提取图片ID
-                                import re
+            # 查找最终生成的图片ID
+            for msg in last_messages:
+                if msg.get("role") == "tool":
+                    content = msg.get("content", [])
+                    for item in content:
+                        if isinstance(item, dict) and "Image Id:" in item.get(
+                            "text", ""
+                        ):
+                            # 提取图片ID
+                            import re
 
-                                match = re.search(r"Image Id:\s*(\d+)", item["text"])
-                                if match:
-                                    image_id = match.group(1)
+                            match = re.search(r"Image Id:\s*(\d+)", item["text"])
+                            if match:
+                                image_id = match.group(1)
 
-                                    # 保存结果图片
-                                    output_dir = "test_outputs"
-                                    os.makedirs(output_dir, exist_ok=True)
+                                # 保存结果图片
+                                output_dir = "test_outputs"
+                                os.makedirs(output_dir, exist_ok=True)
 
-                                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                    output_path = (
-                                        f"{output_dir}/test_{i+1}_{timestamp}.png"
-                                    )
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                output_path = (
+                                    f"{output_dir}/test_{i+1}_{timestamp}.png"
+                                )
 
-                                    agent.save_image(image_id, output_path)
-                                    print(f"💾 结果已保存到: {output_path}")
-                                    break
+                                agent.save_image(image_id, output_path)
+                                print(f"💾 结果已保存到: {output_path}")
+                                break
 
-            # 打印完整的对话历史
-            print("\n📜 对话历史:")
-            print_trajectory(result[0])
+        # 打印完整的对话历史
+        print("\n📜 对话历史:")
+        print_trajectory(result[0])
+        assert_image_edited(result[0])
 
-        except Exception as e:
-            print(f"❌ 测试失败: {str(e)}")
-            import traceback
 
-            traceback.print_exc()
-
-        # 等待用户确认继续
-        if i < len(test_cases) - 1:
-            input("\n按Enter继续下一个测试...")
 
     print("\n🎉 所有测试完成！")
 
 
 @pytest.mark.gpu
-async def test_specific_function():
+@pytest.mark.asyncio(loop_scope="module")
+async def test_specific_function(agent):
     """
     测试特定功能的示例
     """
-    agent = ImageEditingAgent(
-        model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
-        template="qwen2.5-vl-system-tool",
-        backend_config={"backend": "async_vllm"},
-    )
 
     # 测试1: 物体检测并替换
     print("\n🔍 测试: 检测并替换物体")
@@ -161,6 +171,7 @@ async def test_specific_function():
 
     # 显示结果
     print_trajectory(result[0])
+    assert_image_edited(result[0])
 
 
 async def interactive_test():

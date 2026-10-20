@@ -1,5 +1,9 @@
+"""Logging helpers: :func:`get_logger` (a logger writing to a file in a given directory) and a rank-aware :class:`Logger` wrapper."""
+
 import os
 from logging import DEBUG, INFO, FileHandler, Formatter, StreamHandler, getLogger
+
+_logger = getLogger(__name__)
 
 
 class Logger:
@@ -25,7 +29,7 @@ class Logger:
 
 
 def get_logger(directory, filename, level="INFO", local_rank=-1):
-    print(f"Local rank: {local_rank}")
+    _logger.debug(f"Local rank: {local_rank}")
     os.makedirs(directory, exist_ok=True)
     if filename is None:
         filename = "log"

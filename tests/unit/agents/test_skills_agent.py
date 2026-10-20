@@ -6,7 +6,7 @@ Skills reach the model via one of two mutually-exclusive paths:
 1. Agent-layer (backend-agnostic) — when the system prompt carries a ``{skills}``
    slot, ``BaseAgent._render_skills_block()`` expands it into the system *message*
    content. Works for hosted models (OpenAI/Gemini) since it needs no template
-   support. In this case ``_skills_payload()`` returns None to avoid double
+   support. In this case ``skills_payload()`` returns None to avoid double
    injection.
 2. Template — when there is no ``{skills}`` slot, ``BaseAgent.skills_payload()``
    projects skills to ``[{"name", "description"}]`` dicts; ``ClientBackend`` re-emits
@@ -51,6 +51,12 @@ def _dummy_openai_key(monkeypatch):
 
 MODEL = "gpt-5.5"
 BASE_URL = "https://api.openai-next.com/v1"
+
+# Checked at import, before ``_dummy_openai_key`` installs its placeholder: the end-to-end
+# tests call the real endpoint and need a real key.
+requires_api_key = pytest.mark.skipif(
+    not os.getenv("OPENAI_API_KEY"), reason=f"needs OPENAI_API_KEY for {BASE_URL}"
+)
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant with access to a small set of bundled skills. "
@@ -135,7 +141,7 @@ def test_skills_payload_is_forwarded_to_backend(skills):
     Runs unconditionally so a regression in the plumbing fails fast.
     """
     agent = _build_agent(skills)
-    payload = agent._skills_payload()
+    payload = agent.skills_payload()
     assert payload is not None
     assert len(payload) == len(skills)
     by_name = {s["name"]: s["description"] for s in payload}
@@ -150,7 +156,7 @@ def test_skills_rendered_into_system_prompt_when_slot_present(skills):
     agent = _build_agent(skills, system_prompt=SYSTEM_PROMPT_WITH_SLOT)
 
     # Template path is suppressed when the agent renders skills itself.
-    assert agent._skills_payload() is None
+    assert agent.skills_payload() is None
 
     block = agent._render_skills_block()
     assert "<available_skills>" in block
@@ -179,6 +185,7 @@ def test_no_dangling_header_when_no_skills():
 
 
 @pytest.mark.gpu
+@requires_api_key
 @pytest.mark.asyncio(loop_scope="session")
 async def test_country_capital_skill_canberra_trap(skills):
     """Model must consult ``country-capital`` to answer Australia → Canberra (not Sydney)."""
@@ -199,6 +206,7 @@ async def test_country_capital_skill_canberra_trap(skills):
 
 
 @pytest.mark.gpu
+@requires_api_key
 @pytest.mark.asyncio(loop_scope="session")
 async def test_add_numbers_skill_runs_script(skills):
     """Model must use ``run_skill_script`` on add-numbers — not compute the sum itself."""
@@ -217,6 +225,7 @@ async def test_add_numbers_skill_runs_script(skills):
 
 
 @pytest.mark.gpu
+@requires_api_key
 @pytest.mark.asyncio(loop_scope="session")
 async def test_word_count_skill_exit_code_branch(skills):
     """Empty input → script exits 1 → model consults references/rules.md and explains."""

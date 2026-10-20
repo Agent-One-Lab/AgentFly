@@ -4,22 +4,57 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 markers = [
-    "gpu: marks tests as requiring GPU resources"
+    "gpu: marks tests as requiring GPU resources",
+    "local_server: needs a model server on localhost:8000; skipped when none is running",
 ]
 
 [tool.setuptools]
-packages = ["agentfly"]
 package-dir = {"" = "src"}
 
-[tool.isort]
-profile = "black"
-line_length = 120
-known_first_party = ["agentfly"]
-skip_glob = ["*/verl/*"]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agentfly*"]
+
+[tool.setuptools.package-data]
+# Non-Python files read at runtime: verl's trainer configs (Hydra YAML) and version file,
+# tool/env configs, chat templates, and the Dockerfiles/scripts used to build env images.
+agentfly = [
+    "**/*.yaml", "**/*.yml", "**/*.json", "**/*.jinja", "**/*.txt", "**/*.html",
+    "**/*.sh", "**/Dockerfile", "verl/version/version", "**/py.typed",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# verl is a submodule with its own lint setup; dockers/ holds the sources baked into env images.
+extend-exclude = ["src/agentfly/verl", "src/agentfly/dockers"]
 
 [tool.ruff.lint]
-# Disable import checking - let isort handle it
-ignore = ["I"]
+# Listed explicitly so a ruff upgrade can't change what is enforced.
+select = [
+    "E4", "E7", "E9", "F",  # ruff defaults: pycodestyle errors, pyflakes
+    "I",                    # import sorting (replaces isort)
+    "T201",                 # print: library code logs via the "agentfly" logger
+    "D100",                 # module docstrings (empty package __init__ files are exempt)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agentfly"]
+
+[tool.ruff.lint.per-file-ignores]
+# Command-line entry points and terminal pretty-printers, where printing is the point.
+"src/agentfly/cli.py" = ["T201"]
+"src/agentfly/utils/download.py" = ["T201"]
+"src/agentfly/utils/deploy.py" = ["T201"]
+"src/agentfly/utils/vision.py" = ["T201"]
+"src/agentfly/tools/src/search/retriever_server.py" = ["T201"]
+"src/agentfly/tools/src/file/file_manager.py" = ["T201"]
+"src/agentfly/tools/src/shell/command_filter.py" = ["T201"]
+"src/agentfly/rewards/swe_rewards/r2e_gym/eval.py" = ["T201"]
+"src/agentfly/agents/utils/inspection.py" = ["T201"]
+"src/agentfly/agents/rollout/structures.py" = ["T201"]
+# The ``__main__`` block holds the snippets the docs include.
+"src/agentfly/tools/tool_base.py" = ["T201"]
 
 [tool.uv]
 # The CUDA / vLLM stack ships Linux-x86_64 wheels only; restrict lock resolution
@@ -29,14 +64,27 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 # already-installed torch; they must skip build isolation. Only relevant when
 # `--extra verl` is requested.
 no-build-isolation-package = ["liger-kernel", "flash-attn"]
-# vllm 0.19.0 leaves xgrammar unpinned; xgrammar 0.2.4+ dropped the cp312
+# vllm only bounds xgrammar (<1.0); xgrammar 0.2.4+ dropped the cp312
 # linux-x86_64 wheel (and ships no sdist), so uv's "install the highest" pick
 # fails on Python 3.12. Hold the known-good version the reference env runs.
-constraint-dependencies = ["xgrammar==0.2.2"]
+#
+# The pip CUDA compiler wheels (pulled unpinned via cuda-tile -> nvidia-cuda-tileiras)
+# otherwise resolve to mixed releases (nvcc 13.2 / crt 13.4 / cccl 13.3). TileLang
+# compiles Qwen3.5's Gated DeltaNet kernels with them, so hold all four at the
+# 13.0.x set the Qwen3.5 training env ran (matching torch's CUDA 13.0 runtime).
+constraint-dependencies = [
+    "xgrammar==0.2.2",
+    "nvidia-cuda-nvcc==13.0.88",
+    "nvidia-nvvm==13.0.88",
+    "nvidia-cuda-crt==13.0.88",
+    "nvidia-cuda-cccl==13.0.85",
+]
 
 
 [project]
-name = "AgentFly"
+# Distribution name; the import name and the CLI stay ``agentfly`` (PyPI's "agentfly" is
+# an unrelated project).
+name = "agentfly-rl"
 version = "0.2.0"
 description = "Agent reinforcement learning framework."
 readme = "README.md"
@@ -56,9 +104,15 @@ dependencies = [
     # in the verl extra too.
     "ray==2.55.1",
     "openai",
-    "enroot-py",
+    # 0.1.3: stops containers' whole process groups and adds clear_enroot_containers(prefix=),
+    # which the startup sweep calls (0.1.1 leaks container processes and skips the sweep).
+    "enroot-py>=0.1.3",
     "omegaconf",
-    "vllm==0.19.0",
+    # vllm 0.25.1 pins torch==2.11.0 (CUDA 13.0 wheels) and needs transformers>=5.5.3.
+    # transformers 5 is required for Qwen3.5 (model_type qwen3_5) and by chat-bricks.
+    # Both pinned to the versions the Qwen3.5 training env ran.
+    "vllm==0.25.1",
+    "transformers==5.6.2",
     "termcolor",
     "tenacity",
     "bs4",
@@ -66,10 +120,15 @@ dependencies = [
     "onnxruntime",
     "mpmath",
     "wandb",
-    "chat-bricks",
+    # 0.1.5: splices sampled token_ids into training tokenization (0.1.4 silently re-encodes
+    # text) and adds the use_token_ids switch.
+    "chat-bricks>=0.1.5",
     "diffusers",
     "google-genai",
     "chess",
+    # The built-in search tool imports it, and loading any built-in tool loads them all.
+    # 2.14.x still uses pyarrow's removed PyExtensionType; 2.16+ dropped it.
+    "datasets==2.19.0",
     # Teacher-scoring client (agentfly.algorithms.teacher) for on-policy distillation.
     "aiohttp",
 ]
@@ -81,15 +140,17 @@ agentfly = "agentfly.cli:main"
 verl = [
     "accelerate",
     "codetiming",
-    # 2.14.x still uses pyarrow's removed PyExtensionType; 2.16+ dropped it.
-    # Pin to the version the reference env runs (matches known-good pyarrow).
-    "datasets==2.19.0",
     "dill",
     # Required by the verl trainer (models load with attn_implementation=
     # "flash_attention_2"). Was never declared before — the conda env had it
-    # manually. Pinned to the version the reference env runs. Builds against the
-    # installed torch (see no-build-isolation-package in [tool.uv]).
-    "flash-attn==2.8.3",
+    # manually. Builds against the installed torch (see no-build-isolation-package
+    # in [tool.uv]); there is no prebuilt wheel for torch 2.11 / CUDA 13, so it
+    # compiles from source.
+    "flash-attn==2.8.3.post1",
+    # Gated DeltaNet kernels for Qwen3.5 training (transformers imports them from
+    # fla when available). Was installed manually before. On Hopper with torch
+    # 2.11's Triton 3.6, fla's backward is only correct via TileLang.
+    "flash-linear-attention[tilelang]==0.5.2",
     "hydra-core",
     "liger-kernel",
     "numpy",
@@ -111,6 +172,11 @@ dev = [
     "nest-asyncio",
     "pytest-asyncio",
     "pre-commit",
+]
+# Dense retrieval (the async_dense_retrieve / dense_retrieve tools and `agentfly search`).
+# The retriever searches on CPU; faiss-gpu builds can be installed instead.
+search = [
+    "faiss-cpu>=1.8",
 ]
 # Cloud-sandbox container engine (AF_CONTAINER_ENGINE=daytona).
 daytona = [

@@ -1,4 +1,7 @@
+"""FAISS index wrapper used by the dense retrievers: load (or create) an inner-product index, optionally on GPUs, and search it for the top-n document ids."""
+
 import logging
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -18,7 +21,10 @@ class Indexer:
         try:
             import faiss
         except ImportError:
-            raise ImportError("faiss is not installed, please install it using `conda install pytorch::faiss-gpu`")
+            raise ImportError(
+                "faiss is not installed; install the search extra: `uv pip install \"agentfly-rl[search]\"` "
+                "(or `uv sync --extra search` in a source checkout)."
+            )
         self.faiss = faiss
 
         self.similarity = similarity
@@ -33,9 +39,7 @@ class Indexer:
             self.index.add(embeddings)
         elif index_file is not None:
             self.index = self.faiss.read_index(index_file)
-            print(
-                f"Loaded FAISS index: {self.index.ntotal} vectors, {self.index.d} dimensions"
-            )
+            logger.debug(f"Loaded FAISS index: {self.index.ntotal} vectors, {self.index.d} dimensions")
 
         # 2. Move to GPU if requested
         if self.use_gpu:
@@ -67,11 +71,11 @@ class Indexer:
         """Robustly shards the index across multiple GPUs using GpuMultipleClonerOptions."""
         res_count = self._get_gpu_count()
         if res_count == 0:
-            print("No GPUs found, using CPU index")
+            logger.debug("No GPUs found, using CPU index")
             return cpu_index
 
         actual_gpus = min(num_gpus, res_count)
-        print(f"Sharding index across {actual_gpus} GPUs...")
+        logger.debug(f"Sharding index across {actual_gpus} GPUs...")
 
         # Multiple versions compatibility
         try:
@@ -95,7 +99,7 @@ class Indexer:
                 try:
                     res = self.faiss.StandardGpuResources()
                     gpu_index = self.faiss.index_cpu_to_gpu(res, 0, cpu_index)
-                    print(f"Using single GPU (multi-GPU failed: {e})")
+                    logger.warning(f"Using single GPU (multi-GPU failed: {e})")
                     return gpu_index
                 except Exception as e2:
                     logger.warning(

@@ -8,22 +8,25 @@ on a specific infrastructure (local, Ray, AWS, K8s).
 from __future__ import annotations
 
 import abc
-from typing import Any, Dict, List, Optional
 import asyncio
 import logging
+from typing import Any, Dict, Optional
+
 from enroot import from_env, random_name
-from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
-from .containers import ContainerResource, create_ray_container_resource
+from enroot.errors import APIError, EnrootError
+from enroot.errors import TimeoutError as EnrootTimeoutError
+
+from .containers import ContainerResource
 from .containers.enroot_containers import enroot_container_name
 from .local_env_resource import LocalEnvResource
 from .models import APIModelResource, VLLMModelResource
 from .types import (
     APIModelResourceSpec,
     BaseResource,
+    BaseResourceSpec,
     ContainerResourceSpec,
     LocalEnvResourceSpec,
     ResourceStatus,
-    BaseResourceSpec,
     VLLMModelResourceSpec,
 )
 
@@ -457,6 +460,8 @@ class RayRunner(BaseRunner):
         ray_opts = spec.ray_actor_options
         opts: Optional[dict[str, Any]] = dict(ray_opts) if isinstance(ray_opts, dict) else None
         start_timeout = timeout if timeout is not None else 1800.0
+        from .containers import create_ray_container_resource  # imports ray
+
         resource = await create_ray_container_resource(
             spec,
             rid,

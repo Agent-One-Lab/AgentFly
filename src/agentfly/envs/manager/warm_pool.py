@@ -1,8 +1,13 @@
+""":class:`WarmPool`: a pool of pre-started environments created by a factory, handed out and returned (reset) for reuse."""
+
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from docker.errors import APIError, NotFound
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..env_base import BaseEnv
@@ -16,7 +21,6 @@ class WarmPool(Generic[T]):
         self._free: asyncio.LifoQueue[T] | None = None
         self._lock: asyncio.Lock | None = None
         self._spawn_tasks: list[asyncio.Task[None]] = []
-        # self._in_pool: set[T] = set()  # Track which envs are currently in the pool
 
     @property
     def size(self):
@@ -46,30 +50,15 @@ class WarmPool(Generic[T]):
             env = await self._free.get()
             await env.aclose()
 
-        # # 3. clear tracking set
-        # self._in_pool.clear()
-
     # ---------- token operations ----------
     async def acquire(self) -> T:
         assert self._free is not None
-        # print(f"[WarmPool] Current free queue size: {self._free.qsize()}")
-        # print(f"[POOL] free={self._free.qsize()}/{self._size}")
         env = await self._free.get()
-        # self._in_pool.discard(env)  # Remove from tracking set when acquired
         return env
 
     async def release(self, env: T, *, finished: bool = True):
-        # Prevent the same env from being released multiple times
-        # if env in self._in_pool:
-        #     # print(f"[WarmPool] Warning: Env {env} already in pool, skipping release")
-        #     return
-
         # We don't reset the env during release, and leave this to the user
-        # if finished:
-        #     await self.reset(env)
-        # self._in_pool.add(env)  # Mark as in pool before putting
         await self._free.put(env)
-        # print(f"[WarmPool] Current free queue size: {self._free.qsize()}")
 
     async def reset(self, env: T):
         try:
@@ -78,10 +67,10 @@ class WarmPool(Generic[T]):
             try:
                 await env.aclose()
             except NotFound:
-                print(f"[WarmPool] Env {env} not found")
+                logger.warning(f"[WarmPool] Env {env} not found")
                 await self._spawn()
             except APIError:
-                print(f"[WarmPool] Env {env} APIError")
+                logger.warning(f"[WarmPool] Env {env} APIError")
                 await self._spawn()
             except Exception as e:
                 raise e
@@ -92,5 +81,4 @@ class WarmPool(Generic[T]):
             env = self._factory()
             await env.start()
             await env.reset()
-            # self._in_pool.add(env)  # Mark as in pool before putting
             await self._free.put(env)

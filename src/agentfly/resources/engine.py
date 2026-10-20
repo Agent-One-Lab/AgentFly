@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import uuid
-from .types import BaseResource, ResourceStatus, BaseResourceSpec
-from .runner import LocalRunner, RayRunner, CloudRunner, K8sRunner
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from .runner import CloudRunner, K8sRunner, LocalRunner, RayRunner
+from .types import BaseResource, BaseResourceSpec, ResourceStatus
+
 if TYPE_CHECKING:
     from .runner import BaseRunner
 
@@ -327,25 +329,13 @@ class ResourceEngine:
 
     @classmethod
     async def close(cls) -> None:
-        """Shut down: end all free and acquired resources, clear store."""
+        """Shut down: end all free and acquired resources concurrently, clear store."""
         async with cls._lock:
-            acquired_list = list(cls._acquired.values())
-            free_list: List[Tuple[str, BaseResource]] = []
-            for key, resources in cls._free.items():
-                for r in resources:
-                    free_list.append((key, r))
+            resources = [resource for resource, _ in cls._acquired.values() if resource is not None]
+            for pool in cls._free.values():
+                resources.extend(pool)
             cls._acquired.clear()
             cls._free.clear()
-        for _, resource in acquired_list:
-            if resource is None:
-                continue
-            try:
-                await resource.end()
-            except Exception:
-                pass
-        for _, resource in free_list:
-            try:
-                await resource.end()
-            except Exception:
-                pass
+        # Failures are ignored: every resource still gets its end() call.
+        await asyncio.gather(*(resource.end() for resource in resources), return_exceptions=True)
 

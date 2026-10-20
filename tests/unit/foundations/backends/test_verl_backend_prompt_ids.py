@@ -4,12 +4,13 @@ The backend renders each prompt with the same chat-bricks call ``tokenize_trajec
 makes (earlier assistant turns spliced from their sampled ``token_ids``) and hands verl
 the ids, so the prompt vLLM samples from is the training row's prefix by construction.
 ``prompt_check`` then compares those ids against the ``prompts`` verl echoes back and
-reports on stdout, where the Ray log shows it.
+logs the result (``agentfly train`` shows AgentFly's INFO logs in the Ray log).
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -122,7 +123,7 @@ def test_sampling_prompt_is_the_training_render(tokenizer):
     text_render = tokenizer.apply_chat_template(
         [{"role": m["role"], "content": (m["content"] if isinstance(m["content"], str) else m["content"][0]["text"])}
          for m in msgs if m["role"] != "tool"] + [{"role": "user", "content": "You arrive at fridge 1. It is closed."}],
-        tokenize=True, add_generation_prompt=True)
+        tokenize=True, add_generation_prompt=True, return_dict=False)
     assert _contains(list(text_render), TEXT_THINK) and list(text_render) != sent
 
     # The sampled response is still passed through verbatim.
@@ -131,16 +132,18 @@ def test_sampling_prompt_is_the_training_render(tokenizer):
     assert "raw_prompt" in engine.calls[0]
 
 
-def test_prompt_check_reports_identical_with_turn_depth(tokenizer, capsys):
+def test_prompt_check_reports_identical_with_turn_depth(tokenizer, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentfly")
     msgs = multi_turn_messages(tokenizer)
     engine = EchoEngine(tokenizer, [IM_END])
     asyncio.run(_backend(tokenizer, engine).generate_async([msgs], return_dict=True, tools=[]))
-    out = capsys.readouterr().out
+    out = caplog.text
     assert "prompt_check: 1/1 rows identical" in out
     assert "assistant turns=[1]" in out
 
 
-def test_prompt_check_prints_mismatch_when_verl_rerenders(tokenizer, capsys):
+def test_prompt_check_prints_mismatch_when_verl_rerenders(tokenizer, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentfly")
     """Simulate the bug: verl ignores the ids and re-tokenizes the earlier turn from text."""
     msgs = multi_turn_messages(tokenizer)
 
@@ -151,7 +154,7 @@ def test_prompt_check_prints_mismatch_when_verl_rerenders(tokenizer, capsys):
     engine = EchoEngine(tokenizer, [IM_END], tamper=retokenize)
     backend = _backend(tokenizer, engine)
     asyncio.run(backend.generate_async([msgs], return_dict=True, tools=[]))
-    out = capsys.readouterr().out
+    out = caplog.text
     assert "PROMPT MISMATCH" in out and "1/1 rows differ" in out
     assert backend.prompt_check_stats["checked"] == 1 and backend.prompt_check_stats["mismatched"] == 1
 
@@ -164,15 +167,17 @@ def test_prompt_check_strict_raises(tokenizer):
         asyncio.run(backend.generate_async([msgs], return_dict=True, tools=[]))
 
 
-def test_prompt_check_can_be_disabled(tokenizer, capsys):
+def test_prompt_check_can_be_disabled(tokenizer, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentfly")
     msgs = multi_turn_messages(tokenizer)
     engine = EchoEngine(tokenizer, [IM_END], tamper=lambda row: row[:-1] + [0])
     backend = _backend(tokenizer, engine, check_prompt_consistency=False)
     asyncio.run(backend.generate_async([msgs], return_dict=True, tools=[]))
-    assert "prompt_check" not in capsys.readouterr().out and backend.prompt_check_stats["checked"] == 0
+    assert "prompt_check" not in caplog.text and backend.prompt_check_stats["checked"] == 0
 
 
-def test_vision_rows_fall_back_to_verl_render(tokenizer, capsys):
+def test_vision_rows_fall_back_to_verl_render(tokenizer, caplog):
+    caplog.set_level(logging.DEBUG, logger="agentfly")
     """Ids are text-only for now: a row with vision inputs is left for verl to render."""
     msgs = [
         {"role": "system", "content": "You are an agent."},
@@ -183,4 +188,4 @@ def test_vision_rows_fall_back_to_verl_render(tokenizer, capsys):
     backend = _backend(tokenizer, engine, check_prompt_consistency=False)  # the guard is not under test here
     asyncio.run(backend.generate_async([msgs], return_dict=True, tools=[]))
     assert "prompt_ids" not in engine.calls[0]
-    assert "vision inputs" in capsys.readouterr().out
+    assert "vision inputs" in caplog.text

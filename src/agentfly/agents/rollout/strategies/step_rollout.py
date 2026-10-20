@@ -22,7 +22,6 @@ the standalone training converter reads these segments and uses the internal
 import asyncio
 import json
 import logging
-import re
 import time
 import uuid
 from copy import deepcopy
@@ -32,15 +31,15 @@ from ....core import Context
 from ....core.context_config import ContextConfig
 from ....rewards.reward_base import calculate_reward
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
+from ....utils.monitor import Monitor
 from ...types import RunResult, Segment, Trajectory
 from ...utils.messages import Messages, MessagesList
-from ....utils.monitor import Monitor
-from ..base import Rollout, TOKEN_SAFETY_MARGIN
+from ..base import Rollout
 from ..events import FinishReason
 from ..loop.generation import generate_response
 from ..loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
-from .prompt_builders import resolve_prompt_builder
 from ..structures import Step
+from .prompt_builders import resolve_prompt_builder
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +106,7 @@ class StepRollout(Rollout):
         max_concurrent_chains: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
+        use_token_ids: bool = True,
         **kwargs,
     ) -> RunResult:
         """Roll out ``num_chains`` trajectories per task, async-concurrently.
@@ -115,10 +115,12 @@ class StepRollout(Rollout):
         per rollout. Conversations live in ``segments``; runtime ``steps`` provide
         the corresponding environment signals. Trajectories come back in
         ``(group_idx, chain_idx)`` order (the spec order). ``global_step`` sets the
-        metrics x-axis (see ``Rollout.resolve_global_step``).
+        metrics x-axis (see ``Rollout.resolve_global_step``). ``use_token_ids`` see
+        ``Rollout.run``.
         """
         self.validate_run_args(max_turns, num_chains, max_concurrent_chains)
         self.agent = agent
+        self.use_token_ids = bool(use_token_ids)
         Monitor.ensure_started()
         step = self.resolve_global_step(global_step)
 
@@ -255,6 +257,7 @@ class StepRollout(Rollout):
             action_msg, _ = await generate_response(
                 agent, None, gen_step, tools, step, traj_uid,
                 generation_config, context,
+                use_token_ids=self.use_token_ids,
             )
             full_messages.append(action_msg)
 
@@ -346,12 +349,12 @@ class StepRollout(Rollout):
         # Episode outcome (reuse the L2 reward path). Scale 1.0.
         outcome: Optional[float] = None
         reward_extras: Dict[str, Any] = {}
-        if agent._reward_fn is not None:
+        if agent.reward_fn is not None:
             context.trajectory = full_messages
             final_response = agent.extract_final_response(full_messages)
             context.final_response = final_response
             reward = await calculate_reward(
-                agent._reward_fn,
+                agent.reward_fn,
                 final_response=final_response,
                 trajectory=full_messages,
                 id=traj_uid,

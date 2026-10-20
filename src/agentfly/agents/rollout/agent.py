@@ -32,7 +32,7 @@ class RolloutAgent(Protocol):
     skills: Optional[List[Any]]
     system_prompt: Optional[str]
     default_tool_call_source: str
-    _reward_fn: Optional[Callable[..., Any]]
+    reward_fn: Optional[Callable[..., Any]]
 
     # --- template-method hooks the loop calls (subclasses override) ---
     async def generate_async(self, messages_list: List[List[Dict]], **kwargs) -> Any:

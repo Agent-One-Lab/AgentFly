@@ -11,6 +11,7 @@ the same resource the chess tools use.
 """
 
 from typing import Any, Dict
+
 from ..core import Context
 from ..envs.chess_env import ChessPuzzleEnv, ChessPuzzleSpec
 from .reward_base import reward

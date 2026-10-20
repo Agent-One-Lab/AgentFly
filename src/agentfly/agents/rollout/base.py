@@ -17,9 +17,12 @@ Layering:
 """
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
+from agentfly.tools.src.context.tools import fold_messages_with_summarize
 
 from ...core import Context
 from ...rewards.reward_base import calculate_reward
@@ -30,12 +33,10 @@ from ...utils.vision import image_to_data_uri
 from ..types import RunResult, Segment, Trajectory
 from ..utils.action_format import action_format_valid, message_text
 from ..utils.messages import Messages
-from agentfly.tools.src.context.tools import fold_messages_with_summarize
 from .events import FinishReason, ToolObserved
-from .structures import Chain, Step
 from .loop.metrics import aggregate_tool_metrics, count_tool_calls
 from .loop.tokens import estimate_chat_prompt_tokens, observation_token_length
-
+from .structures import Chain, Step
 
 # Extra tokens charged per tool observation for the chat-template prefix that wraps it
 # (e.g. ``<|im_start|>user<tool_response>`` ... ``</tool_response><|im_end|>``). Approximate;
@@ -47,7 +48,6 @@ TOOL_OBS_PREFIX_TOKENS = 15
 # at the exact ceiling can let an over-length prompt slip to vLLM — which RAISES
 # and kills the whole run. Clipping the guard this far below max_model_len absorbs
 # that drift. Env-overridable.
-import os
 TOKEN_SAFETY_MARGIN = int(os.environ.get("AGENTFLY_TOKEN_SAFETY_MARGIN", "512"))
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,10 @@ class Rollout(ABC):
     # (an "end task" sentinel, or a parser-supplied status). Distinct from the
     # continue/end/raise control vocabulary; the loop maps a match to ``end``.
     TERMINAL_MESSAGE_STATUS = frozenset({"terminal", "finish"})
+
+    # Whether generated assistant messages carry the sampled ``token_ids``; set per run
+    # from ``run(use_token_ids=...)``.
+    use_token_ids: bool = True
 
     # ---- L2: loop-control policy (the single authority for continue/end/raise) ----
 
@@ -481,7 +485,7 @@ class Rollout(ABC):
         # Always record the final trajectory segment so that histories capture
         chain.histories.append(current_step.messages.messages)
 
-        if agent._reward_fn is not None:
+        if agent.reward_fn is not None:
             # flatten the histories
             full_trajectory = []
             for segment in chain.histories:
@@ -502,7 +506,7 @@ class Rollout(ABC):
             }
 
             reward = await calculate_reward(
-                agent._reward_fn,
+                agent.reward_fn,
                 final_response=final_response,
                 **other_args,
                 trajectory=context.trajectory,
@@ -615,11 +619,14 @@ class Rollout(ABC):
         generation_config: Optional[Dict[str, Any]] = None,
         context_config: Optional[Any] = None,
         global_step: Optional[int] = None,
+        use_token_ids: bool = True,
         **kwargs,
     ) -> RunResult:
         """Drive the rollout for a batch of tasks and return a :class:`RunResult`.
 
         ``global_step`` is the caller's step counter for the metrics x-axis; see
-        :meth:`resolve_global_step`.
+        :meth:`resolve_global_step`. ``use_token_ids``: carry the backend's sampled token
+        ids onto generated assistant messages (see :func:`generate_response`); a strategy
+        stores it as ``self.use_token_ids`` for the run.
         """
         ...

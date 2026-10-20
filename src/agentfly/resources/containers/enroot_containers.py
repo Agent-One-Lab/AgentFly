@@ -40,10 +40,12 @@ def enroot_container_name(
 
 
 def clear_agentfly_containers() -> List[str]:
-    """Force-remove this node's leftover ``agentfly-*`` enroot containers.
+    """Stop and force-remove this node's leftover ``agentfly-*`` enroot containers.
 
     A thin wrapper over :func:`enroot.clear_enroot_containers` scoped to
-    :data:`ENROOT_CONTAINER_PREFIX`, meant to run once before training. Opt out
+    :data:`ENROOT_CONTAINER_PREFIX`, meant to run once before training. enroot-py 0.1.3+
+    also stops the containers' processes, so orphaned servers no longer keep the
+    removed root filesystems' disk space. Opt out
     with ``AF_ENROOT_CLEANUP_ON_START=0`` (e.g. when two training jobs share a node).
     Never raises: a failure (no enroot binary, an old enroot-py without ``prefix``)
     is logged and skipped so it cannot block a training launch. ``enroot list`` is
@@ -58,6 +60,6 @@ def clear_agentfly_containers() -> List[str]:
     except Exception as e:  # noqa: BLE001 — cleanup must never stop a training launch
         logger.warning("enroot cleanup skipped: %s", e)
         return []
-    if removed:
-        logger.info("removed %d stale enroot container(s): %s", len(removed), ", ".join(removed))
+    # print, not logger.info: the launch log should show what the sweep did.
+    print(f"[agentfly] enroot sweep: removed {len(removed)} stale container(s)")  # noqa: T201
     return removed

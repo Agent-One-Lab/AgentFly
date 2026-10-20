@@ -267,7 +267,7 @@ class SqsTransport:
         self._sqs.send_message(QueueUrl=self.queue_url, MessageBody=json.dumps(msg))
 
         parts: List[bytes] = []
-        status, last = 0, {}
+        status = 0
         deadline = time.time() + timeout
         while time.time() < deadline:
             resp = self._sqs.receive_message(
@@ -281,7 +281,6 @@ class SqsTransport:
                     continue
                 if r.get("req_id") != req_id:
                     continue          # stale reply from an earlier request
-                last = r
                 status = r.get("status_code") or status
                 kind = r.get("type")
                 if kind == "STREAM":

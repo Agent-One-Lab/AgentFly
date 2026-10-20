@@ -1,4 +1,11 @@
+"""``agentfly deploy``: print and run the ``vllm serve`` command for a model.
+
+Serves a model with an optional chat template, tool-call parser and tensor/pipeline/data
+parallelism, e.g. ``python -m agentfly.utils.deploy --model-name-or-path Qwen/Qwen2.5-3B-Instruct``.
+"""
+
 import os
+import shlex
 
 import click
 from chat_bricks import get_template
@@ -40,10 +47,10 @@ def vllm_serve(
         allowed_local_media_path_option = ""
     
     if override_generation_config:
-        override_generation_config_option = f"--override-generation-config {override_generation_config}"
+        # Quoted: the value is JSON (e.g. '{"temperature": 0.6}') and the command runs in a shell.
+        override_generation_config_option = f"--override-generation-config {shlex.quote(override_generation_config)}"
     else:
         override_generation_config_option = ""
-    # command = f"vllm serve {model_name_or_path} --chat-template {AF_DATA_DIR}/cache/jinja_template.jinja --tensor-parallel-size {tp} --pipeline-parallel-size {pp} --data-parallel-size {dp} --port {port} --enable-auto-tool-choice --tool-call-parser hermes --expand-tools-even-if-tool-choice-none"
     command = f"""vllm serve {model_name_or_path} \
 {template_option} \
 --trust-remote-code \
@@ -52,7 +59,8 @@ def vllm_serve(
 --data-parallel-size {dp} --port {port} \
 --gpu-memory-utilization {gpu_memory_utilization} \
 {tool_call_parser_option} \
-{allowed_local_media_path_option}"""
+{allowed_local_media_path_option} \
+{override_generation_config_option}"""
 
     print(command)
     os.system(command)
@@ -96,8 +104,8 @@ def main(
 
 
 if __name__ == "__main__":
-    "python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen2.5-3B-Instruct --template qwen2.5 --tp 2 --dp 2"
-    "python -m agentfly.utils.deploy --model_name_or_path openai/gpt-oss-20b --tp 1 --dp 1"
-    "python -m agentfly.utils.deploy --model_name_or_path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --tp 1 --dp 1"
-    "python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen3-VL-235B-A22B-Instruct --template qwen3-vl-instruct --tp 8 --dp 1"
+    "python -m agentfly.utils.deploy --model-name-or-path Qwen/Qwen2.5-3B-Instruct --template qwen2.5 --tp 2 --dp 2"
+    "python -m agentfly.utils.deploy --model-name-or-path openai/gpt-oss-20b --tp 1 --dp 1"
+    "python -m agentfly.utils.deploy --model-name-or-path deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --tp 1 --dp 1"
+    "python -m agentfly.utils.deploy --model-name-or-path Qwen/Qwen3-VL-235B-A22B-Instruct --template qwen3-vl-instruct --tp 8 --dp 1"
     main()

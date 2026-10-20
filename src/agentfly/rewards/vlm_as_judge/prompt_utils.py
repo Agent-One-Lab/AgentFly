@@ -1,3 +1,5 @@
+"""Prompt builders for VLM-as-judge rewards: format the judge prompt from a template, the task summary and its verification questions."""
+
 from __future__ import annotations
 
 import re

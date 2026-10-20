@@ -17,6 +17,7 @@ import base64
 import contextlib
 import io
 import json
+import logging
 import os
 import time
 from dataclasses import asdict, dataclass, field, is_dataclass
@@ -24,6 +25,8 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
 import numpy as np
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 # NOTE: ``wandb`` (~1.5s) is imported lazily inside WandbSink's methods so that
 # importing this module (pulled in by agent_base for the light Monitor/emit path)
@@ -161,9 +164,6 @@ class WandbSink(BaseSink):
     """Weights & Biases backend (lazy import)."""
 
     def __init__(self, project: str, **wandb_init_kwargs: Any) -> None:  # noqa: D401
-        # self.wandb = importlib.import_module("wandb")  # lazy, keeps wandb optional
-        # if wandb.run is None:
-        #     wandb.init(project=project, **wandb_init_kwargs)
         self._defined_axes: Set[Tuple[str, str]] = set()
         self.tables: Dict[str, Any] = {}  # values are wandb.Table (lazy import)
 
@@ -288,9 +288,7 @@ class Monitor:
         except RuntimeError:
             # No running event loop - this shouldn't happen in normal usage
             # but we'll handle it gracefully
-            print(
-                "[Monitor] Warning: No running event loop found. Monitor consumer not started."
-            )
+            logger.warning("[Monitor] No running event loop found. Monitor consumer not started.")
             cls._running = False
             cls._consumer_task = None
 
@@ -343,7 +341,7 @@ class Monitor:
                 try:
                     await sink.log(evt)
                 except Exception as exc:
-                    print(f"[Monitor] Sink {sink!r} failed: {exc}")
+                    logger.warning(f"[Monitor] Sink {sink!r} failed: {exc}")
         # drain any remaining events (best‑effort)
         while not queue.empty():
             queue.get_nowait()

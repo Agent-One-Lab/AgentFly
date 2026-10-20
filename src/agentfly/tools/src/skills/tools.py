@@ -28,7 +28,6 @@ from .skill_loader import (
     safe_skill_dir,
 )
 
-
 # read_skill_file output cap. Bounded so a reasoning builder can't blow up its
 # own context by reading several large skill files — at ~30k+ token context
 # GLM/M3 overrun their per-turn token budget mid-<think> and return an empty turn
@@ -327,9 +326,3 @@ async def run_skill_script(
         },
         ensure_ascii=False,
     )
-
-
-if __name__ == "__main__":
-    print(load_skill.schema)
-    print(read_skill_file.schema)
-    print(run_skill_script.schema)

@@ -1,3 +1,9 @@
+"""Validation of agent input messages.
+
+:class:`Messages` checks one task item (a dict with ``messages`` and optional dataset fields);
+:class:`MessagesList` checks a batch of them before a run.
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy

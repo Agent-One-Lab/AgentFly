@@ -28,11 +28,11 @@ async def test_undo_edit_reverts_last_edit():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = (await list_files(path=".", context=context))['observation']
+        listing = (await list_files(path=".", context=context)).observation
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
-        before = (await read_file(path=path, context=context))['observation']
+        before = (await read_file(path=path, context=context)).observation
         content_before = _strip_line_numbers(before)
         lines = [ln for ln in content_before.split("\n") if ln.strip()]
         if not lines:
@@ -45,19 +45,19 @@ async def test_undo_edit_reverts_last_edit():
             search_block=search_block,
             replace_block=replace_block,
             context=context,
-        ))['observation']
+        )).observation
         print(f"edit_result: {edit_result}")
         if "Error" in edit_result:
             pytest.skip("Edit failed, cannot test undo")
-        after_edit = (await read_file(path=path, context=context))['observation']
+        after_edit = (await read_file(path=path, context=context)).observation
         assert replace_block in _strip_line_numbers(after_edit)
 
-        undo_result = (await undo_edit(path=path, context=context))['observation']
+        undo_result = (await undo_edit(path=path, context=context)).observation
         print(f"undo_result: {undo_result}")
         ur = undo_result.lower()
         assert "undo successful" in ur or "error" in ur
 
-        after_undo = (await read_file(path=path, context=context))['observation']
+        after_undo = (await read_file(path=path, context=context)).observation
         print(f"after_undo: {after_undo}")
         assert search_block in _strip_line_numbers(after_undo)
         assert replace_block not in _strip_line_numbers(after_undo)
@@ -73,11 +73,11 @@ async def test_undo_edit_no_backup_returns_error():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        listing = (await list_files(path=".", context=context))['observation']
+        listing = (await list_files(path=".", context=context)).observation
         paths = [p.strip() for p in listing.split("\n") if p.strip()]
         assert len(paths) > 0
         path = paths[0]
-        result = (await undo_edit(path=path, context=context))['observation']
+        result = (await undo_edit(path=path, context=context)).observation
         # No prior edit: file_manager returns "No edit history for this file."
         print(f"observation: {result}")
         rl = result.lower()

@@ -15,6 +15,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from ....core.context import Context
+from ....tools.src.shell.tools import run_shell_command
 from ....tools.types import ToolResult
 from ...agent_base import BaseAgent
 from ...rollout.structures import Step
@@ -23,8 +24,7 @@ from ..action_agent import (
     CONTEXT_TRIGGER_MESSAGE_TYPE_ENV,
     CONTEXT_TRIGGER_TURNS_ENV,
 )
-from ....tools.src.shell.tools import run_shell_command
-from .prompts import Qwen3CoderSystemPrompt, Qwen3CoderToolPrompt
+from .prompts import Qwen3CoderToolPrompt
 
 
 class Qwen3CoderSWEAgent(BaseAgent):

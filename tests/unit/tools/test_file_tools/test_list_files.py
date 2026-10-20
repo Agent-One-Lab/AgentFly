@@ -4,6 +4,7 @@ import pytest
 
 from agentfly.core import Context
 from agentfly.tools.src.file.tools import list_files
+from agentfly.tools.types import ToolResult
 
 IMAGE_ID = "swebench/swesmith.x86_64.andialbrecht_1776_sqlparse.e57923b3"
 
@@ -18,9 +19,9 @@ async def test_list_files_root():
     )
     try:
         result = await list_files(path=".", context=context)
-        assert isinstance(result, dict), f"expected tool dict, got {type(result)}"
-        assert "observation" in result, f"missing observation: {result.keys()}"
+        assert isinstance(result, ToolResult), f"expected ToolResult, got {type(result)}"
         obs = result.observation
+        assert obs, "empty observation"
         print(obs)
     finally:
         await context.end_resource(scope="rollout")
@@ -37,8 +38,8 @@ async def test_list_files_path_slash():
     try:
         dot = await list_files(path=".", context=context)
         slash = await list_files(path="/", context=context)
-        assert "observation" in dot and "observation" in slash
         d_obs, s_obs = dot.observation, slash.observation
+        assert d_obs == s_obs, "path='/' should list the same workspace root as '.'"
         print(d_obs)
         print(s_obs)
     finally:

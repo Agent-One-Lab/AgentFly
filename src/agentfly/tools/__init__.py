@@ -92,7 +92,6 @@ __all__ = [
     "summarize",
     "alfworld_step",
     "calculator",
-    "google_search_serper",
     "dense_retrieve",
     "async_dense_retrieve",
     "async_dense_retrieve_api",

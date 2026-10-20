@@ -105,19 +105,19 @@ experiment_name="chess_puzzle_solver_$(date +%Y%m%d_%H%M%S)"
 # Launch Training
 # ============================================================================
 
-python3 -m verl.trainer.main_ppo \
+python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
     data.train_files=$train_dataset \
     data.val_files=$val_dataset \
     data.train_batch_size=$batch_size \
-    agent.agent_type=$agent_type \
-    agent.tools=$tools \
-    agent.template=$template \
-    agent.model_name_or_path=$model \
-    agent.max_turns=${max_turns} \
-    agent.backend=${agent_backend} \
-    agent.reward_name=$reward_name \
-    agent.num_chains=$num_chains \
+    agent.init_config.agent_type=$agent_type \
+    agent.init_config.tools=$tools \
+    agent.init_config.template=$template \
+    agent.init_config.model_name_or_path=$model \
+    agent.run_config.max_turns=${max_turns} \
+    agent.init_config.backend_config.backend=${agent_backend} \
+    agent.init_config.reward_name=$reward_name \
+    agent.run_config.num_chains=$num_chains \
     agent.use_agent=True \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

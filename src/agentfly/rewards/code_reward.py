@@ -1,3 +1,5 @@
+"""Code reward: ``code_reward_test`` runs code in the rollout's Python sandbox and scores the result."""
+
 from ..core import Context
 from ..envs.python_env import PythonSandboxSpec
 from .reward_base import reward

@@ -1,3 +1,10 @@
+"""ALFWorld tool: ``alfworld_step`` takes one text action in a containerized ALFWorld game.
+
+The ALFWorld environment is acquired per rollout through the context and reset to the episode's
+task on first use. Observations end with the admissible-action menu, and each step reports the
+raw environment reward plus ``won``/``lost`` metrics used by the ALFWorld reward.
+"""
+
 import traceback
 
 from ....core import Context
@@ -107,10 +114,3 @@ async def alfworld_step(action: str, context: Context):
         }
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-if __name__ == "__main__":
-    print("ALFWorld Tools Schema:")
-    print("======================")
-    print("alfworld_step schema:")
-    print(alfworld_step.schema)

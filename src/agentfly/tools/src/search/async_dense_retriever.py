@@ -1,3 +1,14 @@
+"""Dense Wikipedia retrieval: an asynchronous E5 + FAISS retriever and the ``async_dense_retrieve`` tool.
+
+:class:`DenseRetriever` embeds queries with ``intfloat/e5-base-v2`` and searches a FAISS index over
+the wiki-18 corpus, loading the corpus in the background and caching embeddings and documents.
+The tool builds one shared retriever on first use, fetching a missing corpus/index first
+(:func:`~agentfly.utils.download.ensure_tool_data`). Heavy dependencies (torch, transformers,
+datasets) are imported only when a retriever is built.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import logging
 import multiprocessing
@@ -5,18 +16,18 @@ import os
 import pickle
 import threading
 from concurrent.futures import ThreadPoolExecutor
-
-import datasets
-import torch
-from torch import Tensor
-from transformers import AutoModel, AutoTokenizer
+from typing import TYPE_CHECKING
 
 from .... import AF_CACHE_DIR
 from ...decorator import tool
 from .faiss_indexer import Indexer
 
+# torch / transformers / datasets are imported where a retriever is built, so importing the
+# tool (which loading any built-in tool does) stays cheap.
+if TYPE_CHECKING:
+    from torch import Tensor
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 def average_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
@@ -44,6 +55,9 @@ class DenseRetriever:
         self._max_cache = 10000
 
         # 1. Load Model & Tokenizer
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
         model_name = "intfloat/e5-base-v2"
         # Use CPU for now
         self.device = torch.device("cpu")
@@ -56,7 +70,6 @@ class DenseRetriever:
 
         # 2. Apply Hardware Optimizations
         if self.device.type == "cpu":
-            # self.model = quantize_dynamic(self.model, {torch.nn.Linear}, dtype=torch.qint8)
             pass
         else:
             self.model.half()
@@ -87,6 +100,8 @@ class DenseRetriever:
         # This prevents the .cache.pkl file from being used with the new loading mechanism
         # In a real scenario, you might want more robust cache invalidation
 
+        import datasets
+
         corpus = datasets.load_dataset(
             "json",
             data_files=self.corpus_file,
@@ -114,6 +129,8 @@ class DenseRetriever:
             prefixed, padding=True, truncation=True, max_length=256, return_tensors="pt"
         )
         batch = {k: v.to(self.device) for k, v in batch.items()}
+
+        import torch
 
         with torch.inference_mode():
             out = self.model(**batch)
@@ -176,6 +193,9 @@ GLOBAL_RETRIEVER = None
 async def async_dense_retrieve(query: str):
     global GLOBAL_RETRIEVER
     if GLOBAL_RETRIEVER is None:
+        from ....utils.download import ensure_tool_data
+
+        ensure_tool_data("async_dense_retrieve")  # corpus + index, if missing (approval-gated)
         GLOBAL_RETRIEVER = DenseRetriever(
             corpus_file=os.path.join(
                 AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"

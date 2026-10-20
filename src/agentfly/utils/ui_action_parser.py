@@ -1,5 +1,13 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
+
+"""Parse GUI-agent action text into structured actions and PyAutoGUI code.
+
+Handles UI-TARS-style ``Thought: ... Action: ...`` responses: extracts actions and their
+coordinates, rescales coordinates to the screen (Qwen2-VL ``smart_resize``), and renders the
+actions as PyAutoGUI code.
+"""
+
 import ast
 import logging
 import math
@@ -8,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-IMAGE_FACTOR = 1  # Changed to match gui_reward.py
+IMAGE_FACTOR = 1  # Changed to match gui_rewards.py
 MIN_PIXELS = 100 * 28 * 28
 MAX_PIXELS = 16384 * 28 * 28
 MAX_RATIO = 200
@@ -194,16 +202,12 @@ def parse_action_to_structure_output(
     # Extract thought and reflection
     if text.startswith("Thought:"):
         thought_pattern = r"Thought: (.+?)(?=\s*Action: |$)"
-        # thought_hint = "Thought: "
     elif text.startswith("Reflection:"):
         thought_pattern = r"Reflection: (.+?)Action_Summary: (.+?)(?=\s*Action: |$)"
-        # thought_hint = "Reflection: "
     elif text.startswith("Action_Summary:"):
         thought_pattern = r"Action_Summary: (.+?)(?=\s*Action: |$)"
-        # thought_hint = "Action_Summary: "
     else:
         thought_pattern = r"Thought: (.+?)(?=\s*Action: |$)"
-        # thought_hint = "Thought: "
 
     reflection, thought = None, None
     thought_match = re.search(thought_pattern, text, re.DOTALL)

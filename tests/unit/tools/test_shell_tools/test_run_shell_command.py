@@ -17,7 +17,7 @@ async def test_run_shell_command_echo():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        result = (await run_shell_command(cmd="echo hello", context=context))['observation']
+        result = (await run_shell_command(cmd="echo hello", context=context)).observation
         print(f"observation: {result}")
         assert "hello" in result
     finally:
@@ -32,7 +32,7 @@ async def test_run_shell_command_pwd():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        result = (await run_shell_command(cmd="pwd", context=context))['observation']
+        result = (await run_shell_command(cmd="pwd", context=context)).observation
         print(f"observation: {result}")
         assert len(result.strip()) > 0
     finally:
@@ -47,7 +47,7 @@ async def test_run_shell_command_ls():
         metadata={"image_id": IMAGE_ID},
     )
     try:
-        result = (await run_shell_command(cmd="ls -la", context=context))['observation']
+        result = (await run_shell_command(cmd="ls -la", context=context)).observation
         print(f"observation: {result}")
     finally:
         await context.end_resource(scope="rollout")
@@ -60,7 +60,7 @@ async def test_run_shell_command_requires_image_id():
         group_id="group_shell_tools",
         metadata={},
     )
-    result = (await run_shell_command(cmd="echo x", context=context))['observation']
+    result = (await run_shell_command(cmd="echo x", context=context)).observation
     print(f"observation: {result}")
     assert "Error" in result
     assert "image_id" in result

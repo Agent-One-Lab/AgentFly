@@ -66,16 +66,7 @@ The tool itself is just a regular method decorated with `@tool`. Because the fir
        self.is_method = True
    ```
 
-2. **Instance Binding**: During agent initialization, the framework automatically sets the instance for method tools:
-   ```python
-   tool_methods = []
-   for name, method in inspect.getmembers(self):
-       if isinstance(method, Tool):
-           tool_methods.append(method)
-   for tool_method in tool_methods:
-       if hasattr(tool_method, 'is_method') and tool_method.is_method:
-           tool_method.instance = self
-   ```
+2. **Instance Binding**: `@tool` on a method creates one tool class shared by every instance of the agent class. During agent initialization (`BaseAgent._bind_method_tools`), each agent creates its **own** tool instance for every method tool of its class, binds it to itself, sets it as an instance attribute (so `self.my_tool` is this agent's tool), and uses it in place of the shared class in its `tools` list. Two agents of the same class therefore never share a tool's `self`. When the model calls a tool, the agent runs its own tool objects (`submit_tool_call(..., tools=...)`), falling back to the global registry only for names it does not hold.
 
 3. **Execution**: When a method tool is called, it's executed with the bound instance:
    ```python

@@ -1,3 +1,5 @@
+"""LLM-as-judge reward: ``llm_as_judge_reward`` asks a judge model to rate a response against a reference answer."""
+
 from typing import Dict
 
 from ..reward_base import reward
@@ -42,13 +44,3 @@ Score:"""
         score = 0.0
 
     return {"reward": score, "raw_score": score}
-
-
-if __name__ == "__main__":
-    # Test the reward function
-    # Import here to avoid circular imports during normal operation
-    from ..reward_base import get_reward_from_name
-
-    reward_fn = get_reward_from_name("llm_as_judge_reward")
-    result = reward_fn("I got answer is 2/3", "I got answer is 2/3")
-    print(result)

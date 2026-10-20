@@ -1,4 +1,7 @@
+""":class:`RedisEnv`: a local ``redis-server`` process used as a cache by the (disabled) Google search tool."""
+
 import asyncio
+import logging
 import os
 import socket
 import subprocess
@@ -6,6 +9,8 @@ import subprocess
 import redis
 
 from .env_base import BaseEnv
+
+logger = logging.getLogger(__name__)
 
 global_redis_env = None
 
@@ -34,10 +39,8 @@ class RedisEnv(BaseEnv):
         config_path = os.path.join(AF_CONFIG_DIR, "redis", "redis.conf")
         data_path = os.path.join(AF_DATA_DIR, "redis")
         os.makedirs(data_path, exist_ok=True)
-        print(
-            f"Starting Redis server at {self.host}:{self.port} with config {config_path}"
-        )
-        print(f"Using data directory: {data_path}")
+        logger.debug(f"Starting Redis server at {self.host}:{self.port} with config {config_path}")
+        logger.debug(f"Using data directory: {data_path}")
 
         self.process = subprocess.Popen(
             [
@@ -64,13 +67,11 @@ class RedisEnv(BaseEnv):
                 self.client = redis.Redis(host=self.host, port=self.port, db=self.db)
                 # Test the connection
                 self.client.ping()
-                print(f"Successfully connected to Redis at {self.host}:{self.port}")
+                logger.debug(f"Successfully connected to Redis at {self.host}:{self.port}")
                 break
             except redis.exceptions.ConnectionError as e:
                 if attempt < max_retries - 1:
-                    print(
-                        f"Failed to connect to Redis (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s..."
-                    )
+                    logger.warning(f"Failed to connect to Redis (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
                 else:
@@ -107,7 +108,7 @@ class RedisEnv(BaseEnv):
     async def aclose(self):
         global global_redis_env
         if self == global_redis_env:
-            print("Skip global redis env close")
+            logger.debug("Skip global redis env close")
         else:
             if self.process:
                 self.process.terminate()

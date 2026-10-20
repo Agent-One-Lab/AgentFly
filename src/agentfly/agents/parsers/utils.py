@@ -1,3 +1,5 @@
+"""Parse tool calls out of model text (:func:`extract_tool_calls`), accepting Qwen-style ``<tool_call>`` JSON and similar formats."""
+
 import re
 from typing import Dict, List
 

@@ -5,6 +5,7 @@ import pytest
 
 
 @pytest.mark.gpu
+@pytest.mark.local_server
 @pytest.mark.asyncio
 async def test_image_agent_client():
     # --8<-- [start:client_backend]
@@ -81,7 +82,7 @@ async def test_image_agent_openai():
 
 @pytest.mark.gpu
 @pytest.mark.asyncio
-async def test_image_agent_async_vllm():
+async def test_image_agent_async_vllm(release_image_agent):
     # --8<-- [start:async_vllm_backend]
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
@@ -115,7 +116,10 @@ async def test_image_agent_async_vllm():
             ]
         }
     ]
-    result = await agent.run(
-        messages=messages_list, max_turns=4, num_chains=1
-    )
-    print_trajectory(result[0])
+    try:
+        result = await agent.run(
+            messages=messages_list, max_turns=4, num_chains=1
+        )
+        print_trajectory(result[0])
+    finally:
+        release_image_agent(agent)

@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-
 # A skill name is one or more lowercase/digit/hyphen segments, separated by
 # forward slashes. This allows simple names ("hello-skill") AND nested paths
 # under the skills root ("microsoft/azure-skills/azure-upgrade"). Each segment

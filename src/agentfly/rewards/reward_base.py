@@ -1,3 +1,11 @@
+"""Reward base class, the ``@reward`` decorator, and the reward registry.
+
+A reward is a function (``@reward(name=...)``) or a :class:`BaseReward` subclass that returns a
+float or a dict with a ``reward`` key. :func:`calculate_reward` runs it and normalizes the result
+into a :class:`~agentfly.rewards.types.RewardResult`; :func:`get_reward_from_name` resolves
+registered names and import references, importing the built-ins only when needed.
+"""
+
 import inspect
 from typing import Callable, List, Optional
 
@@ -60,11 +68,11 @@ class BaseReward:
 
     ```python
     @reward(name="my_reward")
-    def my_reward_function(prediction: str, answer: str) -> float:
-        return 1.0 if prediction == answer else 0.0
+    def my_reward_function(final_response: str, answer: str) -> float:
+        return 1.0 if final_response == answer else 0.0
 
     # Call with keyword arguments
-    result = await my_reward(prediction="hello", answer="hello")
+    result = await my_reward(final_response="hello", answer="hello")
     ```
 
     2. Inheritance-based (new pattern):
@@ -78,22 +86,22 @@ class BaseReward:
             super().__init__()  # Class attributes are set at class definition time
             self.threshold = threshold  # Instance data
 
-        def call(self, prediction: str, answer: str) -> float:
+        def call(self, final_response: str, answer: str) -> float:
             \"\"\"
-            Calculate reward based on prediction and answer.
+            Calculate reward based on the final response and answer.
 
             Args:
-                prediction (str): The predicted answer
+                final_response (str): The agent's final response
                 answer (str): The correct answer
 
             Returns:
                 float: The reward value
             \"\"\"
-            return 1.0 if prediction == answer else 0.0
+            return 1.0 if final_response == answer else 0.0
 
     # Create instance and call with keyword arguments
     my_reward = MyReward()
-    result = await my_reward(prediction="hello", answer="hello")
+    result = await my_reward(final_response="hello", answer="hello")
     ```
 
     Note: Metadata (name, etc.) is stored as class attributes.
@@ -218,7 +226,7 @@ class BaseReward:
         Allow rewards to be called directly as functions.
 
         Args:
-            **kwargs: All arguments as keyword arguments (e.g. context, prediction, env).
+            **kwargs: All arguments as keyword arguments (e.g. context, final_response, env).
 
         Returns:
             reward_value_or_dict or coroutine: Coroutine if async, else direct result.
@@ -391,8 +399,11 @@ def get_reward_from_name(reward_name: str) -> BaseReward | type[BaseReward]:
     Raises:
         KeyError: If the reward name is not found in the registry
     """
-    from ..utils.references import resolve_reference
-    ensure_builtins_loaded()
+    from ..utils.references import is_reference, resolve_reference
+
+    # The built-ins are loaded only if the name is neither registered nor an import reference.
+    if reward_name.lower() not in REWARD_REGISTRY and not is_reference(reward_name):
+        ensure_builtins_loaded()
     # Accepts a registered name OR an import reference ("module:attr",
     # "/path.py:attr") so a custom reward loads without a pre-import.
     return resolve_reference(reward_name, REWARD_REGISTRY, "reward")
@@ -427,5 +438,5 @@ def list_available_rewards() -> List[str]:
 
 
 @reward(name="fake_reward")
-def fake_reward(prediction: str, **kwargs) -> float:
+def fake_reward(final_response: str, **kwargs) -> float:
     return 0.0

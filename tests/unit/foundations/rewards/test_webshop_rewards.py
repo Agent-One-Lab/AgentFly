@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentfly.rewards.webshop_reward import webshop_episode_reward, webshop_reward
+from agentfly.rewards.webshop_rewards import webshop_episode_reward, webshop_reward
 
 
 def _ctx(score=None, error=None):

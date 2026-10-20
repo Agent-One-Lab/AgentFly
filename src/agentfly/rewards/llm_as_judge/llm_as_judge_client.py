@@ -1,3 +1,10 @@
+"""LLM-as-judge client for math answers: ``llm_as_judge_math_reward``.
+
+Sends the response and reference answer to judge model servers (found through their server
+instance files) with round-robin load balancing and rate limiting, and parses the judge's JSON
+score.
+"""
+
 import asyncio
 import glob
 import json
@@ -24,8 +31,6 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 def get_server_ips(model: str) -> List[str]:
     """Get list of server IPs from the most recent complete server instances file for a specific model"""
-    # Get the directory where this utils.py file is located
-    # current_dir = os.path.dirname(os.path.abspath(__file__))
     server_status_dir = os.path.join(
         REPO_ROOT.parent.parent, "data-process", "vllm_server", "server_status"
     )
@@ -308,7 +313,6 @@ class LLMClient:
             api_key: API key for authentication
         """
         self.timeout_seconds = timeout_seconds
-        # server_ips = get_server_ips(model)
         server_ips = ["10.24.0.80"]
         # Create a rate limiter for each instance
         rate_limiters = [RateLimiter(max_window_size_per_instance) for _ in server_ips]

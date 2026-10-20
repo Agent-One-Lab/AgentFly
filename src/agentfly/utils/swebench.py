@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, List
 
 import click
-from ..tools import run_shell_command
+
 from ..agents.specialized.swe_agents import BashSWEAgent, Qwen3CoderSWEAgent
 from ..agents.specialized.swe_agents.prompts import (
     InstructionSystemPrompt,
@@ -39,7 +39,7 @@ from ..agents.specialized.swe_agents.prompts import (
 from ..agents.types import RunResult
 from ..core import ContextConfig
 from ..rewards.reward_base import get_reward_from_name
-from ..tools import create_file, edit_file, grep_search, read_file, run_python, undo_edit
+from ..tools import create_file, edit_file, grep_search, read_file, run_python, run_shell_command, undo_edit
 from .monitor import serialize_for_json
 
 

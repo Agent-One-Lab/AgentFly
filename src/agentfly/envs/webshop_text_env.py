@@ -1,4 +1,13 @@
+"""WebShop text environment backed by a containerized WebShop simulator.
+
+:class:`WebShopEnv` talks to the simulator server over HTTP: it starts sessions (optionally with
+a caller-provided goal and prices), performs ``search[...]`` / ``click[...]`` actions, and reads
+the purchase score. :data:`WebShopSpec` is the resource spec tools and rewards acquire, and
+:func:`server_mount` bind-mounts the repository's simulator server into the container.
+"""
+
 import asyncio
+import json
 import os
 import random
 import re
@@ -31,6 +40,21 @@ ACTION_TO_TEMPLATE = {
 # is aligned to verl-agent/RAGEN for framework comparison. (The old
 # `rifoag/webshop-simulator-env:latest` shipped a 1,000-doc index over the full
 # catalog -> 0% training-goal coverage; do not use it.)
+def server_mount() -> dict:
+    """Bind-mount the repo's simulator server over the image's copy.
+
+    The images predate per-session goals (``POST /session/{id}``, used for verl-agent-aligned
+    tasks); mounting ``dockers/webshop_env/webshop_simulator_server.py`` serves the current server
+    without an image rebuild. Opt out with ``AF_WEBSHOP_SERVER_MOUNT=0`` (e.g. once an image
+    ships the same server) or when the source file is not present.
+    """
+    source = os.path.join(os.path.dirname(__file__), "..", "dockers", "webshop_env", "webshop_simulator_server.py")
+    source = os.path.abspath(source)
+    if os.environ.get("AF_WEBSHOP_SERVER_MOUNT", "1") != "1" or not os.path.isfile(source):
+        return {}
+    return {f"{source}:/app/webshop_simulator_server.py:none": "bind,ro"}
+
+
 WebShopSpec = ContainerResourceSpec(
     category="webshop",
     image=os.environ.get("WEBSHOP_IMAGE", "reasonwang/webshop-env:full"),
@@ -39,6 +63,7 @@ WebShopSpec = ContainerResourceSpec(
     start_timeout=180.0,
     host_ip="127.0.0.1",
     max_global_num=64,
+    mount=server_mount(),
 )
 
 
@@ -60,6 +85,10 @@ class WebShopEnv(ContainerResource):
         self.state = {"html": None, "url": None}
         self.text_to_clickable = None
         self.server = None  # no server ref in resource mode
+        # True while the current episode's goal was provided by the caller (``goal_json``);
+        # the server then scores purchases against that goal and its prices, not ``task_id``.
+        self.session_goal = False
+        self.goal_session_id = "g" + "".join(random.choices(string.ascii_lowercase, k=10))
 
     @property
     def category(self) -> str:
@@ -114,7 +143,30 @@ class WebShopEnv(ContainerResource):
 
         Returns:
             str: None (kept for compatibility)
+
+        When ``env_args`` carries ``goal_json`` (and optionally ``prices_json``) the episode's goal
+        and product prices come from the caller instead of the server's goal list — e.g. tasks
+        generated from verl-agent's env workers. Failures on that path raise: silently falling
+        back to the server's own goal would train on different tasks.
         """
+        goal_json = (env_args or {}).get("goal_json")
+        if goal_json:
+            goal = json.loads(goal_json) if isinstance(goal_json, str) else goal_json
+            prices = (env_args or {}).get("prices_json") or {}
+            prices = json.loads(prices) if isinstance(prices, str) else prices
+            self.session_id = self.goal_session_id
+            r = await self._client.post(f"/session/{self.session_id}", json={"goal": goal, "prices": prices})
+            if r.status_code != 200:
+                raise RuntimeError(
+                    f"WebShop server rejected a caller-provided goal (HTTP {r.status_code}); the server "
+                    "must support POST /session/{id} (see AF_WEBSHOP_SERVER_MOUNT)."
+                )
+            r = await self._client.get(f"/index/{self.session_id}")
+            self.state.update({"html": r.text, "url": f"/index/{self.session_id}"})
+            self.text_to_clickable = None
+            self.session_goal = True
+            return
+        self.session_goal = False
         try:
             task_id = env_args.get("task_id", None)
             if task_id is not None:
@@ -160,9 +212,8 @@ class WebShopEnv(ContainerResource):
             url_parts = current_url.split("/")
             asin = url_parts[3]
             options = literal_eval(url_parts[4])
-            r = await self._client.get(
-                f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}"
-            )
+            query = "" if self.session_goal or task_id is None else f"?task_id={task_id}"
+            r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}{query}")
             r = r.json()
             self.state.update(
                 {
@@ -298,7 +349,7 @@ class WebShopEnv(ContainerResource):
                             }
                         )
                 elif action_arg == END_BUTTON.lower():
-                    if task_id:
+                    if task_id and not self.session_goal:
                         r = await self._client.get(
                             f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}"
                         )
@@ -584,19 +635,6 @@ class WebShopEnv(ContainerResource):
             return element.parent.name not in ignore and not isinstance(
                 element, Comment
             )
-
-    @staticmethod
-    async def acquire():
-        """
-        Acquire and start a new WebAgentTextEnv environment asynchronously.
-
-        Returns:
-            WebAgentTextEnv: The started environment instance.
-        """
-        env = WebAgentTextEnv()
-        await env.start()
-        await env.reset()
-        return env
 
     @staticmethod
     def parse_action(action):

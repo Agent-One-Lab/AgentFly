@@ -69,7 +69,7 @@ async def test_tool_reward():
 
     @reward(name="math_reward_string_equal")
     def math_reward_string_equal(
-        prediction: str, answer: str, trajectory: List[Dict]
+        final_response: str, answer: str, trajectory: List[Dict]
     ) -> float:
         def extract_last_number(s: str):
             matches = re.findall(r"\d+", s)  # find all sequences of digits
@@ -83,9 +83,9 @@ async def test_tool_reward():
         if tool_count < 1:
             return 0.0
         else:
-            prediction = extract_last_number(prediction)
+            predicted = extract_last_number(final_response)
 
-            if prediction == answer:
+            if predicted == answer:
                 return 1.0
             else:
                 return 0.1

@@ -1,3 +1,5 @@
+""":class:`CodeAgent`: an agent that writes Python in markdown code blocks and runs it with the code interpreter tool."""
+
 import json
 import re
 from typing import List, Optional, Tuple
@@ -31,7 +33,6 @@ CodeAgentSystemPrompt = """The user asks a question, and you solve it in a multi
 The code is in markdown format, enclosed with ```python and ```. In each turn, only use code to solve the question for one step, and you can stop to wait for the execution result. Do not try to solve the whole question with one code snippet. Only when you get the final answer, can you give the answer enclosed with <answer> and </answer>.
 """
 
-# CodeAgentSystemPrompt = r"""The user asks a question, and you solve it. You first think about the reasoning process in the mind and then provide the user with the answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>. And your final answer will be extracted automatically by the \boxed{} tag."""
 
 
 class CodeAgent(BaseAgent):
@@ -99,8 +100,3 @@ class CodeAgent(BaseAgent):
             new_messages_list.append(message)
 
         return new_messages_list
-
-
-if __name__ == "__main__":
-    """python -m agents.agents.templates.template"""
-    pass

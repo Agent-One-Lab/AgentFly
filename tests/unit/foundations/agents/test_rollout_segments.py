@@ -40,7 +40,7 @@ class FakeAgent:
     tokenizer = None
     processor = None
     max_model_len = None
-    _reward_fn = object()
+    reward_fn = object()
 
     def __init__(self, tool_names, terminal_after=None):
         self.tool_names = tool_names
@@ -71,12 +71,13 @@ class FakeAgent:
 
 
 async def fake_generation(agent, chain, current_step, tools, depth, chain_id,
-                          generation_config, context):
+                          generation_config, context, use_token_ids=True):
     message = {
         "role": "assistant",
         "content": [{"type": "text", "text": f"A{depth + 1}"}],
-        "token_ids": [101 + depth, 2],
     }
+    if use_token_ids:
+        message["token_ids"] = [101 + depth, 2]
     names = agent.tool_names[depth]
     if names:
         message["tool_calls"] = [
@@ -526,7 +527,7 @@ async def test_no_reward_function_returns_none(strategy_cls, tool_names, monkeyp
     monkeypatch.setattr(rollout_base, "calculate_reward", unexpected_reward)
     monkeypatch.setattr(step_rollout, "calculate_reward", unexpected_reward)
     agent = FakeAgent(tool_names, terminal_after=1)
-    agent._reward_fn = None
+    agent.reward_fn = None
     result = await run(strategy_cls(), agent)
     assert result.rewards == [None]
     assert not any(event.name == "agent/rollout/reward" for event in isolated_runtime)
@@ -592,7 +593,7 @@ async def test_rollouts_merge_the_same_tool_metric_averages(
 ):
     agent = FakeAgent([["act"], ["act"], []])
     if not reward_enabled:
-        agent._reward_fn = None
+        agent.reward_fn = None
     results = [
         ToolResult(name="act", arguments={}, observation="O1", step_reward=0.0,
                    metrics={"valid": True, "cost": 2, "note": "text"}),
@@ -764,7 +765,7 @@ async def test_failed_chain_generation_has_no_completed_turn(monkeypatch, isolat
 
     monkeypatch.setattr(chain_rollout, "generate_response", fail)
     agent = FakeAgent([[]])
-    agent._reward_fn = None
+    agent.reward_fn = None
     result = await run(chain_rollout.ChainRollout(), agent)
     assert result[0].finish_reason == "max_model_len"
     assert result[0].num_turns == 0

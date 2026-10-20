@@ -1,22 +1,19 @@
 """VLM as Judge Reward Function for AgentFly RL Training"""
 
-import os
-import sys
-import re
-import json
-import uuid
 import asyncio
+import json
 import logging
-import time
-import concurrent.futures
-from typing import Dict, Any, Optional, List, Tuple
-from pathlib import Path
-from .video_generation import VideoGenerator, can_open_video, extract_code_from_response
-from .prompt_utils import create_vlm_prompt, create_vlm_prompt_custom, create_vlm_prompt_from_template
+import os
+import random  # TEMP (GLM replicas)
+import re
+import uuid
+from typing import Any, Dict, List, Optional, Tuple
 
 from ...core import Context
-from ..reward_base import reward
 from ...resources import APIModelResourceSpec
+from ..reward_base import reward
+from .prompt_utils import create_vlm_prompt, create_vlm_prompt_from_template
+from .video_generation import VideoGenerator, can_open_video, extract_code_from_response
 
 
 def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
@@ -339,12 +336,6 @@ def calculate_weighted_reward(results: List[Dict], questions_list: List[Dict]) -
         scores.append(score)
         weights.append(weight)
     
-    # Calculate weighted average
-    # if weights:
-    #     weighted_sum = sum(s * w for s, w in zip(scores, weights))
-    #     total_weight = sum(weights)
-    #     reward = weighted_sum / total_weight if total_weight > 0 else 0.0
-    # else:
     reward = sum(scores) / len(scores) if scores else 0.0
     
     return reward
@@ -512,6 +503,7 @@ def _calculate_vlm_agreement_stats(
         "missing_count": missing_count,
         "agreement_count": agreement_count,
         "disagreement_count": disagreement_count,
+        "coverage_rate": coverage_rate,
         "agreement_rate": agreement_rate,
         "disagreement_rate": disagreement_rate,
         "agreement_true_count": agreement_true_count,
@@ -670,7 +662,7 @@ async def _prepare_video_and_questions(
     return {"ok": True, "prepared": prepared, "video_metrics": video_metrics}
 
 
-def _vlm_specs_from_globals() -> List[APIModelResourceSpec]:
+def vlm_specs_from_globals() -> List[APIModelResourceSpec]:
     """Build one APIModelResourceSpec per (model, host) global pair."""
     models_raw = VLM_MODELS
     ips_raw = VLM_SERVER_IPS
@@ -699,8 +691,11 @@ def _vlm_specs_from_globals() -> List[APIModelResourceSpec]:
         if not isinstance(server_ip, str) or not server_ip.strip():
             logger.error("Each entry in VLM_SERVER_IPS must be a non-empty string.")
             return []
+        # TEMP (GLM replicas, revert after the LLM-judge run): an entry may list replicas of
+        # the same model as "ip1|ip2|ip3"; each reward call picks one at random.
+        replicas = [ip.strip() for ip in server_ip.split("|") if ip.strip()]
         specs.append(
-            _build_api_model_spec(model=model_name.strip(), server_ip=server_ip.strip())
+            _build_api_model_spec(model=model_name.strip(), server_ip=random.choice(replicas))
         )
     return specs
 
@@ -908,6 +903,17 @@ async def vlm_as_judge_pass_reward(
     context: Optional[Context] = None,
     **data_fields
 ) -> Dict[str, float]:
+    """Render the response's simulation code to a video and have VLM judges check it.
+
+    Extracts the code from ``final_response``, renders it, and asks each judge configured in
+    ``VLM_MODELS`` / ``VLM_SERVER_IPS`` (see :func:`vlm_specs_from_globals`) the task's
+    verification questions (``vlm_questions`` or the matching dataset fields).
+
+    Returns:
+        ``reward``: 1.0 only if every judge passes the video, 0.0 otherwise (including when
+        no code is found, rendering fails, or a judge errors), plus video-generation metrics.
+        Requires ``context``.
+    """
     video_path = None
     try:
         if context is None:
@@ -925,7 +931,7 @@ async def vlm_as_judge_pass_reward(
         video_path = prepared["video_path"]
         prompt_text = create_vlm_prompt(prepared["summarize"], prepared["all_questions"])
         messages = _build_vlm_messages(video_path, prompt_text)
-        specs = _vlm_specs_from_globals()
+        specs = vlm_specs_from_globals()
         if not specs:
             return {"reward": 0.0, **prep["video_metrics"]}
         if len(specs) == 1:
@@ -977,13 +983,26 @@ async def vlm_as_judge_pass_reward_multi_model(
     context: Optional[Context] = None,
     **data_fields,
 ) -> Dict[str, float]:
+    """Ensemble version of :func:`vlm_as_judge_pass_reward` with majority voting and partial credit.
+
+    Each configured judge decides pass/fail for the rendered video. ``reward`` is 1.0 when a
+    majority of judges pass it; otherwise it is a small "ladder" credit for progress:
+    ``MULTI_MODEL_LADDER_CODE_REWARD`` (0.02) when code was extracted,
+    ``MULTI_MODEL_LADDER_VIDEO_SAVED_REWARD`` (0.04) when a video was saved, and
+    ``MULTI_MODEL_LADDER_VIDEO_OPEN_REWARD`` (0.06) when it can be opened.
+
+    Returns:
+        ``reward``, per-model ``model_pass@<model>`` / ``model_response_success@<model>`` /
+        ``model_format_success@<model>``, ``pass#k`` (at least k judges passed), and
+        video-generation metrics. Requires ``context``.
+    """
     video_path = None
     model_specs: List[APIModelResourceSpec] = []
     try:
         if context is None:
             logger.error("Context is required for vlm_as_judge_pass_reward_multi_model.")
             return {"reward": 0.0, **_video_generation_metrics()}
-        model_specs = _vlm_specs_from_globals()
+        model_specs = vlm_specs_from_globals()
         if not model_specs:
             return {"reward": 0.0, **_video_generation_metrics()}
         all_data = _build_vlm_data(vlm_questions, data_fields)
@@ -1023,3 +1042,233 @@ async def vlm_as_judge_pass_reward_multi_model(
         return metrics
     finally:
         _cleanup_video(video_path)
+
+def _per_question_vote(
+    model_results: List[Dict[str, Any]],
+    questions_list: List[Dict[str, Any]],
+) -> List[bool]:
+    """Majority-voted label per question across judges.
+
+    A question is True when more than half of the judges answered it True; a judge that
+    did not answer a question counts as a False vote for it.
+    """
+    result_maps = [r.get("result_map", {}) for r in model_results]
+    labels: List[bool] = []
+    for question in questions_list:
+        idx = str(question.get("index", "")).strip()
+        true_votes = sum(1 for result_map in result_maps if result_map.get(idx) is True)
+        labels.append(true_votes * 2 > len(result_maps))
+    return labels
+
+
+@reward(name="vlm_as_judge_ratio_reward_multi_model")
+async def vlm_as_judge_ratio_reward_multi_model(
+    final_response: str,
+    trajectory: Dict[str, Any] = None,
+    vlm_questions: Dict[str, Any] = None,
+    context: Optional[Context] = None,
+    **data_fields,
+) -> Dict[str, float]:
+    """Ratio reward: fraction of questions whose per-question majority vote is True.
+
+    0 when no code is extracted, the video fails to render, or any judge fails to return
+    parseable output (the same rule as vlm_as_judge_pass_reward_multi_model). Also logs
+    ``vote_all_true`` (every voted label True) and the binary reward's video-level
+    ``pass#k`` so the two aggregation rules can be compared on the same rollouts.
+    """
+    video_path = None
+    model_specs: List[APIModelResourceSpec] = []
+
+    def _zero_metrics(video_metrics: Dict[str, float]) -> Dict[str, float]:
+        metrics = _zero_multi_model_metrics(model_specs)
+        metrics.update(video_metrics)
+        metrics["vote_all_true"] = 0.0
+        return metrics
+
+    try:
+        if context is None:
+            logger.error("Context is required for vlm_as_judge_ratio_reward_multi_model.")
+            return _zero_metrics(_video_generation_metrics())
+        model_specs = vlm_specs_from_globals()
+        if not model_specs:
+            return _zero_metrics(_video_generation_metrics())
+        all_data = _build_vlm_data(vlm_questions, data_fields)
+        all_questions, _, _ = extract_vlm_questions_from_data(all_data)
+        prompt_text = create_vlm_prompt_from_template(
+            VLM_ENSEMBLE_PROMPT_TEMPLATE,
+            variables={"all_questions": all_questions},
+        )
+        backbone = await _run_vlm_backbone(
+            context,
+            final_response=final_response,
+            vlm_questions=vlm_questions,
+            data_fields=data_fields,
+            model_specs=model_specs,
+            prompt_text=prompt_text,
+        )
+        video_metrics = backbone.get("video_metrics", _video_generation_metrics())
+        if not backbone["ok"]:
+            return _zero_metrics(video_metrics)
+        video_path = backbone["video_path"]
+        if len(backbone["available_results"]) < len(model_specs):
+            return _zero_metrics(video_metrics)
+
+        model_results = backbone["model_results"]
+        labels = _per_question_vote(model_results, backbone["prepared"]["questions_list"])
+        # The binary reward's metrics (per-model pass, video-level pass#k) on the same rollout;
+        # its ladder "reward" is replaced by the ratio below.
+        metrics = _build_multi_model_metrics(model_results, model_specs, video_metrics)
+        metrics["reward"] = sum(labels) / len(labels) if labels else 0.0
+        metrics["vote_all_true"] = 1.0 if labels and all(labels) else 0.0
+        return metrics
+    except Exception as e:
+        logger.error("Error in vlm_as_judge_ratio_reward_multi_model: %s", e)
+        return _zero_metrics(_video_generation_metrics())
+    finally:
+        _cleanup_video(video_path)
+
+
+# Text-only LLM-as-judge ablation: the same judge ensemble reads the generated code instead of
+# watching the rendered video. The rules mirror VLM_ENSEMBLE_PROMPT_TEMPLATE so that the two
+# rewards differ only in the evidence the judges see; the runtime description matches what
+# VideoGenerator actually does (python <script> <output_path>, 120 s limit, AgentFly venv).
+LLM_ENSEMBLE_PROMPT_TEMPLATE = """You are given a Python program that is meant to render a video of a physical scenario, and several verification questions about that video. You cannot run the program. Your task is to judge each question as true or false based on the video this program would actually produce when run. If the code does not give enough evidence to confirm the statement, or if the statement contradicts what the code would render, answer 'false'.
+ 
+⸻
+ 
+Runtime
+The program is run once as `python program.py <output_path>`, with the output video path passed as the first command-line argument, and is stopped after 120 seconds. Only the Python standard library, numpy, and opencv (cv2) are installed; there is no internet access and nothing can be installed. Any other third-party import fails.
+ 
+Code Reasoning Rules
+    1.  Judge the Rendered Output, Not the Intent: Trace what is actually drawn into each frame from the simulation state. Comments, docstrings, variable names, and printed text are not evidence that something appears in the video.
+    2.  Only Visible Content Counts: An object or motion counts only if the code draws it into the written frames. Something that is simulated but never drawn, drawn outside the frame, or never written to the video is not visible.
+    3.  Execution: Question 1 is true only if the program would run to completion without raising an error within the time limit, under the runtime above.
+    4.  Video Output: Question 2 is true only if the program would write a non-empty, playable video to the output path, for example by creating a video writer, writing frames to it, and releasing it.
+    5.  Perspective Changes: The rendered view may be a 2D projection. A circular path may look curved, straight, or wavy depending on the viewpoint, and a cylinder may be drawn as a circle (top view) or a rectangle (side view).
+    6.  Simplified / Symbolic Drawings: The code may use simple shapes or colors to represent real objects. If the rendered motion or layout still matches the description, treat it as True.
+    7.  Container Boundaries: If no container is drawn, assume the frame is the boundary. If something would not be visible, don't assume it is inside the container.
+    8.  Focus on Shape and Motion, ignore assumptions about material, weight, texture, or color. If the rendered motion does not match (e.g., "slides down" vs. actually moving up), answer False.
+ 
+Input
+Questions:{all_questions}
+ 
+Program:
+```python
+{code}
+```
+ 
+Output Format:
+Return a JSON list of objects, one per question. **Do not include any conversational filler or Markdown formatting tags.** Fields for each object:
+- `"index"`: The question index.
+- `"question"`: The full question text.
+- `"analysis"`: A concise step-by-step breakdown of what the code would render vs. what the question claims.
+- `"result"`: "true" if the code confirms it, "false" if contradicted or evidence is insufficient.
+ 
+Example Format:
+[
+  {{
+    "index": "1",
+    "question": "Does the program run to completion without errors?",
+    "analysis": "It imports only numpy and cv2, all names are defined, and the loop runs 300 frames.",
+    "result": "true"
+  }}
+]
+"""
+LLM_JUDGE_EXEC_QUESTION = "Does the program run to completion without errors?"
+LLM_JUDGE_VIDEO_QUESTION = "Does the program write a non-empty, playable video to the output path?"
+
+
+def _llm_judge_questions(questions_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Extended question set Q' = {q_exec, q_video} + Q, renumbered from 1.
+
+    The execution and video checks come first (indices 1 and 2) so that the prompt rules can
+    refer to them by number; the domain questions follow in their original order.
+    """
+    texts = [LLM_JUDGE_EXEC_QUESTION, LLM_JUDGE_VIDEO_QUESTION]
+    texts += [str(q.get("question", "")) for q in questions_list]
+    return [{"index": str(i), "question": text} for i, text in enumerate(texts, start=1)]
+
+
+def _build_llm_messages(prompt_text: str) -> List[Dict[str, Any]]:
+    return [{"role": "user", "content": [{"type": "text", "text": prompt_text}]}]
+
+
+def _zero_llm_judge_metrics(model_specs: List[APIModelResourceSpec], code_extracted: bool) -> Dict[str, float]:
+    metrics = _zero_multi_model_metrics(model_specs)
+    for key in ("video_saved", "video_opened"):
+        metrics.pop(key, None)
+    metrics["code_extracted"] = 1.0 if code_extracted else 0.0
+    metrics["judged_exec"] = 0.0
+    metrics["judged_video"] = 0.0
+    metrics["vote_all_true"] = 0.0
+    return metrics
+
+
+@reward(name="llm_as_judge_pass_reward_multi_model")
+async def llm_as_judge_pass_reward_multi_model(
+    final_response: str,
+    trajectory: Dict[str, Any] = None,
+    vlm_questions: Dict[str, Any] = None,
+    context: Optional[Context] = None,
+    **data_fields,
+) -> Dict[str, float]:
+    """Text-only LLM-as-judge binary reward, the ablation of vlm_as_judge_pass_reward_multi_model.
+
+    The code is neither executed nor rendered. Each judge in VLM_MODELS / VLM_SERVER_IPS reads
+    the code and answers Q' = {q_exec, q_video} + Q; a judge passes when it answers every
+    question True. Aggregation and failure handling follow the VLM binary reward: reward 1 when
+    a majority of judges pass, otherwise the code-extraction ladder credit; 0 when no code is
+    extracted or any judge fails to return parseable output. Also logs the per-question vote
+    for the execution and video checks and ``vote_all_true``.
+    """
+    model_specs: List[APIModelResourceSpec] = []
+    code_extracted = False
+    try:
+        if context is None:
+            logger.error("Context is required for llm_as_judge_pass_reward_multi_model.")
+            return _zero_llm_judge_metrics(model_specs, code_extracted)
+        model_specs = vlm_specs_from_globals()
+        if not model_specs:
+            return _zero_llm_judge_metrics(model_specs, code_extracted)
+        all_data = _build_vlm_data(vlm_questions, data_fields)
+        _, _, questions_list = extract_vlm_questions_from_data(all_data)
+        if not questions_list:
+            logger.warning("No VLM questions found in data.")
+            return _zero_llm_judge_metrics(model_specs, code_extracted)
+        code = extract_code_from_response(final_response)
+        if not code:
+            return _zero_llm_judge_metrics(model_specs, code_extracted)
+        code_extracted = True
+
+        judge_questions = _llm_judge_questions(questions_list)
+        all_questions = "\n".join(f"{q['index']}. {q['question']}" for q in judge_questions)
+        prompt_text = create_vlm_prompt_from_template(
+            LLM_ENSEMBLE_PROMPT_TEMPLATE,
+            variables={"all_questions": all_questions, "code": code},
+        )
+        messages = _build_llm_messages(prompt_text)
+        model_results = await asyncio.gather(
+            *[
+                _run_one_vlm_model(context, messages=messages, spec=spec, questions_list=judge_questions)
+                for spec in model_specs
+            ]
+        )
+        if any(r.get("error") is not None for r in model_results):
+            for r in model_results:
+                if r.get("error") is not None:
+                    logger.error("LLM judge evaluation failed: %s", r.get("error"))
+            return _zero_llm_judge_metrics(model_specs, code_extracted)
+
+        metrics = _build_multi_model_metrics(
+            model_results, model_specs, _video_generation_metrics(code_extracted=True)
+        )
+        for key in ("video_saved", "video_opened"):
+            metrics.pop(key, None)
+        labels = _per_question_vote(model_results, judge_questions)
+        metrics["judged_exec"] = 1.0 if labels[0] else 0.0
+        metrics["judged_video"] = 1.0 if labels[1] else 0.0
+        metrics["vote_all_true"] = 1.0 if all(labels) else 0.0
+        return metrics
+    except Exception as e:
+        logger.error("Error in llm_as_judge_pass_reward_multi_model: %s", e)
+        return _zero_llm_judge_metrics(model_specs, code_extracted)

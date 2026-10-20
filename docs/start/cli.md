@@ -172,7 +172,7 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH}"
 python -m agentfly.cli search
 ```
 
-The corpus and FAISS index are auto-downloaded into `$AF_CACHE_DIR/data/search/` by `agentfly.tools.utils.data.download_tool_data("asyncdense_retrieve")` if they're not already present.
+It needs FAISS from the `search` extra (`uv pip install "agentfly-rl[search]"`, or `uv sync --extra search` from source). The corpus and FAISS index are downloaded into `$AF_CACHE_DIR/data/search/` by `agentfly.utils.download.ensure_tool_data("async_dense_retrieve")` if they're not already present, after an approval prompt that shows their size (set `AF_ASSUME_YES=1` to accept non-interactively).
 
 ---
 

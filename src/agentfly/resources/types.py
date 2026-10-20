@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Literal, Optional
 
-
 # --- Structured specs ---
 
 ContainerCategory = Literal[
@@ -21,6 +20,8 @@ ContainerCategory = Literal[
     "alfworld",
     "webshop",
 ]
+"""Kind of container a :class:`ContainerResourceSpec` describes: ``"container"`` for a generic
+image, or one of the built-in environments (Python sandbox, ScienceWorld, ALFWorld, WebShop)."""
 
 
 @dataclass(frozen=True)

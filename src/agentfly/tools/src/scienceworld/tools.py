@@ -1,3 +1,5 @@
+"""ScienceWorld tool: ``scienceworld_explorer`` takes one action in a containerized ScienceWorld task and returns the observation."""
+
 import traceback
 
 from ....core import Context
@@ -35,7 +37,3 @@ async def scienceworld_explorer(action: str, context: Context):
         return observation
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-if __name__ == "__main__":
-    print(scienceworld_explorer.schema)

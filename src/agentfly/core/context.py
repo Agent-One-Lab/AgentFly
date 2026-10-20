@@ -8,7 +8,8 @@ for tools and rewards that need to run in containers or access shared resources.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Set
-from ..resources.types import BaseResource, ContainerResourceSpec, BaseResourceSpec
+
+from ..resources.types import BaseResource, BaseResourceSpec, ContainerResourceSpec
 from .context_config import ContextConfig, resolve_resource_backend
 
 

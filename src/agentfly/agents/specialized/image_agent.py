@@ -1,3 +1,10 @@
+""":class:`ImageEditingAgent`: a vision-language agent that edits images with Qwen-Image-Edit.
+
+Images in the conversation get ids (:meth:`ImageEditingAgent.store_image` /
+:meth:`ImageEditingAgent.get_image`); the agent's ``qwen_image_edit`` method tool edits an image
+by id with :class:`QwenImageEditTool`, which loads the diffusion pipeline on first use.
+"""
+
 import json
 import logging
 import random
@@ -40,14 +47,14 @@ class QwenImageEditTool:
 
         """Lazy initialization of the pipeline to save memory."""
         if self._pipeline is None:
-            print(f"INFO: Loading Qwen-Image-Edit pipeline on {self.device}...")
+            logger.debug(f"Loading Qwen-Image-Edit pipeline on {self.device}...")
             self._pipeline = QwenImageEditPipeline.from_pretrained(
                 self.model_id,
                 torch_dtype=torch.bfloat16 if self.device != "cpu" else torch.float32,
             )
             self._pipeline.to(self.device)
             self._pipeline.set_progress_bar_config(disable=None)
-            print("INFO: Qwen-Image-Edit pipeline loaded successfully!")
+            logger.debug("Qwen-Image-Edit pipeline loaded successfully!")
 
     def apply(
         self,
@@ -145,13 +152,13 @@ class ImageEditingAgent(BaseAgent):
         )
 # --8<-- [end:class_method_tool_init]
 
-    def _store_image(self, image: Image.Image) -> str:
+    def store_image(self, image: Image.Image) -> str:
         """Store an image in the instance database and return its ID"""
         image_id = geneate_image_id(image)
         self._image_database[image_id] = image
         return image_id
 
-    def _get_image(self, image_id: str) -> Image.Image:
+    def get_image(self, image_id: str) -> Image.Image:
         """Retrieve an image from the instance database by ID"""
         if image_id not in self._image_database:
             raise ValueError(f"Image with ID {image_id} not found in database")
@@ -159,7 +166,7 @@ class ImageEditingAgent(BaseAgent):
 
     def save_image(self, image_id: str, path: str):
         """Save an image from the instance database to a path"""
-        image = self._get_image(image_id)
+        image = self.get_image(image_id)
         image = image_to_pil(image)
         image.save(path)
 
@@ -220,7 +227,7 @@ class ImageEditingAgent(BaseAgent):
                 for content in message["content"]:
                     if content["type"] == "image":
                         image = open_image_from_any(content["image"])
-                        image_id = self._store_image(image)
+                        image_id = self.store_image(image)
                 message["content"].insert(
                     0, {"type": "text", "text": f"Image id: {image_id}"}
                 )
@@ -260,7 +267,7 @@ class ImageEditingAgent(BaseAgent):
             JSON string with observation and edited image data
         """
 
-        image = self._get_image(image_id)
+        image = self.get_image(image_id)
 
         edited_image = self._qwen_image_edit_tool.apply(
             image=image,
@@ -272,7 +279,7 @@ class ImageEditingAgent(BaseAgent):
         )
 
         image_base64 = image_to_data_uri(edited_image)
-        new_image_id = self._store_image(edited_image)
+        new_image_id = self.store_image(edited_image)
 
         result = {"observation": f"Image Id: {new_image_id}", "image": image_base64}
         return result

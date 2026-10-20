@@ -66,6 +66,23 @@ async def health():
     return {"status": "ok"}
 
 
+@app.post("/session/{session_id}")
+async def set_session(session_id: str, request: Request):
+    """Start (or restart) a session with a caller-provided goal and product prices.
+
+    Lets a client serve tasks generated elsewhere, e.g. verl-agent's per-worker goals
+    (``examples/data_preprocess/prepare_webshop_verl_agent.py``): ``goal`` is a full goal dict
+    (instruction text, attributes, goal options, price limit, ...) and ``prices`` maps asin ->
+    price used by the reward's price check (verl-agent draws ranged prices per worker seed).
+    Products missing from ``prices`` fall back to this server's prices.
+    """
+    body = await request.json()
+    goal = body["goal"]
+    prices = {asin: float(price) for asin, price in (body.get("prices") or {}).items()}
+    user_sessions[session_id] = {"goal": goal, "done": False, "prices": prices}
+    return JSONResponse(content={"ok": True, "instruction_text": goal["instruction_text"]})
+
+
 @app.get("/")
 async def home():
     session_id = "".join(random.choices(string.ascii_lowercase, k=10))
@@ -278,16 +295,20 @@ async def done(session_id: str, asin: str, options: str, request: Request):
     global goals
     options = literal_eval(options)
 
-    # Extract task_id from request query params if present
+    # A session started through /session/{id} carries its own goal and prices. Otherwise the
+    # goal comes from ``task_id`` (index into this server's goals) or the session.
+    session = user_sessions.get(session_id, {})
     task_id = request.query_params.get("task_id")
-    if task_id is not None:
+    if "prices" in session:
+        goal = session["goal"]
+    elif task_id is not None:
         task_id = int(task_id)
         goal = goals[task_id]
     else:
-        goal = user_sessions[session_id]["goal"]
+        goal = session["goal"]
 
     purchased_product = product_item_dict[asin]
-    price = product_prices[asin]
+    price = session.get("prices", {}).get(asin, product_prices[asin])
 
     reward, reward_info = get_reward(
         purchased_product, goal, price=price, options=options, verbose=True

@@ -1,4 +1,12 @@
-from chat_bricks import Template, register_template
+"""AgentFly's own chat templates, registered with chat-bricks on import.
+
+Adds templates that chat-bricks doesn't ship: ``search-r1``, ``action-agent``,
+``qwen3-instruct-no-tool``, ``qwen3-think-no-tool``, ``qwen3-think``, ``qwen3-miniswe``,
+``qwen-xml`` / ``qwen-xml-think`` (XML-style tool calls), and ``qwen3-think-no-tool-no-system``
+(the Qwen3 SFT models' format: no default system block, thinking on).
+"""
+
+from chat_bricks import SystemPolicy, Template, register_template
 
 register_template(
     Template(
@@ -142,5 +150,20 @@ register_template(
         generation_prompt="<|im_start|>assistant\n<think>",
         observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
         stop_words=["<|im_end|>"],
+    )
+)
+
+# Matches the Qwen3 SFT models' HF chat template for a single user turn: no system block when
+# there is no system message, and thinking on (the SFT targets start with "<think>").
+register_template(
+    Template(
+        name="qwen3-think-no-tool-no-system",
+        system_template="<|im_start|>system\n{system_message}<|im_end|>\n",
+        user_template="<|im_start|>user\n{content}<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n<think>{content}<|im_end|>\n",
+        generation_prompt="<|im_start|>assistant\n<think>",
+        observations_template="<|im_start|>user\n<tool_response>\n{observation}\n</tool_response><|im_end|>\n",
+        stop_words=["<|im_end|>"],
+        system_policy=SystemPolicy(use_system_without_system_message=False),
     )
 )

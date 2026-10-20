@@ -55,13 +55,21 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 
 ## Installation
-**Option 1**: One-line Installation:
-```
-bash install.sh # Installs uv if missing, then builds a project .venv (Python 3.12)
-```
-**Option 2**: Customized Installation
+AgentFly uses [uv](https://docs.astral.sh/uv/) and requires Python 3.12 on Linux.
 
-Please refer to [installation.md](docs/start/installation.md) for customized installation.
+**Option 1**: Install from PyPI. The package is named `agentfly-rl` (the `agentfly` package on PyPI is an unrelated project); it is imported as `agentfly`.
+```bash
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install agentfly-rl            # agents, tools, rewards, and rollouts
+```
+
+**Option 2**: One-line installation from source, recommended for RL training. It installs uv if missing and builds a project `.venv` from the committed `uv.lock`, so the training stack matches the versions we test with.
+```bash
+bash install.sh
+```
+**Option 3**: Customized installation
+
+Please refer to [installation.md](docs/start/installation.md) for customized installation, including the `[verl]` training extra.
 
 ## Tasks
 
@@ -99,7 +107,8 @@ async def main():
     print(result.trajectories)
     print(result.rewards)
 
-asyncio.run(main())
+if __name__ == "__main__":  # vLLM may start worker processes with spawn
+    asyncio.run(main())
 ```
 
 ## Features
@@ -121,7 +130,7 @@ def customized_reward(...):
 agent = HFAgent(
     model_name_or_path=model_name,
     tools=[customized_tool],
-    reward=customized_reward,
+    reward_fn=customized_reward,
     backend_config={"backend": "async_vllm"},
 )
 ```
@@ -172,11 +181,11 @@ def customized_tool(arg1, arg2):
     # tool logic here
 ```
 
-Define your reward function or use an existing one. The reward function can accept `prediction` and `trajectory` as the argument, which is the agent's final response and the whole trajectory. Other fields will also be given if you defined them in dataset. To use them, simply put these fields as arguments in reward function.
+Define your reward function or use an existing one. The reward function can accept `final_response` and `trajectory` as arguments, which are the agent's final response and the whole trajectory. Other fields will also be given if you defined them in the dataset. To use them, simply add these fields as arguments of the reward function.
 
 ```python
 @reward(name="customized_reward")
-def customized_reward(prediction, trajectory, optional_field1, optional_field2):
+def customized_reward(final_response, trajectory, optional_field1, optional_field2):
     # calculate reward
     ...
 ```

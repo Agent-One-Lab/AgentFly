@@ -81,7 +81,7 @@ backend_config = AsyncVLLMConfig(
 ```bash
 # Take qwen2.5 as an example
 # Note you must set the template since qwen2.5 does not inherently support tools in official chat template
-python -m agentfly.utils.deploy --model_name_or_path Qwen/Qwen2.5-VL-3B-Instruct --template qwen2.5-vl-system-tool --tp 2 --dp 2
+python -m agentfly.utils.deploy --model-name-or-path Qwen/Qwen2.5-VL-3B-Instruct --template qwen2.5-vl-system-tool --tp 2 --dp 2
 ```
 
 ```python
@@ -286,10 +286,10 @@ edit_result = await agent.qwen_edit_image_tool(
 
 ```python
 # Store an image and get its ID
-image_id = agent._store_image(your_pil_image)
+image_id = agent.store_image(your_pil_image)
 
 # Retrieve an image by ID
-image = agent._get_image(image_id)
+image = agent.get_image(image_id)
 
 # Save an image to disk
 agent.save_image(image_id, "output_image.jpg")

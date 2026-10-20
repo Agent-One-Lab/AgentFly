@@ -18,16 +18,25 @@ A purely functional reward decorated with `@reward`:
 A class-based reward that holds external credentials or state, by inheriting from `BaseReward`:
 
 ```python
+import requests
+
+from agentfly.rewards import BaseReward
+
 class APIReward(BaseReward):
     name = "api_reward"
 
-    def __init__(self, api_key):
+    def __init__(self, api_key: str):
+        super().__init__()
         self.api_key = api_key
 
-    def call(self, query: str):
-        # call request with api key
-        result = requests.request(api_key=self.api_key, query=query)
-        return result["reward"]
+    def call(self, final_response: str) -> float:
+        # Score the response with an external service.
+        result = requests.post(
+            "https://example.com/score",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"response": final_response},
+        ).json()
+        return float(result["reward"])
 ```
 
 A stateful async reward that shares an environment with the corresponding tools through `Context`:
@@ -36,7 +45,7 @@ A stateful async reward that shares an environment with the corresponding tools 
 from agentfly.core import Context
 from agentfly.envs.webshop_text_env import WebShopSpec
 
---8<-- "src/agentfly/rewards/webshop_reward.py:webshop_reward_example"
+--8<-- "src/agentfly/rewards/webshop_rewards.py:webshop_reward_example"
 ```
 
 
@@ -57,7 +66,7 @@ Beside predefined fields, you can give additional fields in your task input. The
 ```python
 task_messages = {
     "messages": [
-        "role": "user", "content": "Search the information about AgentFly and write a short summary."
+        {"role": "user", "content": "Search the information about AgentFly and write a short summary."}
     ],
     "length_penalty": True,
     "max_length": 2048,
@@ -87,4 +96,4 @@ def summary_reward(final_response, length_penalty, max_length):
 
 A reward function returns either a `float` or a `dict` containing a `reward` key. When a `float` is returned, it is used directly. When a `dict` is returned, the value at `reward` is used as the scalar reward and every other key is logged as an extra metric (`reward_extra/{key}/mean`, `.../max`, `.../min`) in the metrics produced by `compute_data_metrics`.
 
-Internally, the framework normalizes both shapes into a typed `RewardResult` at the boundary (`agentfly.rewards.calculate_reward`), exposing `.reward: float` and `.extras: Dict[str, Any]`. You don't need to construct `RewardResult` yourself — the conversion is automatic. The typed form lands on the trajectory as `Trajectory.reward` (the float) and `Trajectory.metrics` (the extras dict).
+Internally, the framework normalizes both shapes into a typed `RewardResult` at the boundary (`agentfly.rewards.calculate_reward`), exposing `.reward: float` and `.metrics: Dict[str, Any]`. You don't need to construct `RewardResult` yourself — the conversion is automatic. The typed form lands on the trajectory as `Trajectory.reward` (the float) and `Trajectory.metrics` (the extras dict).

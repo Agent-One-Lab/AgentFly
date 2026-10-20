@@ -7,12 +7,14 @@
 #
 # Matched to verl-agent examples/gigpo_trainer/run_webshop.sh: Qwen2.5-{size}-Instruct,
 # lr=1e-6, gamma=0.95, gigpo_mode=mean_norm (their WebShop choice), invalid-action penalty 0.1,
+# The grpo arm matches examples/grpo_trainer/run_webshop.sh instead: adv_estimator=grpo with
+# norm_adv_by_std_in_grpo=True, i.e. the episode advantage divided by the group std
+# (step_advantage_w=0 + mean_std_norm; tests/unit/algorithms/test_gigpo.py checks the parity).
 # rollout n=8, history_length=2, max_steps=15, KL 0.01 low_var_kl, max_prompt=4096 /
 # max_response=512, ppo_mini_batch_size=64 step rows, 150 steps, train temp=1.0, val temp=0.4 sampled.
 #
-# Environment: reasonwang/webshop-env:small — 1,000-product catalog with a matching index and
-# the same 6,910 synthetic goals as verl-agent (task ids byte-identical). val = ids 0-499 (all
-# 500; verl-agent samples 256 of them), train = 500-6909. WEBSHOP_IMAGE must be exported
+# Environment: reasonwang/webshop-env:small — 1,000-product catalog with a matching index, as
+# verl-agent. Tasks: see train_dataset below. WEBSHOP_IMAGE must be exported
 # BEFORE `ray start` so the Ray workers inherit it.
 #
 # Reward = verl-agent's (upstream envs.WebshopWorker.step): 10 if the purchase's score == 1.0,
@@ -28,17 +30,29 @@
 
 arm=${1:-gigpo}
 size=${2:-1.5B}
-if   [[ "$arm" == "gigpo" ]]; then step_advantage_w=1.0
-elif [[ "$arm" == "grpo"  ]]; then step_advantage_w=0.0
+tag=${3:-}                          # optional suffix, e.g. "rerun": keeps a repeat run's
+                                    # wandb name and checkpoints separate from the original
+if   [[ "$arm" == "gigpo" ]]; then step_advantage_w=1.0; gigpo_mode=mean_norm
+elif [[ "$arm" == "grpo"  ]]; then step_advantage_w=0.0; gigpo_mode=mean_std_norm
 else echo "usage: $0 [gigpo|grpo] [1.5B|3B|7B]"; exit 1; fi
 if [[ "$size" != "1.5B" && "$size" != "3B" && "$size" != "7B" ]]; then
     echo "usage: $0 [gigpo|grpo] [1.5B|3B|7B]"; exit 1; fi
 
 export VLLM_USE_V1=1
+# vLLM keeps its share of each GPU while the actor trains (measured ~105/143 GB at 0.75), so the
+# KV-cache fraction is what caps activation memory. 7B needs more room for the actor; the fraction
+# only changes rollout cache size, never the training math, so arms stay comparable.
+gpu_memory_utilization=0.75
+[[ "$size" == "7B" ]] && gpu_memory_utilization=0.6
 # Select the verl-agent-aligned WebShop image + goal files (exported before ray start).
 export WEBSHOP_IMAGE=reasonwang/webshop-env:small
-train_dataset="./data/rlhf/webshop/webshop_train_small.json"
-eval_dataset="./data/rlhf/webshop/webshop_val_small.json"
+# Tasks replayed from verl-agent's own env workers and draws (see
+# examples/data_preprocess/prepare_webshop_verl_agent.py): the train file is verl-agent's exact
+# training tasks in order (16 per step x 150 steps, read with data.shuffle=False); the val file is
+# the 512 tasks of its first two evaluations. Each row carries its goal + product prices, served per
+# session by the mounted simulator server (AF_WEBSHOP_SERVER_MOUNT).
+train_dataset="./data/rlhf/webshop/webshop_train_verl_agent_small.json"
+eval_dataset="./data/rlhf/webshop/webshop_val_verl_agent_small.json"
 set -x
 
 head_node_ip=$(hostname --ip-address)
@@ -52,11 +66,10 @@ ray start --head --node-ip-address="$head_node_ip" --port=$port --num-cpus 192 -
 model=Qwen/Qwen2.5-${size}-Instruct
 lr=1e-6
 gamma=0.95
-gigpo_mode=mean_norm
 penalty_coef=0.1
 num_chains=8                        # rollout n (group size)
 train_batch_size=16
-val_batch_size=500                  # all val task ids 0-499
+val_batch_size=512                  # verl-agent's first two evaluations (2 x 256)
 ppo_mini_batch_size=64              # step rows per optimizer step (verl-agent run_webshop.sh; ALFWorld uses 256)
 max_turns=15                        # verl-agent env.max_steps
 history_length=2                    # verl-agent env.history_length
@@ -75,7 +88,7 @@ template=null                       # native Qwen chat template (stock system me
 system_prompt=null                  # the flat prompt carries the instruction
 
 total_training_steps=150            # verl-agent total_epochs=150, one batch per epoch
-experiment_name="Qwen2.5-${size}-webshop-step-${arm}-v2"
+experiment_name="Qwen2.5-${size}-webshop-step-${arm}-v3${tag:+-$tag}"
 project_name="Open"
 
 python3 -m agentfly.cli train \
@@ -88,6 +101,7 @@ python3 -m agentfly.cli train \
     data.val_files=${eval_dataset} \
     data.val_batch_size=$val_batch_size \
     data.train_batch_size=$train_batch_size \
+    data.shuffle=False \
     agent.use_agent=True \
     agent.init_config.agent_type=$agent_type \
     agent.init_config.model_name_or_path=$model \
@@ -117,7 +131,7 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.75 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=$gpu_memory_utilization \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.val_kwargs.temperature=0.4 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \

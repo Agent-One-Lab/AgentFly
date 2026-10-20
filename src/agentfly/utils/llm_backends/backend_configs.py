@@ -2,6 +2,9 @@
 # signature) don't force ``vllm`` (~4s) at import; it's constructed lazily inside
 # __init__. This module is pulled in by agent_base, so a bare
 # ``import agentfly.agents`` must not pay for vllm.
+
+"""Configuration dataclasses for the generation backends (:class:`AsyncVLLMConfig`, :class:`AsyncVerlConfig`, :class:`ClientConfig`), keyed by backend name in ``BACKEND_CONFIGS``."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

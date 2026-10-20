@@ -1,3 +1,5 @@
+""":class:`Timer`: record how long named sections take, through a context manager (``timing_context``) or a decorator (``timed_function``)."""
+
 import time
 from contextlib import contextmanager
 from typing import Callable
@@ -24,19 +26,3 @@ class Timer:
             return wrapper
 
         return decorator
-
-
-# Example usage
-if __name__ == "__main__":
-    timer = Timer()
-
-    @timer.timed_function("example_function")
-    def example():
-        time.sleep(1)  # Simulating work
-
-    with timer.timing_context("context_block"):
-        time.sleep(2)  # Simulating work inside a context
-
-    example()
-
-    print(timer.timing_data)

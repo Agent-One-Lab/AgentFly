@@ -1,3 +1,10 @@
+"""Agents that use the model's own tool-calling format.
+
+:class:`HFAgent` parses tool calls with a vLLM tool parser (``hermes`` by default), matching the
+format of the model's Hugging Face chat template. :class:`SearchR1Agent` parses the Search-R1
+format (``<think>``, ``<search> query </search>``, ``<answer>``).
+"""
+
 import json
 import logging
 import re
@@ -60,7 +67,7 @@ class SearchR1Agent(BaseAgent):
         """
         Parse a single model response using the search-R1 format:
         - <think>...</think> (reasoning)
-        - <search> query </search> (tool call to asyncdense_retrieve)
+        - <search> query </search> (tool call to async_dense_retrieve)
         - <answer>...</answer> (final answer)
 
         Extracts all <search>...</search> blocks as tool calls; returns one assistant

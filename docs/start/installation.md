@@ -13,6 +13,20 @@
 
 If you only want to **run** agents — no RL training, no container-backed tools — `uv sync` alone is enough. The `[verl]` extra and the enroot install are training- and environment-specific.
 
+**Install From PyPI**
+
+AgentFly is published on PyPI as **`agentfly-rl`** and imported as `agentfly` (the `agentfly` package on PyPI is an unrelated project, so install `agentfly-rl`, not `agentfly`). We use uv:
+
+```bash
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install agentfly-rl
+```
+
+Or add it to your own uv project with `uv add agentfly-rl`. The dense-retrieval tools (`async_dense_retrieve`, `dense_retrieve`) and `agentfly search` need FAISS, which comes with the `search` extra: `uv pip install "agentfly-rl[search]"` (or `uv sync --extra search` from source). This installs the agent runtime: agents, tools, rewards, rollouts, and the `agentfly` command. Container-backed tools additionally need enroot (see step 2 below).
+
+For RL training, we recommend the source installation below (`bash install.sh` or `uv sync --extra verl`). It installs from the committed `uv.lock`, so the training stack (vLLM, PyTorch, flash-attn, flash-linear-attention, and the CUDA compiler packages) matches the versions we test with. The training extra can also be installed from PyPI with `uv pip install "agentfly-rl[verl]"`; flash-attn and liger-kernel then build against the installed PyTorch (pass `--no-build-isolation-package flash-attn --no-build-isolation-package liger-kernel`), and flash-attn compiles from source, which takes a while.
+
 **Install With Script**
 
 To install everything, run the script below. It installs [uv](https://docs.astral.sh/uv/) if it is not already present, provisions Python 3.12, and creates a project-local `.venv`.

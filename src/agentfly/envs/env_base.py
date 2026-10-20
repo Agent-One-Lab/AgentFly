@@ -1,19 +1,21 @@
+"""Environment base classes.
+
+:class:`BaseEnv` is the contract every environment implements (``start``, ``reset``, ``step``,
+``aclose`` / ``close``);
+:class:`SupportsDocker` adds a Docker container lifecycle for environments that run in one.
+"""
+
 import abc
 import asyncio
 import time
 import warnings
 from typing import Any
-from enroot import from_env
-from .manager.resource import GLOBAL_ENVS
 
-# import docker
+from enroot import from_env
 
 
 class BaseEnv(abc.ABC):
     """Minimal contract every environment must honour."""
-
-    def __init__(self):
-        GLOBAL_ENVS.add(self)
 
     @abc.abstractmethod
     async def start(self) -> None:
@@ -78,7 +80,6 @@ class SupportsDocker:
         Raises:
             RuntimeError: If the container fails to start.
         """
-        # client = docker.from_env()
         client = from_env()
 
         # run docker-py call in default ThreadPoolExecutor
@@ -99,7 +100,6 @@ class SupportsDocker:
                 await asyncio.sleep(0.1)
                 await asyncio.to_thread(self._container.reload)
                 if time.time() > deadline:
-                    # raise RuntimeError("container failed to start")
                     warnings.warn("container failed to start, retrying...")
                     continue
             break

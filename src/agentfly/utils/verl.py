@@ -1,6 +1,9 @@
 # Defer annotation evaluation so the ``torch.Tensor`` type hints don't force torch
 # (~3s) at import; it's used lazily inside the functions that need it. This module
 # is imported by agent_base, so a bare ``import agentfly.agents`` must not pull torch.
+
+"""Padding helpers for verl batches, whose size must divide evenly across data-parallel ranks."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

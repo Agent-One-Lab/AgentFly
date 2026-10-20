@@ -15,7 +15,6 @@ import httpx
 
 from ..resources import ContainerResource, ContainerResourceSpec
 
-
 # Fallback task loaded when reset() is called without a task_id (e.g. smoke tests).
 # Real training always passes task_id via context.metadata.
 _DEFAULT_TASK_ID = "trial_T20190909_013611_626994"

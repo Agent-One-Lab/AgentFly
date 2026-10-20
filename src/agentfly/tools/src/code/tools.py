@@ -1,3 +1,9 @@
+"""Code tools: run Python in an isolated sandbox container.
+
+``code_interpreter`` (decorator-based) and :class:`CodeInterpreterTool` (class-based) execute code
+in a Python sandbox acquired through the context (``scope="global"``) and return stdout/stderr.
+"""
+
 import traceback
 
 from ....core import Context
@@ -60,7 +66,3 @@ class CodeInterpreterTool(BaseTool):
             return str(obs)
         except Exception as e:
             return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-if __name__ == "__main__":
-    print(code_interpreter.schema)

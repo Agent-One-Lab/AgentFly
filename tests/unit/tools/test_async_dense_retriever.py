@@ -12,7 +12,7 @@ sys.path.insert(
 
 try:
     from agentfly.tools import DenseRetriever as AsyncDenseRetriever
-    from agentfly.tools import asyncdense_retrieve as async_dense_retrieve
+    from agentfly.tools import async_dense_retrieve
 except ImportError as e:
     print(f"Error importing async_dense_retriever: {e}")
     AsyncDenseRetriever = None

@@ -1,3 +1,5 @@
+"""ALFWorld reward: ``alfworld_episode_reward`` gives ``10 * won`` (verl-agent's scale) from the episode's environment state."""
+
 from typing import Any, Dict
 
 from ..core import Context

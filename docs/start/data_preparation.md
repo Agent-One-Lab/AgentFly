@@ -113,19 +113,24 @@ Used with `math_equal_reward_tool`, which reads `final_response` and `answer`.
 
 ### WebShop
 
-`data/rlhf/webshop/webshop_goals_train.json` — many task-specific fields, all flowing into the reward:
+`data/rlhf/webshop/webshop_train_verl_agent_small.json` (also `webshop_val_verl_agent_small.json` and the held-out `webshop_heldout_verl_agent_small.json`). Each task carries its own goal and product prices, which the WebShop server scores the purchase against, so a task does not depend on the server's built-in goal list:
 
 ```json
 {
-    "question": "i am looking for travel foaming dispenser for hand soap...",
-    "task_id": 111,
-    "asin": "B085W67P7L",
-    "category": "beauty",
-    "attributes": ["rose gold"],
-    "price_upper": 30.0,
-    "goal_options": ["silver pump head"]
+    "task_id": 0,
+    "question": "Find me non slip desks for living room with color: christmasgoo3302, and size: 19.7x31.5in+19.7x63in, and price lower than 50.00 dollars",
+    "asin": "B09CQ45ZRB",
+    "instruction_text": "Find me non slip desks for living room with ...",
+    "price_upper": 50.0,
+    "goal_json": "{\"asin\": \"B09CQ45ZRB\", \"attributes\": [\"non slip\", \"living room\"], \"goal_options\": {\"color\": \"christmasgoo3302\", ...}, ...}",
+    "prices_json": "{\"B0002J1HOC\": 5.01, ...}",
+    "verl_agent_seed": 0,
+    "verl_agent_goal_index": 0,
+    "verl_agent_draw": "..."
 }
 ```
+
+The tasks replay the goals verl-agent draws for its WebShop environment, so results are comparable with verl-agent; `examples/data_preprocess/prepare_webshop_verl_agent.py` generates them, and the training scripts download them from the `Agent-One/AgentFly-Train` dataset when missing. They are meant for the small-catalog WebShop image (`reasonwang/webshop-env:small`).
 
 ### Chess Puzzles
 
@@ -198,7 +203,7 @@ data/
 │   └── webshop/
 ```
 
-Larger artifacts (the Wikipedia corpus and FAISS index used by `asyncdense_retrieve`, the WebShop product DB, etc.) are downloaded on demand into `$AF_CACHE_DIR` (default `~/.agentfly/cache`) by `agentfly.utils.download.download_tool_data`. Training/eval task files are likewise fetched from the `Agent-One/AgentFly-Train` dataset when missing. Both go through an **approval prompt** that shows the total size first; set `AF_ASSUME_YES=1` to accept non-interactively (CI/batch). See [Configuration](configuration.md) for the full environment-variable surface.
+Larger artifacts (the Wikipedia corpus and FAISS index used by `async_dense_retrieve`, the WebShop product DB, etc.) are downloaded on demand into `$AF_CACHE_DIR` (default `~/.agentfly/cache`) by `agentfly.utils.download.ensure_tool_data`. Training/eval task files are likewise fetched from the `Agent-One/AgentFly-Train` dataset when missing. Both go through an **approval prompt** that shows the total size first; set `AF_ASSUME_YES=1` to accept non-interactively (CI/batch). See [Configuration](configuration.md) for the full environment-variable surface.
 
 For a brand-new task, the typical workflow is:
 

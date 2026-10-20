@@ -11,16 +11,15 @@ Undo: per-file snapshot stack under ``.agentfly_undo/`` inside the workspace
 so each container invocation (copied ``file_manager.py``) can still undo edits.
 """
 
-import hashlib
-import os
-import sys
-import json
-import re
 import fnmatch
+import hashlib
+import json
+import os
+import re
 import shutil
 import subprocess
-from typing import Optional, List, Tuple
-
+import sys
+from typing import List, Optional, Tuple
 
 # ═════════════════════════════════════════════════════════════════════
 #  FileManager — one instance per task

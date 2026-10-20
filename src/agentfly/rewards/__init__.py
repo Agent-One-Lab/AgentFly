@@ -42,6 +42,7 @@ if TYPE_CHECKING:
         swe_reward,
         vlm_as_judge_pass_reward,
         vlm_as_judge_pass_reward_multi_model,
+        vlm_as_judge_ratio_reward_multi_model,
         webshop_episode_reward,
         webshop_reward,
     )
@@ -100,4 +101,5 @@ __all__ = [
     "code_reward_test",
     "vlm_as_judge_pass_reward",
     "vlm_as_judge_pass_reward_multi_model",
+    "vlm_as_judge_ratio_reward_multi_model",
 ]

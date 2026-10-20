@@ -1,16 +1,23 @@
+""":class:`AutoAgent`: create an agent from a config dict or a model name.
+
+Resolves the agent type (a registered name or an import reference), the tools and the reward,
+then constructs the agent; also used by the trainer to build the agent from Hydra config.
+"""
+
 from typing import Any, Callable, Dict, List, Optional, Type
+
+from omegaconf import DictConfig, OmegaConf
 
 from ..rewards.reward_base import get_reward_from_name
 from ..tools import get_tools_from_names
 from .agent_base import BaseAgent
-from .specialized.react_agent import ReactAgent
 from .specialized.action_agent import ActionAgent
 from .specialized.code_agent import CodeAgent
 from .specialized.gui_agent import GUIAgent
-from .specialized.swe_agents import BashSWEAgent, FunctionCallSWEAgent, Qwen3CoderSWEAgent
 from .specialized.hf_agent import HFAgent, SearchR1Agent
 from .specialized.miniswe import MinisweAgent
-from omegaconf import OmegaConf, DictConfig
+from .specialized.react_agent import ReactAgent
+from .specialized.swe_agents import BashSWEAgent, Qwen3CoderSWEAgent
 
 
 class AutoAgent:
@@ -68,18 +75,15 @@ class AutoAgent:
         Args:
             config: A dictionary containing the agent configuration.
                 Required keys:
-                    - agent_type: Type of agent ('react', 'code', etc.)
+                    - agent_type: A registered agent type ('react', 'hf', 'code', ...) or an
+                      import reference to an agent class ("module:Class", "/path.py:Class")
                     - model_name_or_path: Model name or path
-                    - template: Conversation template
+                    - backend_config: Dict with a "backend" key (e.g. {"backend": "async_vllm"})
                 Optional keys:
-                    - tools: List of tool objects
-                    - vllm: Whether to use vLLM for inference (default: False)
-                    - debug: Whether to enable debug logging (default: False)
-                    - log_file: Log file name (default: "agent")
-                    - task_info: Task-specific information (for ReactAgent)
-                    - reward_function: Reward function to use (default: None)
-                    - reward_name: Name of registered reward function to use
-                    - reward_args: Arguments to pass to the reward function
+                    - tools: Registered names, import references, or tool objects (default: none)
+                    - reward_fn: The reward function (e.g. a ``@reward``)
+                    - reward_name: A registered reward name or import reference (instead of reward_fn)
+                    - template, system_prompt, max_model_len, ...: other agent arguments
 
         Returns:
             An initialized agent instance.
@@ -98,7 +102,7 @@ class AutoAgent:
         else:
             raise ValueError(f"Unsupported config type: {type(config)}")
 
-        required_params = ["agent_type", "tools", "backend_config"]
+        required_params = ["agent_type", "backend_config"]
         missing_params = [param for param in required_params if not config.get(param)]
 
         if missing_params:
@@ -113,14 +117,18 @@ class AutoAgent:
 
         agent_type = config["agent_type"]
         agent_kwargs.pop("agent_type")
-        tools = get_tools_from_names(config["tools"])
+        # Tools may be registered names, import references, or tool objects, mixed.
+        tools = [
+            get_tools_from_names([t])[0] if isinstance(t, str) else t
+            for t in (agent_kwargs.get("tools") or [])
+        ]
         agent_class = cls._get_agent_class(agent_type)
-        reward_name = config.get("reward_name")
+        reward_fn = agent_kwargs.get("reward_fn")
+        reward_name = agent_kwargs.pop("reward_name", None)
         if reward_name is not None:
+            if reward_fn is not None:
+                raise ValueError("Pass either reward_fn or reward_name, not both.")
             reward_fn = get_reward_from_name(reward_name)
-            agent_kwargs.pop("reward_name")
-        else:
-            reward_fn = None
 
         agent_kwargs["tools"] = tools
         agent_kwargs["reward_fn"] = reward_fn
@@ -150,17 +158,14 @@ class AutoAgent:
 
         Args:
             model_name_or_path: Pretrained model name or path
-            agent_type: Type of agent ('react', 'code', etc.)
+            agent_type: A registered agent type ('react', 'hf', 'code', ...) or an import
+                reference to an agent class ("module:Class", "/path.py:Class")
             template: Conversation template name
-            tools: List of tool objects
-            vllm: Whether to use vLLM for inference
+            tools: Tools: registered names, import references, or tool objects
             debug: Whether to enable debug logging
-            log_file: Log file name
-            wrapper: Whether to use the agent as a wrapper
-            reward_function: Reward function instance to use (takes precedence)
-            reward_name: Name of registered reward function to use
-            reward_args: Arguments to pass to the reward function constructor
-            **kwargs: Additional arguments specific to the agent type
+            reward_fn: The reward function (e.g. a ``@reward``); or pass ``reward_name``
+                (a registered name or import reference) in ``kwargs`` instead
+            **kwargs: Other agent arguments, e.g. ``backend_config`` (required)
 
         Returns:
             An initialized agent instance.

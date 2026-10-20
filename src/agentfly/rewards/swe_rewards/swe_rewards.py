@@ -1,3 +1,5 @@
+"""SWE rewards: ``r2e_gym_reward`` runs a task's tests in the agent's container; ``swe_reward`` evaluates the agent's patch with SWE-smith."""
+
 import asyncio
 from typing import Any
 
@@ -25,6 +27,20 @@ def _sync_docker_like_container(container: Any) -> Any:
 
 @reward(name="r2e_gym_reward")
 async def r2e_gym_reward(context: Context) -> dict:
+    """Score an R2E-Gym / SWE-bench / SWE-smith task by running its tests in the rollout's container.
+
+    Uses the container the agent worked in (same image and rollout id), prepares the
+    dataset's test script, runs the tests and grades the result.
+
+    ``context.metadata`` fields:
+        image_id: The task's container image (required).
+        data_source: ``"r2e"`` (default), ``"swebench"``, ``"swebench_verified"`` or ``"swesmith"``.
+        eval_timeout: Seconds allowed for the test run (default ``DEFAULT_EVAL_TIMEOUT``).
+
+    Returns:
+        ``reward`` and ``acc`` (1.0 when the tests pass, else 0.0), ``eval_timeout`` (1.0 if
+        setup or the tests timed out) and ``out`` (the test output).
+    """
     image_id = context.metadata.get("image_id")
     if not image_id:
         return "Error: context.metadata['image_id'] is required for r2e_gym_reward."
@@ -84,6 +100,16 @@ async def r2e_gym_reward(context: Context) -> dict:
 
 @reward(name="swe_reward")
 async def swe_reward(context: Context) -> dict:
+    """Score a SWE-smith task by extracting the agent's patch and evaluating it.
+
+    Takes the git diff of the agent's changes from the rollout's container and runs the
+    SWE-smith evaluation for the task in ``context.metadata`` (``image_id`` required,
+    optional ``eval_timeout``).
+
+    Returns:
+        ``reward`` (1.0 when the task is resolved, else 0.0) and ``eval_timeout`` (1.0 if the
+        evaluation timed out).
+    """
     image_id = context.metadata.get("image_id")
     if not image_id:
         return "Error: context.metadata['image_id'] is required for shell tool."

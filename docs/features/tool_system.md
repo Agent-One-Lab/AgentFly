@@ -16,7 +16,7 @@ We have designed three ways to define tools:
 ```python
 from agentfly.tools import tool
 
-@tool(name="tool name", description="Description about the tool)
+@tool(name="tool_name", description="Description about the tool")
 async def custom_tool(arg1, arg2):
     """
     Description about the tool.
@@ -44,6 +44,7 @@ from agentfly.tools import BaseTool
 3. A specialized tool that can be directly defined as the method of the agent. This is recommended for specialized agent.
 ```python
 from agentfly.agents import BaseAgent
+from agentfly.tools import tool
 
 class CustomAgent(BaseAgent):
     def __init__(self, special_api_key, **kwargs):
@@ -55,6 +56,12 @@ class CustomAgent(BaseAgent):
 
     @tool(name="specialized_tool")
     async def specialized_tool(self, query: str):
+        """
+        Call the special API with a query.
+
+        Args:
+            query (str): The query to send.
+        """
         query = self.processing_query(query)
         result = f"Call query {query} with special api key: {self.special_api_key}"
 
@@ -108,9 +115,9 @@ This design lets tools focus on logic (`env.step(action)`) while the engine mana
 
 ## Tool Return Values
 
-A `@tool` function returns either a `str` (used directly as the observation the LLM sees) or a `dict`. If it returns a dict, the dict must include an `observation: str` key; an optional `image` key is extracted to its own field for multi-modal tools, and any other keys are forwarded as extra info alongside the observation.
+A `@tool` function returns either a `str` (used directly as the observation the LLM sees) or a `dict`. If it returns a dict, the dict must include an `observation: str` key; an optional `image` key is extracted to its own field for multi-modal tools, `step_reward` (a per-step environment reward, used by step-level estimators such as GiGPO) and `metrics` (or any other extra keys) are kept as well, and the extra keys are logged as tool metrics.
 
-Internally, the framework normalizes both shapes into a typed `ToolResult` at the boundary (`agentfly.tools.BaseTool._format_result`), exposing `.observation: str`, `.image: Optional[str]`, `.info: Dict[str, Any]`, plus `.name` and `.arguments`. You don't need to construct `ToolResult` yourself — the conversion is automatic. The chain code receives the typed form (or the legacy dict shape via `ToolResult.to_dict()` during the migration window).
+Internally, the framework normalizes both shapes into a typed `ToolResult` at the boundary (`agentfly.tools.BaseTool._format_result`), exposing `.observation: str`, `.status: str` (`"success"`, `"error"` or `"invalid"`), `.image: Optional[str]`, `.metrics: Dict[str, Any]`, `.step_reward: Optional[float]`, plus `.name` and `.arguments`. You don't need to construct `ToolResult` yourself — the conversion is automatic. Calling a tool directly (e.g. `calculator(expression="1+1")`) returns this `ToolResult`; `ToolResult.to_dict()` gives the plain-dict form.
 
 ## Tool Calling Formats
 
