@@ -153,14 +153,10 @@ async def generate_response(
     :func:`attach_token_ids`). False leaves them off, so every later render re-encodes
     the message from text.
     """
-    effective_config = prepare_generation_config(
-        agent, generation_config, current_step, tools=tools
-    )
+    effective_config = prepare_generation_config(agent, generation_config, current_step, tools=tools)
     skills_payload = agent.skills_payload()
     extra_kwargs = {"skills": skills_payload} if skills_payload else {}
-    extra_kwargs["tool_call_source"] = getattr(
-        agent, "default_tool_call_source", "parser"
-    )
+    extra_kwargs["tool_call_source"] = getattr(agent, "default_tool_call_source", "parser")
     raw = await agent.generate_async(
         [current_step.messages.messages],
         return_dict=True,

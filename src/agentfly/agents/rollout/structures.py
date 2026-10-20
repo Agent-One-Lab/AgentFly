@@ -100,10 +100,7 @@ class Step:
 
     def to_json_recursive(self, use_messages: bool = False) -> dict:
         data = self.to_json(use_messages=use_messages)
-        data["children"] = [
-            child.to_json_recursive(use_messages=use_messages)
-            for child in self.children
-        ]
+        data["children"] = [child.to_json_recursive(use_messages=use_messages) for child in self.children]
         return data
 
 

@@ -102,9 +102,7 @@ class Context:
         if spec is None:
             image_id = self.metadata.get("image_id")
             if image_id is None:
-                raise ValueError(
-                    "Either id+spec or image_id in metadata must be provided"
-                )
+                raise ValueError("Either id+spec or image_id in metadata must be provided")
             # Engine-specific placement/build fields ride along in metadata so
             # a caller can select and configure the backend per rollout without
             # constructing a spec itself. ``docker_host`` pins the docker
@@ -136,8 +134,7 @@ class Context:
             #     declared by the caller must be merged in or it is simply lost
             #     (the tool's own mounts still win on key collision).
             if getattr(spec, "category", None) == "container":
-                for field in ("container_engine", "dockerfile", "build_context",
-                              "snapshot"):
+                for field in ("container_engine", "dockerfile", "build_context", "snapshot"):
                     if getattr(spec, field, None) is None:
                         value = self.metadata.get(field)
                         if value is not None:
@@ -219,8 +216,4 @@ class Context:
             raise ValueError(f"Unsupported scope: {scope!r}")
 
     def __repr__(self) -> str:
-        return (
-            f"Context(rollout_id={self.rollout_id!r}, "
-            f"group_id={self.group_id!r}, "
-            f"metadata={self.metadata!r})"
-        )
+        return f"Context(rollout_id={self.rollout_id!r}, group_id={self.group_id!r}, metadata={self.metadata!r})"

@@ -16,6 +16,7 @@ def message_text(msg: Dict) -> str:
                 return part.get("text", "")
     return str(content) if content is not None else ""
 
+
 def generation_opens_think(agent) -> bool:
     """Whether the agent's chat template ends the generation prompt inside an open
     ``<think>`` block (native thinking, e.g. Qwen3.5-4B). The model's output then carries

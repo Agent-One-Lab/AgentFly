@@ -29,7 +29,9 @@ def observation_token_length(agent: "RolloutAgent", observation: Any) -> int:
 
 
 def estimate_chat_prompt_tokens(
-    agent: "RolloutAgent", current_step: "Step", tools: Optional[List] = None,
+    agent: "RolloutAgent",
+    current_step: "Step",
+    tools: Optional[List] = None,
     cap: bool = True,
 ) -> int:
     """Prompt token count via chat_bricks ``Chat`` + ``tokenize`` (same path as training).
@@ -41,14 +43,10 @@ def estimate_chat_prompt_tokens(
     """
     tokenizer = getattr(agent, "tokenizer", None)
     if tokenizer is None:
-        raise ValueError(
-            "Tokenizer is required when using max_model_len to set max_tokens."
-        )
+        raise ValueError("Tokenizer is required when using max_model_len to set max_tokens.")
     template = getattr(agent, "template", None)
     if not template:
-        raise ValueError(
-            "template is required for the first prompt length estimate."
-        )
+        raise ValueError("template is required for the first prompt length estimate.")
     messages = current_step.messages.messages
     processor = getattr(agent, "processor", None)
     # Backend-aware tool-call rendering. The estimate must render the tool call

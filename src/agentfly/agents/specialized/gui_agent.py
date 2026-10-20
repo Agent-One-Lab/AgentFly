@@ -53,9 +53,7 @@ Action: type(content='hello world')
 class GUIAgent(BaseAgent):
     """GUI Agent for interacting with graphical user interfaces."""
 
-    def __init__(
-        self, model_name_or_path: str, template: str, tools: List = None, **kwargs
-    ):
+    def __init__(self, model_name_or_path: str, template: str, tools: List = None, **kwargs):
         """
         Initialize GUI Agent.
 
@@ -104,16 +102,16 @@ class GUIAgent(BaseAgent):
             elif resp and resp.strip():
                 # Try to reformat responses that don't have the expected format
                 resp_lower = resp.lower()
-                logger.debug(
-                    f"[GUIAgent.parse] Response missing format, reformatting: {resp[:100]}"
-                )
+                logger.debug(f"[GUIAgent.parse] Response missing format, reformatting: {resp[:100]}")
 
                 # Check if it contains action-like content
                 if any(action in resp_lower for action in ["click", "type", "scroll"]):
                     formatted_resp = f"Thought: Executing action based on response.\nAction: {resp.strip()}"
                 else:
                     # Default to click at center if no clear action
-                    formatted_resp = f"Thought: {resp.strip()}\nAction: click(start_box='<|box_start|>(960,540)<|box_end|>')"
+                    formatted_resp = (
+                        f"Thought: {resp.strip()}\nAction: click(start_box='<|box_start|>(960,540)<|box_end|>')"
+                    )
                 processed_responses.append(formatted_resp)
             else:
                 # Handle empty responses with default click at center
@@ -127,18 +125,14 @@ class GUIAgent(BaseAgent):
         # Log responses for debugging
         for idx, resp in enumerate(responses[:3]):  # Log first 3 responses
             if resp:
-                logger.debug(
-                    f"[GUIAgent.parse] Response {idx} length: {len(resp)}, preview: {resp[:200]}"
-                )
+                logger.debug(f"[GUIAgent.parse] Response {idx} length: {len(resp)}, preview: {resp[:200]}")
             else:
                 logger.debug(f"[GUIAgent.parse] Response {idx} is None or empty")
 
         # Parse actions from responses
         action_list = []
         for response in responses:
-            parsed = parse_action_to_structure_output(
-                response, IMAGE_FACTOR, TEST_IMAGE_HEIGHT, TEST_IMAGE_WIDTH
-            )
+            parsed = parse_action_to_structure_output(response, IMAGE_FACTOR, TEST_IMAGE_HEIGHT, TEST_IMAGE_WIDTH)
             action_list.append(parsed)
 
         # Create messages with tool calls
@@ -151,9 +145,7 @@ class GUIAgent(BaseAgent):
 
             if actions is not None and len(actions) > 0:
                 if len(actions) > 1:
-                    logger.debug(
-                        f"[GUIAgent.parse] Warning: Multiple actions found ({len(actions)}), using first one"
-                    )
+                    logger.debug(f"[GUIAgent.parse] Warning: Multiple actions found ({len(actions)}), using first one")
                 action = actions[0]
                 tool_calls = [
                     {
@@ -167,9 +159,7 @@ class GUIAgent(BaseAgent):
                 ]
             else:
                 # If no action was parsed, create a default click action at center
-                logger.debug(
-                    "[GUIAgent.parse] No action parsed from response, creating default click action"
-                )
+                logger.debug("[GUIAgent.parse] No action parsed from response, creating default click action")
                 default_action = {
                     "action_type": "click",
                     "action_inputs": {"start_box": "(960, 540)"},
@@ -192,15 +182,11 @@ class GUIAgent(BaseAgent):
             status = "terminal"
             if actions and isinstance(actions[0], dict):
                 action_type = actions[0].get("action_type", "")
-                logger.debug(
-                    f"[GUIAgent.parse] Action type: {action_type}, terminating after one turn"
-                )
+                logger.debug(f"[GUIAgent.parse] Action type: {action_type}, terminating after one turn")
 
             message = {
                 "role": "assistant",
-                "content": [{"type": "text", "text": response}]
-                if response
-                else [{"type": "text", "text": ""}],
+                "content": [{"type": "text", "text": response}] if response else [{"type": "text", "text": ""}],
                 "tool_calls": tool_calls,
                 "loss": True,
                 "status": status,

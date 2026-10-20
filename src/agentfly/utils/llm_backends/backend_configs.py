@@ -49,7 +49,6 @@ class AsyncVLLMConfig:
             self.engine_args = AsyncEngineArgs()
 
 
-
 @dataclass
 class AsyncVerlConfig:
     """Configuration for Async Verl backend.
@@ -88,6 +87,7 @@ class ClientConfig:
     max_requests_per_minute: int = 100
     timeout: int = 3600
     api_key: str = "EMPTY"
+
 
 # Backend configuration mapping
 BACKEND_CONFIGS = {

@@ -102,7 +102,7 @@ def pass_rate_distribution(
         pass_rates.append(passes / len(rewards))
         mean = sum(rewards) / len(rewards)
         variance = sum((reward - mean) ** 2 for reward in rewards) / len(rewards)
-        reward_stds.append(variance ** 0.5)
+        reward_stds.append(variance**0.5)
         if max(rewards) == min(rewards):
             zero_advantage += 1
 
@@ -264,9 +264,7 @@ class RolloutMetrics:
                 )
                 emit(evt)
 
-        sample_trajectory_json = json.dumps(
-            serialize_for_json(random.choice(trajectories)), indent=2
-        )
+        sample_trajectory_json = json.dumps(serialize_for_json(random.choice(trajectories)), indent=2)
         evt = MetricEvent(
             kind="text",
             name="agent/rollout/sample_trajectory",
@@ -277,9 +275,7 @@ class RolloutMetrics:
         emit(evt)
 
         if timed_trajectories:
-            slowest_trajectory = max(
-                timed_trajectories, key=lambda t: t.rollout_time_sec
-            )
+            slowest_trajectory = max(timed_trajectories, key=lambda t: t.rollout_time_sec)
             # Keep the event name; its payload now matches sample_trajectory and
             # preserves every context segment. Runtime-only steps stay excluded.
             evt = MetricEvent(
@@ -321,9 +317,7 @@ class RolloutMetrics:
                 )
                 emit(evt)
 
-        self._record_pass_rate_distribution(
-            global_step=global_step, trajectories=trajectories
-        )
+        self._record_pass_rate_distribution(global_step=global_step, trajectories=trajectories)
 
     def _record_pass_rate_distribution(
         self,
@@ -343,9 +337,7 @@ class RolloutMetrics:
         rewards_by_group = group_rewards(trajectories)
         if max((len(r) for r in rewards_by_group.values()), default=0) < 2:
             return
-        distribution = pass_rate_distribution(
-            rewards_by_group, success_threshold=self.success_threshold
-        )
+        distribution = pass_rate_distribution(rewards_by_group, success_threshold=self.success_threshold)
         pass_rates = distribution.pop("pass_rates")
 
         logger.info(

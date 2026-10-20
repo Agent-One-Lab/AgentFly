@@ -14,11 +14,11 @@ async def code_reward_test(prediction: str, context: Context) -> dict:
     Caller must pass context when invoking this reward.
     """
     try:
-        env = await context.acquire_resource(
-            spec=PythonSandboxSpec, scope="global", backend="local"
-        )
+        env = await context.acquire_resource(spec=PythonSandboxSpec, scope="global", backend="local")
         result = await env.step(prediction)
         return {"reward": 1.0, "output": result}
     except Exception as e:
         return {"reward": 0.0, "output": str(e)}
+
+
 # --8<-- [end:code_reward_test_example]

@@ -36,15 +36,9 @@ def f1_score(prediction, ground_truth):
 
     ZERO_METRIC = 0.0
 
-    if (
-        normalized_prediction in ["yes", "no", "noanswer"]
-        and normalized_prediction != normalized_ground_truth
-    ):
+    if normalized_prediction in ["yes", "no", "noanswer"] and normalized_prediction != normalized_ground_truth:
         return ZERO_METRIC, ZERO_METRIC, ZERO_METRIC
-    if (
-        normalized_ground_truth in ["yes", "no", "noanswer"]
-        and normalized_prediction != normalized_ground_truth
-    ):
+    if normalized_ground_truth in ["yes", "no", "noanswer"] and normalized_prediction != normalized_ground_truth:
         return ZERO_METRIC, ZERO_METRIC, ZERO_METRIC
 
     prediction_tokens = normalized_prediction.split()
@@ -95,6 +89,8 @@ def qa_f1_reward(final_response: str, answer: str, trajectory: List[str]) -> flo
         "precision": precision,
         "recall": recall,
     }
+
+
 # --8<-- [end:qa_f1_reward_example]
 
 
@@ -149,9 +145,7 @@ def qa_f1_reward_tool(final_response: str, answer: str, trajectory: List[str]) -
             }
         )
     else:
-        raise ValueError(
-            f"Invalid prediction or trajectory for qa reward with format: Trajectory: {trajectory}"
-        )
+        raise ValueError(f"Invalid prediction or trajectory for qa reward with format: Trajectory: {trajectory}")
 
     return rewards_dict
 
@@ -166,9 +160,7 @@ def _format_ok(final_response: str, trajectory: List) -> tuple:
     """True if final_response has <answer>...</answer>, trajectory has tool calling, and all assistant turns except the last have <think>/</think>."""
     has_answer_tags = "<answer>" in final_response and "</answer>" in final_response
 
-    has_tool_calling = any(
-        isinstance(msg, dict) and msg.get("role") == "tool" for msg in trajectory
-    )
+    has_tool_calling = any(isinstance(msg, dict) and msg.get("role") == "tool" for msg in trajectory)
 
     tool_call_count = sum(1 for msg in trajectory if msg.get("role") == "tool")
 
@@ -187,9 +179,7 @@ def _format_ok(final_response: str, trajectory: List) -> tuple:
         previous_have_think = True
     else:
         previous = assistant_turns[:-1]  # all but last
-        previous_have_think = all(
-            "<think>" in c and "</think>" in c for c in previous if c
-        )
+        previous_have_think = all("<think>" in c and "</think>" in c for c in previous if c)
 
     has_tool_call_answer = False
     answer = None
@@ -222,9 +212,7 @@ def _format_ok(final_response: str, trajectory: List) -> tuple:
 
 
 @reward(name="qa_em_format_reward")
-def qa_em_format_reward(
-    final_response: str, golden_answers: List[str], trajectory: List[str]
-) -> float:
+def qa_em_format_reward(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
     """
     Calculate the reward for the agent's response based on the EM score.
 
@@ -252,9 +240,7 @@ def qa_em_format_reward(
         "reward": reward,
         "em": max_em,
         "f1": max_f1,
-        "fmt": 1.0
-        if format_dict["has_think"] and format_dict["has_answer_tags"]
-        else 0.0,
+        "fmt": 1.0 if format_dict["has_think"] and format_dict["has_answer_tags"] else 0.0,
         "fmt_think": 1.0 if format_dict["has_think"] else 0.0,
         "fmt_answer_tags": 1.0 if format_dict["has_answer_tags"] else 0.0,
         "fmt_tool": 1.0 if format_dict["has_tool_calling"] else 0.0,
@@ -268,9 +254,7 @@ def qa_em_format_reward(
 
 
 @reward(name="qa_em_reward")
-def qa_em_reward(
-    final_response: str, golden_answers: List[str], trajectory: List[str]
-) -> float:
+def qa_em_reward(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
     """
     Calculate the reward for the agent's response based on the EM score.
 
@@ -292,9 +276,7 @@ def qa_em_reward(
         "reward": reward,
         "em": max_em,
         "f1": max_f1,
-        "fmt": 1.0
-        if format_dict["has_think"] and format_dict["has_answer_tags"]
-        else 0.0,
+        "fmt": 1.0 if format_dict["has_think"] and format_dict["has_answer_tags"] else 0.0,
         "fmt_think": 1.0 if format_dict["has_think"] else 0.0,
         "fmt_answer_tags": 1.0 if format_dict["has_answer_tags"] else 0.0,
         "fmt_tool": 1.0 if format_dict["has_tool_calling"] else 0.0,
@@ -302,9 +284,7 @@ def qa_em_reward(
 
 
 @reward(name="qa_em_reward_tool_call")
-def qa_em_reward_tool_call(
-    final_response: str, golden_answers: List[str], trajectory: List[str]
-) -> float:
+def qa_em_reward_tool_call(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
     """
     Calculate the reward for the agent's response based on the EM score.
 
@@ -338,9 +318,7 @@ def qa_em_reward_tool_call(
 
 
 @reward(name="ok_vqa_reward")
-def ok_vqa_reward(
-    final_response: str, answers: List[str], trajectory: List[str]
-) -> float:
+def ok_vqa_reward(final_response: str, answers: List[str], trajectory: List[str]) -> float:
     """
     Calculate the reward for the agent's response based on the F1 score and EM score.
     The reward is 0.0 if the agent has not called any tool.

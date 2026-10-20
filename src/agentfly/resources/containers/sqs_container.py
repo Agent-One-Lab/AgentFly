@@ -119,11 +119,7 @@ def _build_artifact(
     transformed / synthesized Dockerfile (differs from the on-disk one) uses the
     native scheme below.
     """
-    build_repository = (
-        repository
-        or os.environ.get("AF_SQS_BUILD_REPOSITORY")
-        or _DEFAULT_BUILD_REPOSITORY
-    )
+    build_repository = repository or os.environ.get("AF_SQS_BUILD_REPOSITORY") or _DEFAULT_BUILD_REPOSITORY
     ctx = Path(context_dir) if context_dir else None
     if (
         ctx is not None
@@ -132,6 +128,7 @@ def _build_artifact(
         and (ctx / "Dockerfile").read_text() == dockerfile
     ):
         from .build_identity import build_artifact as _shared_build_artifact
+
         return _shared_build_artifact(ctx, build_repository)
 
     context = _build_context_archive(dockerfile, context_dir)
@@ -173,7 +170,7 @@ class SqsExecResult:
         self.output = output
         self.error_code = error_code
 
-    def __iter__(self):        # allows `code, out = result`
+    def __iter__(self):  # allows `code, out = result`
         return iter((self.exit_code, self.output))
 
 
@@ -185,21 +182,20 @@ class SqsTransport:
     concatenated until STREAM_END.
     """
 
-    def __init__(self, queue_url: str, region: str, s3_bucket: str,
-                 s3_region: Optional[str] = None, task_id: str = "agentfly"):
+    def __init__(
+        self, queue_url: str, region: str, s3_bucket: str, s3_region: Optional[str] = None, task_id: str = "agentfly"
+    ):
         import boto3
         from botocore.config import Config as BotoConfig
 
         self.queue_url = queue_url
         self.s3_bucket = s3_bucket
         self.task_id = task_id
-        cfg = BotoConfig(max_pool_connections=64,
-                         retries={"max_attempts": 5, "mode": "standard"})
+        cfg = BotoConfig(max_pool_connections=64, retries={"max_attempts": 5, "mode": "standard"})
         self._sqs = boto3.client("sqs", region_name=region, config=cfg)
         self._s3 = boto3.client("s3", region_name=s3_region or region)
         self._channel: Optional[str] = None
-        self.slurm_user = (os.environ.get("SLURM_JOB_USER")
-                           or os.environ.get("USER") or "UNKNOWN_USER")
+        self.slurm_user = os.environ.get("SLURM_JOB_USER") or os.environ.get("USER") or "UNKNOWN_USER"
         self.slurm_job_id = os.environ.get("SLURM_JOB_ID") or "UNKNOWN_JOB_ID"
 
     # -- channel ---------------------------------------------------------
@@ -208,9 +204,9 @@ class SqsTransport:
         if self._channel is None:
             name = f"af-{self.task_id[:40]}-{uuid4().hex[:8]}"
             name = re.sub(r"[^A-Za-z0-9_-]", "-", name)[:78]
-            self._channel = self._sqs.create_queue(
-                QueueName=name,
-                Attributes={"MessageRetentionPeriod": "3600"})["QueueUrl"]
+            self._channel = self._sqs.create_queue(QueueName=name, Attributes={"MessageRetentionPeriod": "3600"})[
+                "QueueUrl"
+            ]
         return self._channel
 
     def close(self) -> None:
@@ -248,17 +244,33 @@ class SqsTransport:
         return content.encode() if isinstance(content, str) else (content or b"")
 
     # -- request/response ------------------------------------------------
-    def request(self, method: str, path: str, *, query: str = "",
-                headers: Optional[dict] = None, body: bytes = b"",
-                extra: Optional[dict] = None,
-                timeout: float = 600.0) -> Tuple[int, bytes, dict]:
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: str = "",
+        headers: Optional[dict] = None,
+        body: bytes = b"",
+        extra: Optional[dict] = None,
+        timeout: float = 600.0,
+    ) -> Tuple[int, bytes, dict]:
         """Send one request and assemble its reply. Returns (status, body, last_msg)."""
         content, compress, s3_key = self._encode(body)
-        msg = {"req_id": uuid4().hex, "channel": self.channel, "method": method,
-               "path": path, "query": query, "headers": headers or {},
-               "content": content, "compress": compress,
-               "sent_at": time.time(), "task_id": self.task_id,
-               "slurm_user": self.slurm_user, "slurm_job_id": self.slurm_job_id}
+        msg = {
+            "req_id": uuid4().hex,
+            "channel": self.channel,
+            "method": method,
+            "path": path,
+            "query": query,
+            "headers": headers or {},
+            "content": content,
+            "compress": compress,
+            "sent_at": time.time(),
+            "task_id": self.task_id,
+            "slurm_user": self.slurm_user,
+            "slurm_job_id": self.slurm_job_id,
+        }
         if s3_key:
             msg["s3_key"] = s3_key
         if extra:
@@ -270,24 +282,22 @@ class SqsTransport:
         status = 0
         deadline = time.time() + timeout
         while time.time() < deadline:
-            resp = self._sqs.receive_message(
-                QueueUrl=self.channel, MaxNumberOfMessages=10, WaitTimeSeconds=10)
+            resp = self._sqs.receive_message(QueueUrl=self.channel, MaxNumberOfMessages=10, WaitTimeSeconds=10)
             for m in resp.get("Messages", []):
-                self._sqs.delete_message(QueueUrl=self.channel,
-                                         ReceiptHandle=m["ReceiptHandle"])
+                self._sqs.delete_message(QueueUrl=self.channel, ReceiptHandle=m["ReceiptHandle"])
                 try:
                     r = json.loads(m["Body"])
                 except json.JSONDecodeError:
                     continue
                 if r.get("req_id") != req_id:
-                    continue          # stale reply from an earlier request
+                    continue  # stale reply from an earlier request
                 status = r.get("status_code") or status
                 kind = r.get("type")
                 if kind == "STREAM":
                     chunk = self._decode(r)
                     if chunk:
                         parts.append(chunk)
-                    deadline = time.time() + timeout   # keepalive resets clock
+                    deadline = time.time() + timeout  # keepalive resets clock
                     continue
                 if kind == "STREAM_END":
                     # STREAM_END's content is the consumer's end marker
@@ -297,22 +307,34 @@ class SqsTransport:
                     if chunk and chunk.strip() not in (b"[EXIT]", b""):
                         parts.append(chunk)
                     return status, b"".join(parts), r
-                return status, self._decode(r), r      # FULL
+                return status, self._decode(r), r  # FULL
         raise TimeoutError(f"[sqs] no reply for {method} {path} in {timeout}s")
 
     # -- docker-ish operations -------------------------------------------
     def upload_build_context(self, tar_bytes: bytes, key: str) -> None:
         self._s3.put_object(Bucket=self.s3_bucket, Key=key, Body=tar_bytes)
 
-    def create(self, image: str, cmd: List[str], env: Dict[str, str],
-               binds: List[str], *, container_id: str,
-               build_context_s3_key: Optional[str] = None,
-               timeout_sec: int = 1800,
-               memory_limit: Optional[str] = None,
-               cpu_limit: Optional[float] = None) -> str:
-        body: dict = {"Image": image, "Cmd": cmd, "ContainerId": container_id,
-                      "AttachStdout": False, "AttachStderr": False,
-                      "keepalive": True}
+    def create(
+        self,
+        image: str,
+        cmd: List[str],
+        env: Dict[str, str],
+        binds: List[str],
+        *,
+        container_id: str,
+        build_context_s3_key: Optional[str] = None,
+        timeout_sec: int = 1800,
+        memory_limit: Optional[str] = None,
+        cpu_limit: Optional[float] = None,
+    ) -> str:
+        body: dict = {
+            "Image": image,
+            "Cmd": cmd,
+            "ContainerId": container_id,
+            "AttachStdout": False,
+            "AttachStderr": False,
+            "keepalive": True,
+        }
         if env:
             body["Env"] = [f"{k}={v}" for k, v in env.items()]
         if binds:
@@ -330,55 +352,65 @@ class SqsTransport:
         if cpu_limit:
             extra["cpu_limit"] = cpu_limit
         status, resp, msg = self.request(
-            "POST", f"{_API}/containers/create",
-            body=json.dumps(body).encode(), extra=extra,
-            timeout=float(timeout_sec))
+            "POST", f"{_API}/containers/create", body=json.dumps(body).encode(), extra=extra, timeout=float(timeout_sec)
+        )
         if status >= 400:
             error = SqsCreateError(status, resp)
             logger.error("%s; response=%s", error, error.response)
             raise error
         return container_id
 
-    def exec(self, cid: str, cmd: Union[str, List[str]], *,
-             user: str = "", env: Optional[Dict[str, str]] = None,
-             timeout_sec: Optional[float] = None) -> SqsExecResult:
+    def exec(
+        self,
+        cid: str,
+        cmd: Union[str, List[str]],
+        *,
+        user: str = "",
+        env: Optional[Dict[str, str]] = None,
+        timeout_sec: Optional[float] = None,
+    ) -> SqsExecResult:
         if isinstance(cmd, str):
             cmd = ["bash", "-c", cmd]
-        body: dict = {"Cmd": cmd, "AttachStdout": True, "AttachStderr": True,
-                      "Detach": False, "User": user or "",
-                      "client": "sqs_env", "exec_id": uuid4().hex,
-                      "keepalive": True}
+        body: dict = {
+            "Cmd": cmd,
+            "AttachStdout": True,
+            "AttachStderr": True,
+            "Detach": False,
+            "User": user or "",
+            "client": "sqs_env",
+            "exec_id": uuid4().hex,
+            "keepalive": True,
+        }
         if env:
             body["Env"] = [f"{k}={v}" for k, v in env.items()]
         if timeout_sec and timeout_sec > 0:
             body["timeout_sec"] = int(timeout_sec)
         status, out, last = self.request(
-            "POST", f"{_API}/exec_run/{cid}", body=json.dumps(body).encode(),
-            timeout=float(timeout_sec or 600))
+            "POST", f"{_API}/exec_run/{cid}", body=json.dumps(body).encode(), timeout=float(timeout_sec or 600)
+        )
         exit_code = last.get("exit_code")
         if exit_code is None:
             exit_code = 0 if status < 400 else 1
         return SqsExecResult(int(exit_code), out, last.get("error_code"))
 
-    def put_archive(self, cid: str, target_dir: str, tar_bytes: bytes,
-                    timeout: float = 600.0) -> bool:
+    def put_archive(self, cid: str, target_dir: str, tar_bytes: bytes, timeout: float = 600.0) -> bool:
         status, _, _ = self.request(
-            "PUT", f"{_API}/containers/{cid}/archive",
+            "PUT",
+            f"{_API}/containers/{cid}/archive",
             query=f"path={target_dir}",
             headers={"Content-Type": "application/x-tar"},
-            body=tar_bytes, timeout=timeout)
+            body=tar_bytes,
+            timeout=timeout,
+        )
         return status < 400
 
     def get_archive(self, cid: str, path: str, timeout: float = 600.0) -> bytes:
-        _, data, _ = self.request(
-            "GET", f"{_API}/containers/{cid}/archive",
-            query=f"path={path}", timeout=timeout)
+        _, data, _ = self.request("GET", f"{_API}/containers/{cid}/archive", query=f"path={path}", timeout=timeout)
         return data
 
     def delete(self, cid: str, timeout: float = 120.0) -> None:
         try:
-            self.request("DELETE", f"{_API}/containers/{cid}",
-                         query="force=true", timeout=timeout)
+            self.request("DELETE", f"{_API}/containers/{cid}", query="force=true", timeout=timeout)
         except Exception as e:  # noqa: BLE001 — delete is best-effort
             logger.warning("[sqs] delete %s failed: %s", cid[:12], e)
 
@@ -398,9 +430,15 @@ class SqsContainer(ContainerResource):
     lifecycle and ``run_cmd`` drive the handle methods below.
     """
 
-    def __init__(self, name: str, cid: str, transport: SqsTransport,
-                 image: Optional[str] = None, workdir: Optional[str] = None,
-                 spec: Optional[Any] = None):
+    def __init__(
+        self,
+        name: str,
+        cid: str,
+        transport: SqsTransport,
+        image: Optional[str] = None,
+        workdir: Optional[str] = None,
+        spec: Optional[Any] = None,
+    ):
         self.name = name
         self.cid = cid
         self.transport = transport
@@ -438,11 +476,10 @@ class SqsContainer(ContainerResource):
         await asyncio.to_thread(self.kill)
 
     def preview_link(self, port: int) -> Optional[str]:
-        return None            # no ingress for sandbox pods
+        return None  # no ingress for sandbox pods
 
     # -- exec -------------------------------------------------------------
-    def _exec(self, cmd, workdir=None, user=None, environment=None,
-              timeout=None) -> SqsExecResult:
+    def _exec(self, cmd, workdir=None, user=None, environment=None, timeout=None) -> SqsExecResult:
         wd = workdir or self.workdir
         if wd:
             # shlex.join (NOT " ".join): run_cmd passes argv ["bash","-c",<script>];
@@ -454,27 +491,21 @@ class SqsContainer(ContainerResource):
             inner = cmd if isinstance(cmd, str) else shlex.join(str(p) for p in cmd)
             cmd = f"cd {shlex.quote(str(wd))} && {inner}"
         return self.transport.exec(
-            self.cid, cmd, user=str(user) if user else "",
-            env=environment or None, timeout_sec=timeout)
+            self.cid, cmd, user=str(user) if user else "", env=environment or None, timeout_sec=timeout
+        )
 
-    def exec_run(self, cmd, workdir=None, user=None, environment=None,
-                 timeout=None, **_) -> SqsExecResult:
+    def exec_run(self, cmd, workdir=None, user=None, environment=None, timeout=None, **_) -> SqsExecResult:
         return self._exec(cmd, workdir, user, environment, timeout)
 
-    async def exec_run_async(self, cmd, workdir=None, user=None,
-                             environment=None, timeout=None, **_) -> SqsExecResult:
-        return await asyncio.to_thread(
-            self._exec, cmd, workdir, user, environment, timeout)
+    async def exec_run_async(self, cmd, workdir=None, user=None, environment=None, timeout=None, **_) -> SqsExecResult:
+        return await asyncio.to_thread(self._exec, cmd, workdir, user, environment, timeout)
 
     # -- copy -------------------------------------------------------------
-    def put_archive(self, path: str, data: Union[bytes, Any],
-                    timeout: Optional[float] = None) -> bool:
+    def put_archive(self, path: str, data: Union[bytes, Any], timeout: Optional[float] = None) -> bool:
         blob = data if isinstance(data, bytes) else bytes(data)
-        return self.transport.put_archive(self.cid, path or "/", blob,
-                                          timeout=timeout or 600.0)
+        return self.transport.put_archive(self.cid, path or "/", blob, timeout=timeout or 600.0)
 
-    def copy_to(self, local_path: str, container_path: str,
-                timeout: Optional[float] = None) -> bool:
+    def copy_to(self, local_path: str, container_path: str, timeout: Optional[float] = None) -> bool:
         src = Path(local_path)
         if not src.exists():
             logger.warning("[sqs] copy_to: %s does not exist", local_path)
@@ -483,15 +514,11 @@ class SqsContainer(ContainerResource):
         tar = _make_tar(src, arcname=os.path.basename(container_path.rstrip("/")))
         return self.put_archive(target_dir, tar, timeout=timeout)
 
-    async def copy_to_async(self, local_path: str, container_path: str,
-                            timeout: Optional[float] = None) -> bool:
-        return await asyncio.to_thread(self.copy_to, local_path,
-                                       container_path, timeout)
+    async def copy_to_async(self, local_path: str, container_path: str, timeout: Optional[float] = None) -> bool:
+        return await asyncio.to_thread(self.copy_to, local_path, container_path, timeout)
 
-    def copy_from(self, container_path: str, local_dir: str,
-                  timeout: Optional[float] = None) -> bool:
-        data = self.transport.get_archive(self.cid, container_path,
-                                          timeout=timeout or 600.0)
+    def copy_from(self, container_path: str, local_dir: str, timeout: Optional[float] = None) -> bool:
+        data = self.transport.get_archive(self.cid, container_path, timeout=timeout or 600.0)
         if not data:
             return False
         Path(local_dir).mkdir(parents=True, exist_ok=True)
@@ -500,13 +527,16 @@ class SqsContainer(ContainerResource):
         return True
 
 
-def start_sqs_container(image: Optional[str], name: str,
-                        environment: Optional[Dict[str, str]] = None,
-                        mount: Optional[Dict[str, str]] = None,
-                        ports: Optional[Any] = None,
-                        workdir: Optional[str] = None,
-                        timeout: float = 1800.0,
-                        spec: Optional[Any] = None) -> SqsContainer:
+def start_sqs_container(
+    image: Optional[str],
+    name: str,
+    environment: Optional[Dict[str, str]] = None,
+    mount: Optional[Dict[str, str]] = None,
+    ports: Optional[Any] = None,
+    workdir: Optional[str] = None,
+    timeout: float = 1800.0,
+    spec: Optional[Any] = None,
+) -> SqsContainer:
     """Create + start one sandbox pod over SQS and return its handle.
 
     ``spec.dockerfile`` (+ optional ``spec.build_context``) is uploaded to S3
@@ -519,11 +549,10 @@ def start_sqs_container(image: Optional[str], name: str,
     s3_region = _cfg(spec, "s3_region", "AF_SQS_S3_REGION", region)
     if not (queue_url and s3_bucket):
         raise RuntimeError(
-            "sqs engine needs sqs_queue_url + s3_bucket (spec fields or "
-            "AF_SQS_QUEUE_URL / AF_SQS_S3_BUCKET)")
+            "sqs engine needs sqs_queue_url + s3_bucket (spec fields or AF_SQS_QUEUE_URL / AF_SQS_S3_BUCKET)"
+        )
 
-    transport = SqsTransport(queue_url, region, s3_bucket, s3_region,
-                             task_id=name)
+    transport = SqsTransport(queue_url, region, s3_bucket, s3_region, task_id=name)
     dockerfile = getattr(spec, "dockerfile", None) if spec else None
     build_key = None
     tag = image
@@ -535,31 +564,35 @@ def start_sqs_container(image: Optional[str], name: str,
             "AF_SQS_BUILD_REPOSITORY",
             _DEFAULT_BUILD_REPOSITORY,
         )
-        tag, build_key, ctx = _build_artifact(
-            dockerfile, ctx_dir, build_repository
-        )
+        tag, build_key, ctx = _build_artifact(dockerfile, ctx_dir, build_repository)
         transport.upload_build_context(ctx, build_key)
-        logger.info("[sqs] uploaded build context (%db) -> s3://%s/%s",
-                    len(ctx), s3_bucket, build_key)
+        logger.info("[sqs] uploaded build context (%db) -> s3://%s/%s", len(ctx), s3_bucket, build_key)
     if not tag:
         raise ValueError("sqs engine needs spec.image or spec.dockerfile")
 
     binds = [f"{host}:{cont}" for cont, host in (mount or {}).items()]
     spec_extra = getattr(spec, "extra", None) or {}
-    max_attempts = int(spec_extra.get(
-        "sqs_create_max_attempts",
-        os.environ.get("AF_SQS_CREATE_MAX_ATTEMPTS", _CREATE_MAX_ATTEMPTS),
-    ))
+    max_attempts = int(
+        spec_extra.get(
+            "sqs_create_max_attempts",
+            os.environ.get("AF_SQS_CREATE_MAX_ATTEMPTS", _CREATE_MAX_ATTEMPTS),
+        )
+    )
     cid = ""
     for attempt in range(1, max(1, max_attempts) + 1):
         cid = uuid4().hex
         try:
-            transport.create(tag, ["/bin/sh", "-c", "sleep infinity"],
-                             environment or {}, binds, container_id=cid,
-                             build_context_s3_key=build_key,
-                             timeout_sec=int(timeout),
-                             memory_limit=getattr(spec, "mem_limit", None) if spec else None,
-                             cpu_limit=getattr(spec, "cpu_limit", None) if spec else None)
+            transport.create(
+                tag,
+                ["/bin/sh", "-c", "sleep infinity"],
+                environment or {},
+                binds,
+                container_id=cid,
+                build_context_s3_key=build_key,
+                timeout_sec=int(timeout),
+                memory_limit=getattr(spec, "mem_limit", None) if spec else None,
+                cpu_limit=getattr(spec, "cpu_limit", None) if spec else None,
+            )
             break
         except SqsCreateError as error:
             if not error.retryable or attempt >= max_attempts:
@@ -572,12 +605,14 @@ def start_sqs_container(image: Optional[str], name: str,
             ) * random.uniform(0.5, 1.5)
             logger.warning(
                 "[sqs] create retry %d/%d after %s; sleeping %.1fs",
-                attempt, max_attempts, error.error_code, delay,
+                attempt,
+                max_attempts,
+                error.error_code,
+                delay,
             )
             time.sleep(delay)
         except Exception:
             transport.close()
             raise
     logger.info("[sqs] sandbox created: %s (%s)", cid[:12], name)
-    return SqsContainer(name, cid, transport, image=tag, workdir=workdir,
-                        spec=spec)
+    return SqsContainer(name, cid, transport, image=tag, workdir=workdir, spec=spec)

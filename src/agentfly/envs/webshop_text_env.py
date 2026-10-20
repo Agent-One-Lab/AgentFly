@@ -34,6 +34,7 @@ ACTION_TO_TEMPLATE = {
     "Attributes": "attributes_page.html",
 }
 
+
 # WebShop simulator image. Default is the full 1.18M-catalog + human-goals benchmark
 # with a correctly-sized Lucene index (`webshop-env:full`). Set WEBSHOP_IMAGE to
 # `reasonwang/webshop-env:small` for the 1,000-catalog + synthetic-goals variant that
@@ -239,10 +240,7 @@ class WebShopEnv(ContainerResource):
         if action_name not in ["click", "search"]:
             return "Invalid action, action name should be 'click' or 'search'."  # invalid action, do nothing
         elif action_arg not in self.text_to_clickable.keys() and action_name == "click":
-            return (
-                "Invalid action, action argument should be one of the clickables: "
-                + str(clickables)
-            )
+            return "Invalid action, action argument should be one of the clickables: " + str(clickables)
         else:
             current_url = self.state.get("url")
             url_parts = current_url.split("/")
@@ -251,9 +249,7 @@ class WebShopEnv(ContainerResource):
             if current_page == "index":
                 if action_name == "search":
                     keywords = action_arg.split()
-                    r = await self._client.get(
-                        f"/search_results/{self.session_id}/{action_arg}/1"
-                    )
+                    r = await self._client.get(f"/search_results/{self.session_id}/{action_arg}/1")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -266,9 +262,7 @@ class WebShopEnv(ContainerResource):
                 keywords = literal_eval(url_parts[3])
                 if action_arg == NEXT_PAGE.lower():
                     next_page = page_num + 1
-                    r = await self._client.get(
-                        f"/search_results/{self.session_id}/{keywords}/{next_page}"
-                    )
+                    r = await self._client.get(f"/search_results/{self.session_id}/{keywords}/{next_page}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -282,9 +276,7 @@ class WebShopEnv(ContainerResource):
                     and page_num > 1
                 ):
                     prev_page = page_num - 1
-                    r = await self._client.get(
-                        f"/search_results/{self.session_id}/{keywords}/{prev_page}"
-                    )
+                    r = await self._client.get(f"/search_results/{self.session_id}/{keywords}/{prev_page}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -301,16 +293,10 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/index/{self.session_id}",
                             }
                         )
-                elif (
-                    action_arg.lower()
-                    and len(action_arg) == 10
-                    and action_arg.isalnum()
-                ):
+                elif action_arg.lower() and len(action_arg) == 10 and action_arg.isalnum():
                     asin = action_arg.upper()
                     options = str({})
-                    r = await self._client.get(
-                        f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}"
-                    )
+                    r = await self._client.get(f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -334,9 +320,9 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/index/{self.session_id}",
                             }
                         )
-                elif (
-                    action_arg in [k.lower() for k in ACTION_TO_TEMPLATE]
-                ):  # click on sub page such as description, features, reviews, attributes
+                elif action_arg in [
+                    k.lower() for k in ACTION_TO_TEMPLATE
+                ]:  # click on sub page such as description, features, reviews, attributes
                     sub_page = action_arg.capitalize()
                     r = await self._client.get(
                         f"/item_sub_page/{self.session_id}/{asin}/{keywords}/{page_num}/{sub_page}/{options}"
@@ -350,13 +336,9 @@ class WebShopEnv(ContainerResource):
                         )
                 elif action_arg == END_BUTTON.lower():
                     if task_id and not self.session_goal:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}"
-                        )
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}")
                     else:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}"
-                        )
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}")
                     if r.status_code == 200:
                         r = r.json()
                         self.state.update(
@@ -366,16 +348,12 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/done/{self.session_id}/{asin}/{options}",
                             }
                         )
-                elif (
-                    action_arg in self.text_to_clickable.keys()
-                ):  # click on product attributes
+                elif action_arg in self.text_to_clickable.keys():  # click on product attributes
                     input_html = str(self.text_to_clickable[action_arg])
                     element = self._parse_html(input_html).find("input")
                     name_value = element.get("name")
                     options[name_value] = action_arg
-                    r = await self._client.get(
-                        f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}"
-                    )
+                    r = await self._client.get(f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -392,9 +370,7 @@ class WebShopEnv(ContainerResource):
                 sub_page = url_parts[6].capitalize()
                 options = literal_eval(url_parts[7])
                 if action_arg == PREV_PAGE.lower():
-                    r = await self._client.get(
-                        f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}"
-                    )
+                    r = await self._client.get(f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -411,9 +387,9 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/index/{self.session_id}",
                             }
                         )
-                elif (
-                    action_arg in [k.lower() for k in ACTION_TO_TEMPLATE]
-                ):  # click on sub page such as description, features, reviews, attributes
+                elif action_arg in [
+                    k.lower() for k in ACTION_TO_TEMPLATE
+                ]:  # click on sub page such as description, features, reviews, attributes
                     sub_page = action_arg.capitalize()
                     r = await self._client.get(
                         f"/item_sub_page/{self.session_id}/{asin}/{keywords}/{page_num}/{sub_page}/{options}"
@@ -427,13 +403,9 @@ class WebShopEnv(ContainerResource):
                         )
                 elif action_arg == END_BUTTON.lower():
                     if task_id:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}"
-                        )
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}")
                     else:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}"
-                        )
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}")
                     if r.status_code == 200:
                         r = r.json()
                         self.state.update(
@@ -443,9 +415,7 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/done/{self.session_id}/{asin}/{options}",
                             }
                         )
-                elif (
-                    action_arg in self.text_to_clickable.keys()
-                ):  # click on product attributes
+                elif action_arg in self.text_to_clickable.keys():  # click on product attributes
                     input_html = str(self.text_to_clickable[action_arg])
                     element = self._parse_html(input_html).find("input")
                     name_value = element.get("name")
@@ -503,9 +473,7 @@ class WebShopEnv(ContainerResource):
         product_links = html_obj.find_all(class_="product-link")
         buying_options = html_obj.select('input[type="radio"]')
 
-        self.text_to_clickable = {
-            f"{b.get_text()}".lower(): b for b in buttons + product_links
-        }
+        self.text_to_clickable = {f"{b.get_text()}".lower(): b for b in buttons + product_links}
         for opt in buying_options:
             opt_value = opt.get("value")
             self.text_to_clickable[f"{opt_value}"] = opt
@@ -599,9 +567,7 @@ class WebShopEnv(ContainerResource):
                         processed_t = f"  [button] {t} [button_]"
                 elif t.parent.get("class") == ["product-link"]:  # product asins
                     asins = []
-                    if getattr(self, "server", None) and self.session_id in getattr(
-                        self.server, "user_sessions", {}
-                    ):
+                    if getattr(self, "server", None) and self.session_id in getattr(self.server, "user_sessions", {}):
                         asins = self.server.user_sessions[self.session_id].get("asins", [])
                     if f"{t}" in asins:
                         processed_t = f"\n[clicked button] {t} [clicked button_]"
@@ -627,14 +593,10 @@ class WebShopEnv(ContainerResource):
         if element.parent.parent is not None:
             return (
                 element.parent.name not in ignore
-                and not isinstance(
-                    element, Comment
-                )  # and not (element.parent.parent.get('id') == 'instruction-text')
+                and not isinstance(element, Comment)  # and not (element.parent.parent.get('id') == 'instruction-text')
             )
         else:
-            return element.parent.name not in ignore and not isinstance(
-                element, Comment
-            )
+            return element.parent.name not in ignore and not isinstance(element, Comment)
 
     @staticmethod
     def parse_action(action):

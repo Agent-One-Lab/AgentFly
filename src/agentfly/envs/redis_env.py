@@ -71,7 +71,9 @@ class RedisEnv(BaseEnv):
                 break
             except redis.exceptions.ConnectionError as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"Failed to connect to Redis (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                    logger.warning(
+                        f"Failed to connect to Redis (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s..."
+                    )
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
                 else:
@@ -79,9 +81,7 @@ class RedisEnv(BaseEnv):
                     if self.process.poll() is not None:
                         stderr = self.process.stderr.read()
                         raise RuntimeError(f"Redis server failed to start: {stderr}")
-                    raise RuntimeError(
-                        f"Failed to connect to Redis after {max_retries} attempts: {e}"
-                    )
+                    raise RuntimeError(f"Failed to connect to Redis after {max_retries} attempts: {e}")
 
     def _exists(self, key):
         return self.client.exists(key)

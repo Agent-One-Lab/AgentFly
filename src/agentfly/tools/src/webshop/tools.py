@@ -45,9 +45,7 @@ async def webshop_browser(action: str, value: str, context: Context):
         elif action == "click":
             observation = await env.step(f"click[{value}]")
         else:
-            return (
-                f"Error: Invalid action '{action}'. Must be either 'search' or 'click'"
-            )
+            return f"Error: Invalid action '{action}'. Must be either 'search' or 'click'"
         return observation
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
@@ -59,6 +57,7 @@ WEBSHOP_WON_REWARD = 10.0
 
 
 # ---- verl-agent-aligned page / action formatting (env_manager.WebshopEnvironmentManager) ----
+
 
 def extract_task(obs: str) -> Optional[str]:
     """verl-agent's ``extract_task``: the ``[SEP]`` part right after ``Instruction:``, or None.
@@ -86,7 +85,7 @@ def format_page(obs: str, task: Optional[str]) -> str:
         index = parts.index(task)
     else:
         return str(obs)
-    return " [SEP] ".join(f"'{p}'" for p in parts[index + 1:])
+    return " [SEP] ".join(f"'{p}'" for p in parts[index + 1 :])
 
 
 def format_avail_actions(avail: Dict[str, Any]) -> List[str]:

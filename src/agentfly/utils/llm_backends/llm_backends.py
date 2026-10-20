@@ -2,6 +2,7 @@
 LLM Backend module for reward functions.
 This module provides a unified interface to different LLM implementations.
 """
+
 # Defer annotation evaluation so lazily-imported types (e.g. vLLM ``SamplingParams``
 # in a method signature) don't force those heavy modules at import time.
 from __future__ import annotations
@@ -49,6 +50,7 @@ class LLMBackend:
     Attributes:
         config: Configuration dictionary containing backend-specific parameters.
     """
+
     def apply_chat_template(
         self,
         messages_list: List[List[Dict]],
@@ -106,8 +108,11 @@ class LLMBackend:
             for i in range(n):
                 messages = list(messages_list[i])
                 k = next(
-                    (j for j in range(len(messages) - 1, -1, -1)
-                     if messages[j].get("role") == "assistant" and messages[j].get("token_ids")),
+                    (
+                        j
+                        for j in range(len(messages) - 1, -1, -1)
+                        if messages[j].get("role") == "assistant" and messages[j].get("token_ids")
+                    ),
                     None,
                 )
                 if k is None:
@@ -138,8 +143,10 @@ class LLMBackend:
                 if self.check_prompt_consistency == "strict":
                     raise RuntimeError(msg)
             elif checked:
-                logger.info(f"[AsyncVerlBackend] splice_check: {checked}/{checked} rows continuous "
-                    "(prompt == turn prompt + sampled ids)")
+                logger.info(
+                    f"[AsyncVerlBackend] splice_check: {checked}/{checked} rows continuous "
+                    "(prompt == turn prompt + sampled ids)"
+                )
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
@@ -153,7 +160,6 @@ class LLMBackend:
     def postprocess(self):
         """Postprocess the backend"""
         pass
-
 
 
 class AsyncVLLMBackend(LLMBackend):
@@ -189,9 +195,7 @@ class AsyncVLLMBackend(LLMBackend):
             )
         self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
 
-    def _process_inputs(
-        self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]
-    ):
+    def _process_inputs(self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]):
         inputs = []
         for prompt, vision_input in zip(prompts, vision_inputs):
             mixed_inputs = {
@@ -202,9 +206,7 @@ class AsyncVLLMBackend(LLMBackend):
             inputs.append(mixed_inputs)
         return inputs
 
-    def _convert_to_chat_without_tool_call_processing(
-        self, messages: List[Dict]
-    ) -> List[Dict]:
+    def _convert_to_chat_without_tool_call_processing(self, messages: List[Dict]) -> List[Dict]:
         """
         Keep pure assistant text history for local chat-template rendering.
         Remove tool-call artifacts that may confuse template/tool parsing.
@@ -218,9 +220,7 @@ class AsyncVLLMBackend(LLMBackend):
             processed_messages.append(processed_message)
         return processed_messages
 
-    async def _generate_single(
-        self, prompt: str, sampling_params: SamplingParams
-    ):
+    async def _generate_single(self, prompt: str, sampling_params: SamplingParams):
         outputs_gen = self.llm_engine.generate(
             prompt,
             sampling_params=sampling_params,
@@ -279,14 +279,9 @@ class AsyncVLLMBackend(LLMBackend):
 
         tools = kwargs.get("tools", None)
         skills = kwargs.get("skills", None)
-        messages_list = [
-            self._convert_to_chat_without_tool_call_processing(messages)
-            for messages in messages_list
-        ]
+        messages_list = [self._convert_to_chat_without_tool_call_processing(messages) for messages in messages_list]
         logger.debug("[AsyncVLLMBackend.generate_async] applying chat template")
-        prompts, vision_inputs = await self._apply_chat_template_async(
-            messages_list, tools=tools, skills=skills
-        )
+        prompts, vision_inputs = await self._apply_chat_template_async(messages_list, tools=tools, skills=skills)
         inputs = self._process_inputs(prompts, vision_inputs)
         if n > 1:
             inputs = [_input for _input in inputs for _ in range(n)]
@@ -296,19 +291,12 @@ class AsyncVLLMBackend(LLMBackend):
         logger.debug("[AsyncVLLMBackend.generate_async] generating ...")
         request_outputs = await asyncio.gather(*tasks)
         # Flatten candidate texts across requests.
-        response_texts = [
-            out.text
-            for req_out in request_outputs
-            for out in getattr(req_out, "outputs", [])
-        ]
+        response_texts = [out.text for req_out in request_outputs for out in getattr(req_out, "outputs", [])]
         # Keep one total length per request to align with rollout.strategies.chain_rollout._extract_total_length().
         total_lengths = []
         for req_out in request_outputs:
             prompt_len = len(getattr(req_out, "prompt_token_ids", []) or [])
-            completion_lens = [
-                len(getattr(out, "token_ids", []) or [])
-                for out in getattr(req_out, "outputs", [])
-            ]
+            completion_lens = [len(getattr(out, "token_ids", []) or []) for out in getattr(req_out, "outputs", [])]
             completion_len = max(completion_lens) if completion_lens else 0
             total_lengths.append(prompt_len + completion_len)
         logger.debug(f"[AsyncVLLMBackend] response_texts: {response_texts}")
@@ -383,11 +371,13 @@ class AsyncVerlBackend(LLMBackend):
         self.check_prompt_consistency = check_prompt_consistency
         self._prompt_check_calls = 0
         self.prompt_check_stats = {
-            "checked": 0, "mismatched": 0,
+            "checked": 0,
+            "mismatched": 0,
             # Splice continuity (see _check_splice_continuity): rows whose last
             # sampled turn is exactly "its prompt + its sampled ids" inside the
             # prompt rendered for this call.
-            "continuity_checked": 0, "continuity_broken": 0,
+            "continuity_checked": 0,
+            "continuity_broken": 0,
         }
         self._warned_vision_fallback = False
 
@@ -401,8 +391,7 @@ class AsyncVerlBackend(LLMBackend):
         for m in messages:
             content = m.get("content")
             if isinstance(content, list) and any(
-                isinstance(part, dict)
-                and part.get("type") in ("image", "image_url", "image_base64", "video")
+                isinstance(part, dict) and part.get("type") in ("image", "image_url", "image_base64", "video")
                 for part in content
             ):
                 return True
@@ -456,9 +445,7 @@ class AsyncVerlBackend(LLMBackend):
             prompts, attention_mask = gb["prompts"], gb["attention_mask"]
             prompt_len = prompts.shape[1]
             n = min(self._PROMPT_CHECK_ROWS, len(messages_list))
-            depths = [
-                sum(1 for m in messages_list[i] if m.get("role") == "assistant") for i in range(n)
-            ]
+            depths = [sum(1 for m in messages_list[i] if m.get("role") == "assistant") for i in range(n)]
             mismatched, first_diff = 0, None
             for i in range(n):
                 sampled = prompts[i][attention_mask[i, :prompt_len].bool()].tolist()
@@ -487,8 +474,10 @@ class AsyncVerlBackend(LLMBackend):
                     raise RuntimeError(msg)
             else:
                 # print (not logger.info) so it is greppable next to the [StepRollout] batch line
-                logger.info(f"[AsyncVerlBackend] prompt_check: {n}/{n} rows identical "
-                    f"(sampling == training render; assistant turns={depths})")
+                logger.info(
+                    f"[AsyncVerlBackend] prompt_check: {n}/{n} rows identical "
+                    f"(sampling == training render; assistant turns={depths})"
+                )
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
@@ -504,9 +493,7 @@ class AsyncVerlBackend(LLMBackend):
         """Postprocess the backend"""
         pass
 
-    def _process_inputs(
-        self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]
-    ):
+    def _process_inputs(self, prompts: List[str], vision_inputs: Dict[str, List[PIL.Image.Image]]):
         inputs = []
         for prompt, vision_input in zip(prompts, vision_inputs):
             mixed_inputs = {
@@ -520,9 +507,7 @@ class AsyncVerlBackend(LLMBackend):
     def generate(self, messages_list: str, **kwargs) -> str:
         raise NotImplementedError("Async Verl backend does not support sync generation")
 
-    def _convert_to_openai_chat_without_tool_call_processing(
-        self, messages: list
-    ) -> list:
+    def _convert_to_openai_chat_without_tool_call_processing(self, messages: list) -> list:
         """
         We use the pure generated content as the history. So we don't want any tool call to be part of the history.
         """
@@ -571,12 +556,13 @@ class AsyncVerlBackend(LLMBackend):
         prompt_ids = self._render_prompt_ids(messages_list, tools)
         if prompt_ids is None and not self._warned_vision_fallback:
             self._warned_vision_fallback = True
-            logger.debug("[AsyncVerlBackend] prompt carries vision inputs: verl renders the prompt "
-                "itself (pre-tokenized ids are text-only for now)")
+            logger.debug(
+                "[AsyncVerlBackend] prompt carries vision inputs: verl renders the prompt "
+                "itself (pre-tokenized ids are text-only for now)"
+            )
         messages_list = [self._process_messages(messages) for messages in messages_list]
         messages_list = [
-            self._convert_to_openai_chat_without_tool_call_processing(messages)
-            for messages in messages_list
+            self._convert_to_openai_chat_without_tool_call_processing(messages) for messages in messages_list
         ]
         data_source = kwargs.get("data_source", None)
         tools_list = np.array([tools] * len(messages_list))
@@ -604,9 +590,7 @@ class AsyncVerlBackend(LLMBackend):
 
         logger.debug(f"[AsyncVerlBackend] generation_config: {generation_config}")
 
-        batch = DataProto.from_single_dict(
-            data, meta_info={"generation_config": generation_config}
-        )
+        batch = DataProto.from_single_dict(data, meta_info={"generation_config": generation_config})
 
         gen_batch_output = await self.llm_engine.generate_sequences_async(batch)
         gb = gen_batch_output.batch
@@ -618,10 +602,7 @@ class AsyncVerlBackend(LLMBackend):
         # Same text as before: decoding the padded row with skip_special_tokens
         # already dropped the (special) pad tokens, so stripping first is a no-op
         # for the text and makes the ids trustworthy.
-        response_texts = [
-            self.tokenizer.decode(response_id, skip_special_tokens=True)
-            for response_id in response_ids
-        ]
+        response_texts = [self.tokenizer.decode(response_id, skip_special_tokens=True) for response_id in response_ids]
 
         if return_dict:
             total_lengths = gb["attention_mask"].sum(dim=1)
@@ -698,16 +679,12 @@ class ClientBackend(LLMBackend):
         # holding the slot for the whole agent budget.
         self.timeout = int(os.environ.get("AF_REQUEST_TIMEOUT") or timeout)
 
-
     def _is_gemini_model(self, model_name: str, base_url: str) -> bool:
         """Check if the model is a Google Gemini model."""
         gemini_indicators = ["gemini", "generativelanguage.googleapis.com"]
         model_lower = model_name.lower()
         base_url_lower = base_url.lower()
-        return any(
-            indicator in model_lower or indicator in base_url_lower
-            for indicator in gemini_indicators
-        )
+        return any(indicator in model_lower or indicator in base_url_lower for indicator in gemini_indicators)
 
     def _prepare_gemini_payload(self, messages: List[Dict]):
         """Separates system instructions from chat history and converts to Gemini format."""
@@ -828,9 +805,7 @@ class ClientBackend(LLMBackend):
                                         "type": "function",
                                         "function": {
                                             "name": func.name,
-                                            "arguments": json.dumps(func.args)
-                                            if func.args
-                                            else "{}",
+                                            "arguments": json.dumps(func.args) if func.args else "{}",
                                         },
                                     }
                                 )
@@ -843,9 +818,7 @@ class ClientBackend(LLMBackend):
 
             total_lengths = None
             if hasattr(response, "usage_metadata") and response.usage_metadata is not None:
-                total_lengths = getattr(
-                    response.usage_metadata, "total_token_count", None
-                )
+                total_lengths = getattr(response.usage_metadata, "total_token_count", None)
 
             return {
                 "response_texts": response_texts,
@@ -896,10 +869,15 @@ class ClientBackend(LLMBackend):
                 else:
                     resp_json = self._streaming_chat_call(messages, **kwargs)
                 break
-            except (openai.APIConnectionError, openai.NotFoundError,
-                    openai.RateLimitError, openai.InternalServerError,
-                    openai.APITimeoutError,
-                    httpx.RemoteProtocolError, httpx.ReadError) as e:
+            except (
+                openai.APIConnectionError,
+                openai.NotFoundError,
+                openai.RateLimitError,
+                openai.InternalServerError,
+                openai.APITimeoutError,
+                httpx.RemoteProtocolError,
+                httpx.ReadError,
+            ) as e:
                 # NotFoundError: comet's registry transiently drops workers
                 # (model_not_found for a served model); Remote/ReadError: the
                 # server can cut a stream mid-flight.
@@ -915,18 +893,14 @@ class ClientBackend(LLMBackend):
                 )
                 # exponential with jitter — a fixed ramp makes every concurrent
                 # agent retry in lockstep, re-creating the spike that failed.
-                time.sleep(min(90, (2 ** attempt) * 5) * (0.5 + random.random()))
+                time.sleep(min(90, (2**attempt) * 5) * (0.5 + random.random()))
         else:
             raise last_exc
         logger.debug(f"[ClientBackend] resp_json: {resp_json}")
         # A tool-call turn returns content=null; coerce to "" so downstream
         # string handling (content blocks, joins, templating) never sees None.
-        response_texts = [
-            (choice["message"].get("content") or "") for choice in resp_json["choices"]
-        ]
-        tool_calls = [
-            choice["message"].get("tool_calls") for choice in resp_json["choices"]
-        ]
+        response_texts = [(choice["message"].get("content") or "") for choice in resp_json["choices"]]
+        tool_calls = [choice["message"].get("tool_calls") for choice in resp_json["choices"]]
         usage = resp_json.get("usage") or {}
         total_lengths = usage.get("total_tokens") if usage else None
 
@@ -972,12 +946,14 @@ class ClientBackend(LLMBackend):
                 usage = cj["usage"]
             for ch in cj.get("choices") or []:
                 idx = ch.get("index", 0)
-                acc = choices.setdefault(idx, {
-                    "index": idx,
-                    "message": {"role": "assistant", "content": "",
-                                "reasoning_content": "", "tool_calls": {}},
-                    "finish_reason": None,
-                })
+                acc = choices.setdefault(
+                    idx,
+                    {
+                        "index": idx,
+                        "message": {"role": "assistant", "content": "", "reasoning_content": "", "tool_calls": {}},
+                        "finish_reason": None,
+                    },
+                )
                 if ch.get("finish_reason"):
                     acc["finish_reason"] = ch["finish_reason"]
                 delta = ch.get("delta") or {}
@@ -987,10 +963,14 @@ class ClientBackend(LLMBackend):
                     acc["message"]["reasoning_content"] += delta["reasoning_content"]
                 for tc in delta.get("tool_calls") or []:
                     ti = tc.get("index", 0)
-                    tacc = acc["message"]["tool_calls"].setdefault(ti, {
-                        "id": None, "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    })
+                    tacc = acc["message"]["tool_calls"].setdefault(
+                        ti,
+                        {
+                            "id": None,
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        },
+                    )
                     if tc.get("id"):
                         tacc["id"] = tc["id"]
                     if tc.get("type"):
@@ -1033,9 +1013,7 @@ class ClientBackend(LLMBackend):
         # acquire a rate‑limit token
         async with self._tokens:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, partial(self._blocking_call, messages, **kwargs)
-            )
+            return await loop.run_in_executor(None, partial(self._blocking_call, messages, **kwargs))
 
     # ------------------------------------------------------------------ #
     # Completions endpoint (/v1/completions) — raw prompt path
@@ -1068,9 +1046,7 @@ class ClientBackend(LLMBackend):
     async def _call_complete(self, prompt: str, **kwargs) -> Dict:
         async with self._tokens:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, partial(self._blocking_complete_openai, prompt, **kwargs)
-            )
+            return await loop.run_in_executor(None, partial(self._blocking_complete_openai, prompt, **kwargs))
 
     def complete(
         self,
@@ -1094,8 +1070,7 @@ class ClientBackend(LLMBackend):
         """
         if self.is_gemini:
             raise NotImplementedError(
-                "Gemini does not expose a /v1/completions endpoint. "
-                "Use generate(messages=...) instead."
+                "Gemini does not expose a /v1/completions endpoint. Use generate(messages=...) instead."
             )
 
         if isinstance(prompts, str):
@@ -1105,10 +1080,7 @@ class ClientBackend(LLMBackend):
 
         async def _runner():
             self._ensure_refiller_running()
-            tasks = [
-                asyncio.create_task(self._call_complete(p, **kwargs))
-                for p in prompts_list
-            ]
+            tasks = [asyncio.create_task(self._call_complete(p, **kwargs)) for p in prompts_list]
             response_dicts = await asyncio.gather(*tasks)
             if return_dict:
                 return response_dicts
@@ -1142,10 +1114,7 @@ class ClientBackend(LLMBackend):
             if is_openai_model:
                 if message["role"] == "assistant":
                     if "tool_calls" in message:
-                        if (
-                            "content" in message
-                            and message["content"][0]["text"] is None
-                        ):
+                        if "content" in message and message["content"][0]["text"] is None:
                             del message["content"]
             else:
                 if "tool_calls" in message:
@@ -1162,9 +1131,7 @@ class ClientBackend(LLMBackend):
                         # OpenAI chat completion API only supports image_url
                         # And we keep all images to be base64 for compatibility
                         image = image_to_data_uri(item["image"])
-                        new_content.append(
-                            {"type": "image_url", "image_url": {"url": image}}
-                        )
+                        new_content.append({"type": "image_url", "image_url": {"url": image}})
                     else:
                         new_content.append(item)
                 message["content"] = new_content
@@ -1202,9 +1169,7 @@ class ClientBackend(LLMBackend):
 
         if not self.is_gemini:
             messages_list = [
-                self._convert_to_openai_chat_without_tool_call_processing(
-                    messages, native_tools
-                )
+                self._convert_to_openai_chat_without_tool_call_processing(messages, native_tools)
                 for messages in messages_list
             ]
 
@@ -1252,17 +1217,12 @@ class ClientBackend(LLMBackend):
         else:
             messages_list = messages  # batch
         logger.debug(f"[ClientBackend] messages_list: {messages_list}")
-        messages_list, kwargs = self._preprocess_messages_and_args(
-            messages_list, **kwargs
-        )
+        messages_list, kwargs = self._preprocess_messages_and_args(messages_list, **kwargs)
 
         async def _runner():
             # Ensure refiller is running in this event loop
             self._ensure_refiller_running()
-            tasks = [
-                asyncio.create_task(self._call(_input, **kwargs))
-                for _input in messages_list
-            ]
+            tasks = [asyncio.create_task(self._call(_input, **kwargs)) for _input in messages_list]
             # Flatten the response list
             response_dicts = await asyncio.gather(*tasks)
 

@@ -75,33 +75,33 @@ async def _start_enroot_container(
         logger.debug(f"[{runner_label}]: starting container name={name} kwargs: {start_kwargs}")
 
         await container.start_async(**start_kwargs)
-        
+
     except (asyncio.TimeoutError, TimeoutError, EnrootTimeoutError) as e:
         raise asyncio.TimeoutError(
             f"Container create/start timed out for image={image!r}, name={name!r}, timeout={timeout!r}."
         ) from e
     except APIError as e:
-        raise RuntimeError(
-            f"Container create/start failed for image={image!r}, name={name!r}: {e}"
-        ) from e
+        raise RuntimeError(f"Container create/start failed for image={image!r}, name={name!r}: {e}") from e
     except EnrootError as e:
-        raise RuntimeError(
-            f"Container create/start failed for image={image!r}, name={name!r}: {e}"
-        ) from e
+        raise RuntimeError(f"Container create/start failed for image={image!r}, name={name!r}: {e}") from e
 
     containers_registry[container.name] = container
 
     if spec.category == "python_env":
         from ..envs.python_env import PythonSandboxEnv
+
         resource = PythonSandboxEnv(container=container, resource_id=container.name, spec=spec)
     elif spec.category == "scienceworld":
         from ..envs.scienceworld_env import ScienceWorldEnv
+
         resource = ScienceWorldEnv(container=container, resource_id=container.name, spec=spec)
     elif spec.category == "alfworld":
         from ..envs.alfworld_env import ALFWorldEnv
+
         resource = ALFWorldEnv(container=container, resource_id=container.name, spec=spec)
     elif spec.category == "webshop":
         from ..envs.webshop_text_env import WebShopEnv
+
         resource = WebShopEnv(container=container, resource_id=container.name, spec=spec)
     elif spec.category == "container":
         resource = ContainerResource(container=container, resource_id=container.name, spec=spec)
@@ -119,6 +119,7 @@ def _resolve_container_engine(spec: ContainerResourceSpec) -> str:
     Recognized: "enroot", "docker", "daytona", "sqs".
     """
     import os
+
     engine = getattr(spec, "container_engine", None)
     if engine:
         return str(engine).strip().lower()
@@ -143,10 +144,7 @@ async def _start_docker_container(
     from .containers.docker_container import start_docker_container
 
     if spec.category != "container":
-        raise ValueError(
-            f"docker engine supports only the 'container' category, "
-            f"got {spec.category!r}"
-        )
+        raise ValueError(f"docker engine supports only the 'container' category, got {spec.category!r}")
     name = resource_id or random_name(prefix="res")
     image = spec.image or "ubuntu:22.04"
     timeout_sec = 1800.0 if timeout is None else timeout
@@ -188,10 +186,7 @@ async def _start_daytona_container(
     from .containers.daytona_container import start_daytona_container
 
     if spec.category != "container":
-        raise ValueError(
-            f"daytona engine supports only the 'container' category, "
-            f"got {spec.category!r}"
-        )
+        raise ValueError(f"daytona engine supports only the 'container' category, got {spec.category!r}")
     name = resource_id or random_name(prefix="res")
     timeout_sec = 1800.0 if timeout is None else timeout
     resource = await asyncio.to_thread(
@@ -228,10 +223,7 @@ async def _start_sqs_container(
     from .containers.sqs_container import start_sqs_container
 
     if spec.category != "container":
-        raise ValueError(
-            f"sqs engine supports only the 'container' category, "
-            f"got {spec.category!r}"
-        )
+        raise ValueError(f"sqs engine supports only the 'container' category, got {spec.category!r}")
     name = resource_id or random_name(prefix="res")
     timeout_sec = 1800.0 if timeout is None else timeout
     resource = await asyncio.to_thread(
@@ -411,9 +403,7 @@ class LocalRunner(BaseRunner):
             raise ValueError("LocalEnvResourceSpec requires env_cls_path.")
         module_path, _, cls_name = spec.env_cls_path.rpartition(".")
         if not module_path:
-            raise ValueError(
-                f"env_cls_path must be a fully qualified dotted path, got: {spec.env_cls_path!r}"
-            )
+            raise ValueError(f"env_cls_path must be a fully qualified dotted path, got: {spec.env_cls_path!r}")
         import importlib
 
         module = importlib.import_module(module_path)

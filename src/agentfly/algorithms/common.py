@@ -48,13 +48,15 @@ def are_similar(a: str, b: str, threshold: float = 0.95) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= threshold
 
 
-def episode_norm_reward(token_level_rewards: torch.Tensor,
-                        response_mask: torch.Tensor,
-                        index: np.array,
-                        traj_index: np.array,
-                        epsilon: float = 1e-6,
-                        remove_std: bool = True,
-                        compute_mean_std_cross_steps: bool = True):
+def episode_norm_reward(
+    token_level_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index: np.array,
+    traj_index: np.array,
+    epsilon: float = 1e-6,
+    remove_std: bool = True,
+    compute_mean_std_cross_steps: bool = True,
+):
     """Episode-level advantage (mean/std over a uid group's rows). verl-agent verbatim."""
     response_length = token_level_rewards.shape[-1]
     scores = token_level_rewards.sum(dim=-1)
@@ -90,8 +92,13 @@ def episode_norm_reward(token_level_rewards: torch.Tensor,
     return episode_advantages
 
 
-def build_step_group(anchor_obs: np.array, index: np.array, enable_similarity: bool = False,
-                     similarity_thresh: float = 0.95, summarize: bool = False):
+def build_step_group(
+    anchor_obs: np.array,
+    index: np.array,
+    enable_similarity: bool = False,
+    similarity_thresh: float = 0.95,
+    summarize: bool = False,
+):
     """Cluster rows with identical ``anchor_obs`` within a uid group. verl-agent verbatim."""
     if enable_similarity:
         assert 0.0 < similarity_thresh < 1.0, "similarity_thresh should be in (0, 1)"
@@ -137,11 +144,13 @@ def build_step_group(anchor_obs: np.array, index: np.array, enable_similarity: b
     return step_group_uids
 
 
-def step_norm_reward(step_rewards: torch.Tensor,
-                     response_mask: torch.Tensor,
-                     index: np.array,
-                     epsilon: float = 1e-6,
-                     remove_std: bool = True):
+def step_norm_reward(
+    step_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index: np.array,
+    epsilon: float = 1e-6,
+    remove_std: bool = True,
+):
     """Step-level advantage (mean/std over an anchor step-group). verl-agent verbatim."""
     response_length = response_mask.shape[-1]
     scores = step_rewards.clone()
@@ -171,8 +180,7 @@ def step_norm_reward(step_rewards: torch.Tensor,
     return step_advantages
 
 
-def compute_step_discounted_returns(step_rewards: np.ndarray, traj_uids: np.ndarray,
-                                    gamma: float) -> np.ndarray:
+def compute_step_discounted_returns(step_rewards: np.ndarray, traj_uids: np.ndarray, gamma: float) -> np.ndarray:
     """Per-``traj_uid`` backward discounted return ``G_t = r_t + gamma * G_{t+1}``.
 
     verl-agent's ``compute_step_discounted_returns`` on raw arrays (rows of one trajectory
@@ -268,9 +276,15 @@ def object_array(values: Sequence[Any]) -> np.ndarray:
     return out
 
 
-def print_group_diagnostics(tag: str, step_group_uids: np.ndarray, episode_adv: torch.Tensor,
-                            step_adv: torch.Tensor, response_mask: torch.Tensor,
-                            step_advantage_w: float, extra: Optional[str] = None) -> None:
+def print_group_diagnostics(
+    tag: str,
+    step_group_uids: np.ndarray,
+    episode_adv: torch.Tensor,
+    step_adv: torch.Tensor,
+    response_mask: torch.Tensor,
+    step_advantage_w: float,
+    extra: Optional[str] = None,
+) -> None:
     """One console line per update showing whether the step term is doing anything.
 
     If step groups are mostly singletons the step advantage is ~0 and GiGPO reduces to GRPO.
@@ -287,10 +301,12 @@ def print_group_diagnostics(tag: str, step_group_uids: np.ndarray, episode_adv: 
         ep_mag = float(episode_adv[resp].abs().mean()) if resp.any() else 0.0
         st_mag = float(step_adv[resp].abs().mean()) if resp.any() else 0.0
         nz = 100.0 * float((step_adv[resp].abs() > 1e-8).float().mean()) if resp.any() else 0.0
-        logger.debug(f"[{tag}] {extra + ' | ' if extra else ''}"
+        logger.debug(
+            f"[{tag}] {extra + ' | ' if extra else ''}"
             f"step-groups={len(sizes)} over {n} steps non-singleton={non_singleton:.1f}% "
             f"avg_size={n / max(1, len(sizes)):.2f} max={max(sizes) if sizes else 0} | "
             f"|episode_adv|={ep_mag:.4f} w*|step_adv|={step_advantage_w * st_mag:.4f} "
-            f"step/episode={(step_advantage_w * st_mag) / (ep_mag + 1e-8):.2f} nonzero-step={nz:.1f}%")
+            f"step/episode={(step_advantage_w * st_mag) / (ep_mag + 1e-8):.2f} nonzero-step={nz:.1f}%"
+        )
     except Exception as e:  # noqa: BLE001 — diagnostics must never break training
         logger.warning(f"[{tag}] diagnostics failed: {e}")

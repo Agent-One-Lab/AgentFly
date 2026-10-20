@@ -40,9 +40,7 @@ async def chess_puzzle_reward(final_response: str, context: Context) -> Dict[str
             - centipawn_score (float): Average centipawn quality of moves (0-100 scale)
             - output (str): Human-readable summary
     """
-    env: ChessPuzzleEnv = await context.acquire_resource(
-        spec=ChessPuzzleSpec, scope="global", backend="local"
-    )
+    env: ChessPuzzleEnv = await context.acquire_resource(spec=ChessPuzzleSpec, scope="global", backend="local")
 
     is_solved = env.is_solved
     moves_made = env.moves_made
@@ -104,9 +102,7 @@ async def chess_puzzle_reward(final_response: str, context: Context) -> Dict[str
     output_parts = [
         f"Puzzle {'SOLVED!' if is_solved else 'not solved'}",
         f"Moves made: {num_moves}",
-        f"Best move matches: {best_move_matches}/{num_moves}"
-        if num_moves > 0
-        else "No moves made",
+        f"Best move matches: {best_move_matches}/{num_moves}" if num_moves > 0 else "No moves made",
         f"Average move quality: {avg_cp:.1f}/100",
         f"Total reward: {total_reward:.3f}",
     ]
@@ -122,9 +118,7 @@ async def chess_puzzle_reward(final_response: str, context: Context) -> Dict[str
 
 
 @reward(name="chess_puzzle_reward_simple")
-async def chess_puzzle_reward_simple(
-    final_response: str, context: Context
-) -> Dict[str, Any]:
+async def chess_puzzle_reward_simple(final_response: str, context: Context) -> Dict[str, Any]:
     """
     Simple binary reward for chess puzzle solving.
 
@@ -140,9 +134,7 @@ async def chess_puzzle_reward_simple(
             - is_solved (bool): Whether the puzzle was solved
             - output (str): Human-readable status message
     """
-    env: ChessPuzzleEnv = await context.acquire_resource(
-        spec=ChessPuzzleSpec, scope="global", backend="local"
-    )
+    env: ChessPuzzleEnv = await context.acquire_resource(spec=ChessPuzzleSpec, scope="global", backend="local")
     is_solved = env.is_solved
 
     return {

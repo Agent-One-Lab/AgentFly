@@ -16,9 +16,7 @@ from ..agent_base import BaseAgent
 logger = logging.getLogger(__file__)
 
 # Output format from system prompt: <think>...</think>, <search> query </search>, <information>...</information>, <answer>...</answer>
-_SEARCH_TAG_PATTERN = re.compile(
-    r"<search>\s*(.*?)\s*</search>", re.DOTALL | re.IGNORECASE
-)
+_SEARCH_TAG_PATTERN = re.compile(r"<search>\s*(.*?)\s*</search>", re.DOTALL | re.IGNORECASE)
 
 
 class HFAgent(BaseAgent):
@@ -28,9 +26,7 @@ class HFAgent(BaseAgent):
         tool_parser_name: Optional[str] = "hermes",
         **kwargs,
     ):
-        super().__init__(
-            model_name_or_path, tool_parser_name=tool_parser_name, **kwargs
-        )
+        super().__init__(model_name_or_path, tool_parser_name=tool_parser_name, **kwargs)
 
 
 class SearchR1Agent(BaseAgent):
@@ -43,9 +39,7 @@ class SearchR1Agent(BaseAgent):
         search_tool_name: str = "search",
         **kwargs,
     ):
-        super().__init__(
-            model_name_or_path, tool_parser_name=tool_parser_name, **kwargs
-        )
+        super().__init__(model_name_or_path, tool_parser_name=tool_parser_name, **kwargs)
         self.search_tool_name = search_tool_name
 
     @staticmethod

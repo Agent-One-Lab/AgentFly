@@ -60,6 +60,7 @@ class AutoAgent:
             ValueError: If the agent type is not registered
         """
         from ..utils.references import resolve_reference
+
         # Accepts a registered type OR an import reference
         # ("module:AgentClass", "/path.py:AgentClass").
         try:
@@ -106,9 +107,7 @@ class AutoAgent:
         missing_params = [param for param in required_params if not config.get(param)]
 
         if missing_params:
-            raise ValueError(
-                f"Missing required parameters: {', '.join(missing_params)}"
-            )
+            raise ValueError(f"Missing required parameters: {', '.join(missing_params)}")
         backend_config = agent_kwargs["backend_config"]
         if not isinstance(backend_config, dict) or "backend" not in backend_config:
             raise ValueError(
@@ -118,10 +117,7 @@ class AutoAgent:
         agent_type = config["agent_type"]
         agent_kwargs.pop("agent_type")
         # Tools may be registered names, import references, or tool objects, mixed.
-        tools = [
-            get_tools_from_names([t])[0] if isinstance(t, str) else t
-            for t in (agent_kwargs.get("tools") or [])
-        ]
+        tools = [get_tools_from_names([t])[0] if isinstance(t, str) else t for t in (agent_kwargs.get("tools") or [])]
         agent_class = cls._get_agent_class(agent_type)
         reward_fn = agent_kwargs.get("reward_fn")
         reward_name = agent_kwargs.pop("reward_name", None)

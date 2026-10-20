@@ -43,6 +43,7 @@ from .container_resource import ContainerResource
 @dataclass
 class DockerExecResult:
     """docker-py / enroot ExecResult-compatible: (exit_code, output)."""
+
     exit_code: int
     output: bytes
 
@@ -99,9 +100,12 @@ def _ssh_target_from_docker_host(docker_host: Optional[str] = None) -> Optional[
     return m.group(1) if m else None
 
 
-def _run(cmd: List[str], timeout: Optional[float] = None,
-         input_bytes: Optional[bytes] = None,
-         docker_host: Optional[str] = None) -> subprocess.CompletedProcess:
+def _run(
+    cmd: List[str],
+    timeout: Optional[float] = None,
+    input_bytes: Optional[bytes] = None,
+    docker_host: Optional[str] = None,
+) -> subprocess.CompletedProcess:
     # When a pool host is selected, target it by overriding DOCKER_HOST for this
     # one call only — the process-global env stays the single-host fallback.
     env = {**os.environ, "DOCKER_HOST": docker_host} if docker_host else None
@@ -140,7 +144,8 @@ def _stage_mount_to_remote(target: str, src: str, container_name: str) -> str:
     # Ensure the staging dir exists.
     rc = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", target, f"mkdir -p {remote_dir}"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     if rc.returncode != 0:
         raise RuntimeError(f"mkdir on remote failed: {rc.stderr.decode(errors='replace')}")
@@ -151,30 +156,32 @@ def _stage_mount_to_remote(target: str, src: str, container_name: str) -> str:
     if is_dir:
         subprocess.run(
             ["ssh", "-o", "BatchMode=yes", target, f"mkdir -p {remote_dir}/{leaf}"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
     proc = subprocess.run(
-        ["rsync", "-az", "-e", "ssh -o BatchMode=yes",
-         rsync_src, f"{target}:{remote_leaf}"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ["rsync", "-az", "-e", "ssh -o BatchMode=yes", rsync_src, f"{target}:{remote_leaf}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     if proc.returncode != 0:
-        raise RuntimeError(
-            f"rsync of mount {src!r} to remote failed: "
-            f"{proc.stderr.decode(errors='replace')}"
-        )
+        raise RuntimeError(f"rsync of mount {src!r} to remote failed: {proc.stderr.decode(errors='replace')}")
     # The remote path (expand ~ to an absolute path for docker -v).
     # docker -v needs an absolute path; resolve ~ on the remote.
-    home = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", target, "printf %s \"$HOME\""],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    ).stdout.decode().strip()
+    home = (
+        subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", target, 'printf %s "$HOME"'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        .stdout.decode()
+        .strip()
+    )
     rel = f".agentfly-mounts/{container_name}/{leaf}"
     return f"{home}/{rel}" if home else f"{remote_dir}/{leaf}"
 
 
-def _build_mount_args(mount: Dict[str, str], container_name: str,
-                      docker_host: Optional[str] = None) -> List[str]:
+def _build_mount_args(mount: Dict[str, str], container_name: str, docker_host: Optional[str] = None) -> List[str]:
     """Translate spec.mount into docker -v args, staging to remote if needed."""
     if not mount:
         return []
@@ -219,9 +226,7 @@ def start_docker_container(
     # Placement precedence: explicit arg -> spec.docker_host (caller-pinned) ->
     # image-tag hash (the default). The middle term lets a multi-step task pin
     # all its containers to one host even when their image tags differ.
-    docker_host = (docker_host
-                   or (getattr(spec, "docker_host", None) if spec else None)
-                   or select_docker_host(image))
+    docker_host = docker_host or (getattr(spec, "docker_host", None) if spec else None) or select_docker_host(image)
     cname = name or f"agentfly-{uuid.uuid4().hex[:12]}"
     cmd = [_docker_bin(), "run", "-d", "--name", cname]
     if workdir:
@@ -252,8 +257,7 @@ def start_docker_container(
         c.reload()
     except BaseException:
         try:
-            _run([_docker_bin(), "rm", "-f", cname], timeout=timeout,
-                 docker_host=docker_host)
+            _run([_docker_bin(), "rm", "-f", cname], timeout=timeout, docker_host=docker_host)
         except BaseException:
             pass
         raise
@@ -268,9 +272,13 @@ class DockerContainer(ContainerResource):
     ``end``/``close``) and ``run_cmd`` drive the docker handle methods below.
     """
 
-    def __init__(self, name: str, image: Optional[str] = None,
-                 docker_host: Optional[str] = None,
-                 spec: Optional["ContainerResourceSpec"] = None):
+    def __init__(
+        self,
+        name: str,
+        image: Optional[str] = None,
+        docker_host: Optional[str] = None,
+        spec: Optional["ContainerResourceSpec"] = None,
+    ):
         self.name = name
         self.image = image
         # Pin every docker call for this container to the host it was created
@@ -284,8 +292,7 @@ class DockerContainer(ContainerResource):
     # ---- handle (enroot-Container subset, driven by ContainerResource) ---
 
     def reload(self) -> None:
-        proc = _run([_docker_bin(), "inspect", "-f", "{{.State.Status}}", self.name],
-                    docker_host=self.docker_host)
+        proc = _run([_docker_bin(), "inspect", "-f", "{{.State.Status}}", self.name], docker_host=self.docker_host)
         if proc.returncode != 0:
             self.status = "exited"
         else:
@@ -304,16 +311,15 @@ class DockerContainer(ContainerResource):
         if target is not None:
             await asyncio.to_thread(
                 lambda: subprocess.run(
-                    ["ssh", "-o", "BatchMode=yes", target,
-                     f"rm -rf ~/.agentfly-mounts/{self.name}"],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    ["ssh", "-o", "BatchMode=yes", target, f"rm -rf ~/.agentfly-mounts/{self.name}"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
             )
 
     # ---- exec -----------------------------------------------------------
 
-    def _exec(self, cmd: Union[str, List[str]], workdir, user,
-              environment, timeout) -> DockerExecResult:
+    def _exec(self, cmd: Union[str, List[str]], workdir, user, environment, timeout) -> DockerExecResult:
         argv = [_docker_bin(), "exec"]
         if workdir:
             argv += ["-w", workdir]
@@ -343,13 +349,9 @@ class DockerContainer(ContainerResource):
         **_,
     ) -> DockerExecResult:
         try:
-            return await asyncio.to_thread(
-                self._exec, cmd, workdir, user, environment, timeout
-            )
+            return await asyncio.to_thread(self._exec, cmd, workdir, user, environment, timeout)
         except subprocess.TimeoutExpired as e:
-            raise asyncio.TimeoutError(
-                f"docker exec timed out after {timeout}s"
-            ) from e
+            raise asyncio.TimeoutError(f"docker exec timed out after {timeout}s") from e
 
     def exec_run(
         self,
@@ -363,9 +365,7 @@ class DockerContainer(ContainerResource):
         try:
             return self._exec(cmd, workdir, user, environment, timeout)
         except subprocess.TimeoutExpired as e:
-            raise asyncio.TimeoutError(
-                f"docker exec timed out after {timeout}s"
-            ) from e
+            raise asyncio.TimeoutError(f"docker exec timed out after {timeout}s") from e
 
     # ---- copy (mirror enroot Container.put_archive / copy_to) ------------
 
@@ -378,8 +378,12 @@ class DockerContainer(ContainerResource):
         if hasattr(data, "read"):
             data = data.read()
         self._exec(f"mkdir -p {shlex.quote(path)}", None, None, None, 60)
-        proc = _run([_docker_bin(), "cp", "-", f"{self.name}:{path}"],
-                    input_bytes=data, timeout=timeout, docker_host=self.docker_host)
+        proc = _run(
+            [_docker_bin(), "cp", "-", f"{self.name}:{path}"],
+            input_bytes=data,
+            timeout=timeout,
+            docker_host=self.docker_host,
+        )
         return proc.returncode == 0
 
     def copy_to(self, local_path: str, container_path: str, timeout: float = 300) -> None:
@@ -393,12 +397,10 @@ class DockerContainer(ContainerResource):
         if os.path.isdir(local_path):
             tar_cmd = ["tar", "-C", local_path, "-cf", "-", "."]
         else:
-            tar_cmd = ["tar", "-C", os.path.dirname(local_path), "-cf", "-",
-                       os.path.basename(local_path)]
+            tar_cmd = ["tar", "-C", os.path.dirname(local_path), "-cf", "-", os.path.basename(local_path)]
         p = subprocess.run(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         if not self.put_archive(container_path, p.stdout, timeout=timeout):
             raise RuntimeError(f"copy_to failed: {self.name}:{container_path}")
 
-    async def copy_to_async(self, local_path: str, container_path: str,
-                            timeout: float = 300) -> None:
+    async def copy_to_async(self, local_path: str, container_path: str, timeout: float = 300) -> None:
         await asyncio.to_thread(self.copy_to, local_path, container_path, timeout)

@@ -14,6 +14,7 @@ registries rather than replacing them.
 
 Stdlib only (importlib): the agent layer must not depend on the training layer.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -77,19 +78,15 @@ def load_object(ref: str) -> Any:
     """
     location, sep, attr = ref.rpartition(":")
     if location.startswith(("file://",)):
-        location = location[len("file://"):]
+        location = location[len("file://") :]
     if not sep or not location or not attr:
-        raise ValueError(
-            f"invalid reference {ref!r}: expected 'module_or_file.py:attribute'"
-        )
+        raise ValueError(f"invalid reference {ref!r}: expected 'module_or_file.py:attribute'")
     if location.endswith(".py") or "/" in location or location.startswith("."):
         module = _import_from_file(location)
     else:
         module = importlib.import_module(location)
     if not hasattr(module, attr):
-        raise AttributeError(
-            f"reference {ref!r}: '{location}' has no attribute '{attr}'"
-        )
+        raise AttributeError(f"reference {ref!r}: '{location}' has no attribute '{attr}'")
     return getattr(module, attr)
 
 

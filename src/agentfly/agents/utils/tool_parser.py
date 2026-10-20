@@ -66,8 +66,6 @@ def create_tool_parser(tool_parser_name: str, tokenizer: Any) -> Optional[Any]:
     if tokenizer is None:
         return None
     if not ensure_vllm_tool_parser() or ToolParserManager is None:
-        raise ImportError(
-            "vLLM tool parser is not available. Please install vllm to use tool_parser_name."
-        )
+        raise ImportError("vLLM tool parser is not available. Please install vllm to use tool_parser_name.")
     parser_cls = ToolParserManager.get_tool_parser(tool_parser_name)
     return parser_cls(tokenizer)

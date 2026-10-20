@@ -64,9 +64,7 @@ def __getattr__(name):
     try:
         value = getattr(impls, name)
     except AttributeError:
-        raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}"
-        ) from None
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     globals()[name] = value  # cache so __getattr__ isn't hit again for this name
     return value
 

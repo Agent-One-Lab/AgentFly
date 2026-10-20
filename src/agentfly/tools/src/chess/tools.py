@@ -33,9 +33,7 @@ async def _get_chess_env(context: Context):
     )
     if need_reset:
         meta = context.metadata or {}
-        env_args = {
-            k: meta[k] for k in ("puzzle_id", "fen", "moves") if k in meta
-        }
+        env_args = {k: meta[k] for k in ("puzzle_id", "fen", "moves") if k in meta}
         if env_args:
             await env.reset(env_args=env_args)
         else:

@@ -18,8 +18,7 @@ SYSTEM_BASE = "You are a helpful assistant that can interact with a computer."
 # for this task:"); the current stack renders the plural header for any
 # skill count, so that is what RL and eval use.
 SKILL_HEADER = (
-    "Skills are available for this task. Consider every listed skill equally and\n"
-    "use whichever are relevant:"
+    "Skills are available for this task. Consider every listed skill equally and\nuse whichever are relevant:"
 )
 
 INSTANCE_PREFIX = "Please solve this issue: "

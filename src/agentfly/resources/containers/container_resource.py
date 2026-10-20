@@ -20,6 +20,7 @@ from ..types import BaseResource, ContainerResourceSpec, ResourceStatus
 _TIMEOUT_EXCS: Tuple[type, ...] = (asyncio.TimeoutError,)
 try:  # pragma: no cover - enroot may be absent in some deployments
     from enroot.errors import TimeoutError as _EnrootTimeoutError
+
     _TIMEOUT_EXCS = (asyncio.TimeoutError, _EnrootTimeoutError)
 except Exception:  # noqa: BLE001
     pass
@@ -69,6 +70,7 @@ class ContainerResource(BaseResource):
 
     async def get_status(self) -> ResourceStatus:
         """Return lifecycle status mapped from the underlying container status string."""
+
         def _reload_and_status():
             self._container.reload()
             s = getattr(self._container, "status", "exited")
@@ -139,14 +141,10 @@ class ContainerResource(BaseResource):
             if hasattr(self._container, "exec_run_async"):
                 result = await self._container.exec_run_async(exec_args, **kwargs)
             else:
-                result = await asyncio.to_thread(
-                    self._container.exec_run, exec_args, **kwargs
-                )
+                result = await asyncio.to_thread(self._container.exec_run, exec_args, **kwargs)
         except _TIMEOUT_EXCS as e:
             if timeout is not None:
-                raise asyncio.TimeoutError(
-                    f"Command timed out after {timeout} seconds: {cmd}"
-                ) from e
+                raise asyncio.TimeoutError(f"Command timed out after {timeout} seconds: {cmd}") from e
             raise asyncio.TimeoutError(str(e)) from e
 
         output = result.output if hasattr(result, "output") else str(result)
@@ -154,8 +152,7 @@ class ContainerResource(BaseResource):
             return output.decode("utf-8", errors="replace")
         return output if output is not None else ""
 
-    async def copy_in(self, local_path: str, container_path: str,
-                      timeout: Optional[float] = 300) -> None:
+    async def copy_in(self, local_path: str, container_path: str, timeout: Optional[float] = 300) -> None:
         """Copy a local file/dir into the container (contents, for a dir).
 
         Distinct name from the backend handle's ``copy_to`` on purpose: a

@@ -91,8 +91,7 @@ class ToolResult:
         if isinstance(raw, dict):
             if "observation" not in raw:
                 raise ValueError(
-                    f"observation key required when tool {name!r} returns a dict; "
-                    f"got keys: {list(raw.keys())}"
+                    f"observation key required when tool {name!r} returns a dict; got keys: {list(raw.keys())}"
                 )
             raw = dict(raw)  # don't mutate caller's dict
             obs = raw.pop("observation")
@@ -107,8 +106,7 @@ class ToolResult:
             control = raw.pop("control", None)
             if control is not None and control not in CONTROL:
                 raise ValueError(
-                    f"Tool {name!r} returned control={control!r}; "
-                    f"expected one of {sorted(CONTROL)} or None."
+                    f"Tool {name!r} returned control={control!r}; expected one of {sorted(CONTROL)} or None."
                 )
             explicit = raw.pop("metrics", None) or {}
             metrics = {**raw, **explicit}
@@ -123,10 +121,7 @@ class ToolResult:
                 anchor=anchor,
                 control=control,
             )
-        raise ValueError(
-            f"Tool {name!r} returned {type(raw).__name__}; "
-            "expected str, dict, or ToolResult."
-        )
+        raise ValueError(f"Tool {name!r} returned {type(raw).__name__}; expected str, dict, or ToolResult.")
 
     def to_dict(self) -> Dict[str, Any]:
         """Produce the legacy dict shape consumed by chain code today.

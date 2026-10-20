@@ -99,8 +99,6 @@ def capture_screenshot(**kwargs) -> str:
         return f"Screenshot captured successfully (base64): {img_str[:100]}..."
 
     except ImportError:
-        return (
-            "Error: PyAutoGUI not installed. Please install it to capture screenshots."
-        )
+        return "Error: PyAutoGUI not installed. Please install it to capture screenshots."
     except Exception as e:
         return f"Error capturing screenshot: {str(e)}"

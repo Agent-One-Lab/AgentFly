@@ -91,9 +91,7 @@ def load_lichess_puzzles(
                 "messages": [
                     {
                         "role": "user",
-                        "content": generate_puzzle_prompt(
-                            rating=rating, themes=puzzle_themes
-                        ),
+                        "content": generate_puzzle_prompt(rating=rating, themes=puzzle_themes),
                     }
                 ],
                 "puzzle_id": row["PuzzleId"],
@@ -163,9 +161,7 @@ def load_puzzles_jsonl(
                 puzzle["messages"] = [
                     {
                         "role": "user",
-                        "content": generate_puzzle_prompt(
-                            rating=puzzle.get("rating"), themes=puzzle.get("themes", [])
-                        ),
+                        "content": generate_puzzle_prompt(rating=puzzle.get("rating"), themes=puzzle.get("themes", [])),
                     }
                 ]
 
@@ -228,9 +224,7 @@ def generate_puzzle_prompt(
     return "\n".join(parts)
 
 
-def filter_puzzles_by_theme(
-    puzzles: List[Dict], themes: List[str], require_all: bool = False
-) -> List[Dict]:
+def filter_puzzles_by_theme(puzzles: List[Dict], themes: List[str], require_all: bool = False) -> List[Dict]:
     """
     Filter puzzles by themes.
 
@@ -254,9 +248,7 @@ def filter_puzzles_by_theme(
     return result
 
 
-def filter_puzzles_by_rating(
-    puzzles: List[Dict], min_rating: int = 0, max_rating: int = 3000
-) -> List[Dict]:
+def filter_puzzles_by_rating(puzzles: List[Dict], min_rating: int = 0, max_rating: int = 3000) -> List[Dict]:
     """
     Filter puzzles by rating range.
 

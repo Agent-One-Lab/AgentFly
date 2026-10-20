@@ -40,14 +40,14 @@ async def code_interpreter(code: str, context: Context):
         return str(obs)
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
+
+
 # --8<-- [end:code_interpreter_example]
 
 
 class CodeInterpreterTool(BaseTool):
     name = "code_interpreter_tool"
-    description = (
-        "Run the code in docker container and return the output from stdout or stderr"
-    )
+    description = "Run the code in docker container and return the output from stdout or stderr"
 
     def __init__(self):
         super().__init__()

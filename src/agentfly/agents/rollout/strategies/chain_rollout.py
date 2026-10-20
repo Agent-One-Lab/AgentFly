@@ -125,9 +125,7 @@ class ChainRollout(Rollout):
                         "chain_idx": j,
                     }
                 )
-                root = ch.add_step(
-                    type="Action Input", messages=deepcopy(messages.messages)
-                )
+                root = ch.add_step(type="Action Input", messages=deepcopy(messages.messages))
 
                 chains[cid] = ch
                 start_steps[cid] = root
@@ -143,9 +141,7 @@ class ChainRollout(Rollout):
         assert max_turns >= 1, "max_turns must be at least 1."
         assert num_chains >= 1, "num_chains must be at least 1."
         if max_concurrent_chains is not None:
-            assert (
-                max_concurrent_chains >= 1
-            ), "max_concurrent_chains must be at least 1 when set."
+            assert max_concurrent_chains >= 1, "max_concurrent_chains must be at least 1 when set."
 
     async def run(
         self,
@@ -221,9 +217,7 @@ class ChainRollout(Rollout):
 
         q: asyncio.Queue = asyncio.Queue()
         sem: Optional[asyncio.Semaphore] = (
-            asyncio.Semaphore(int(max_concurrent_chains))
-            if max_concurrent_chains is not None
-            else None
+            asyncio.Semaphore(int(max_concurrent_chains)) if max_concurrent_chains is not None else None
         )
         done = object()  # sentinel pushed once every chain task has settled
 
@@ -231,21 +225,28 @@ class ChainRollout(Rollout):
             if sem is not None:
                 async with sem:
                     async for ev in self._run_chain(
-                        cid, step, chains[cid], tool_schemas,
-                        max_turns, generation_config, context_config,
+                        cid,
+                        step,
+                        chains[cid],
+                        tool_schemas,
+                        max_turns,
+                        generation_config,
+                        context_config,
                     ):
                         await q.put(ev)
             else:
                 async for ev in self._run_chain(
-                    cid, step, chains[cid], tool_schemas,
-                    max_turns, generation_config, context_config,
+                    cid,
+                    step,
+                    chains[cid],
+                    tool_schemas,
+                    max_turns,
+                    generation_config,
+                    context_config,
                 ):
                     await q.put(ev)
 
-        tasks = [
-            asyncio.create_task(drive(cid, step))
-            for cid, step in first_steps.items()
-        ]
+        tasks = [asyncio.create_task(drive(cid, step)) for cid, step in first_steps.items()]
 
         async def _close():
             # return_exceptions so one failing chain doesn't prevent the sentinel;
@@ -324,9 +325,7 @@ class ChainRollout(Rollout):
             try:
                 await prepare_first_step(context, current_step)
             except Exception as e:
-                logger.warning(
-                    f"prepare_first_step hook failed for chain {chain_id}: {e}"
-                )
+                logger.warning(f"prepare_first_step hook failed for chain {chain_id}: {e}")
 
         while not current_step.is_terminal and depth < max_turns:
             turn_result: Optional[TurnResult] = None
@@ -370,13 +369,9 @@ class ChainRollout(Rollout):
             info=chain.info,
         )
 
-        yield ChainEnded(
-            chain_id=chain_id, finish_reason=chain.info.get("finish_reason")
-        )
+        yield ChainEnded(chain_id=chain_id, finish_reason=chain.info.get("finish_reason"))
 
-    def _generation_filled_budget(
-        self, new_msg: Dict[str, Any], current_step: Step, tools, generation_config
-    ) -> bool:
+    def _generation_filled_budget(self, new_msg: Dict[str, Any], current_step: Step, tools, generation_config) -> bool:
         """True when the sampled response used its whole per-turn token budget.
 
         The training backend reports no per-turn stop reason, so a cut-off turn is
@@ -388,9 +383,9 @@ class ChainRollout(Rollout):
         if not ids:
             return False
         try:
-            budget = prepare_generation_config(
-                self.agent, generation_config, current_step, tools=tools
-            ).get("max_tokens")
+            budget = prepare_generation_config(self.agent, generation_config, current_step, tools=tools).get(
+                "max_tokens"
+            )
             budget = int(budget) if budget is not None else None
         except Exception:  # noqa: BLE001 — diagnostics must never break the loop
             budget = None
@@ -438,27 +433,27 @@ class ChainRollout(Rollout):
             if depth >= _min_depth:
                 _incr = current_step.total_token_length
                 try:
-                    _exact = estimate_chat_prompt_tokens(
-                        self.agent, current_step, tools=tools, cap=False)
+                    _exact = estimate_chat_prompt_tokens(self.agent, current_step, tools=tools, cap=False)
                 except Exception:  # noqa: BLE001
                     _exact = -1
                 _margin = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MARGIN", "6000"))
                 # Only surface turns that matter: near/over the ceiling by EITHER
                 # measure, or a large incremental-vs-exact divergence.
-                if (_exact >= max_model_len - _margin
-                        or _incr >= max_model_len - _margin
-                        or (_exact >= 0 and abs(_exact - _incr) > 100)):
-                    logger.info(f"[TOKDBG] chain={chain_id} depth={depth} incr={_incr} "
+                if (
+                    _exact >= max_model_len - _margin
+                    or _incr >= max_model_len - _margin
+                    or (_exact >= 0 and abs(_exact - _incr) > 100)
+                ):
+                    logger.info(
+                        f"[TOKDBG] chain={chain_id} depth={depth} incr={_incr} "
                         f"exact={_exact} drift={(_exact - _incr) if _exact >= 0 else 'NA'} "
                         f"max={max_model_len} guard_fires={_incr >= max_model_len} "
                         f"exact_over={(_exact > max_model_len) if _exact >= 0 else 'NA'} "
-                        f"slips_through={_exact >= 0 and _exact > max_model_len and _incr < max_model_len}")
+                        f"slips_through={_exact >= 0 and _exact > max_model_len and _incr < max_model_len}"
+                    )
 
         # 1. Pre-check: stop before generating if already at/over the context limit.
-        if (
-            max_model_len is not None
-            and current_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
-        ):
+        if max_model_len is not None and current_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN:
             current_step.is_terminal = True
             chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
             yield TurnResult(current_step, have_set_resources, False)
@@ -490,12 +485,12 @@ class ChainRollout(Rollout):
             # guard should prevent ever getting here, but if a residual drift slips
             # through, abort THIS chain gracefully instead of propagating.
             _m = str(e)
-            if ("maximum context length" in _m
-                    or "Prompt length" in _m
-                    or "max_tokens must be at least 1" in _m):
-                logger.warning(f"[TOKDBG] OVER-LENGTH at generation (chain={chain_id} "
+            if "maximum context length" in _m or "Prompt length" in _m or "max_tokens must be at least 1" in _m:
+                logger.warning(
+                    f"[TOKDBG] OVER-LENGTH at generation (chain={chain_id} "
                     f"depth={depth}) — aborting chain, not raising. incr="
-                    f"{current_step.total_token_length} max={max_model_len} :: {_m[:180]}")
+                    f"{current_step.total_token_length} max={max_model_len} :: {_m[:180]}"
+                )
                 current_step.is_terminal = True
                 chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
                 yield TurnResult(current_step, have_set_resources, False)
@@ -517,9 +512,7 @@ class ChainRollout(Rollout):
             messages=newest_messages.copy(),
             description=new_msg.get("content", ""),
         )
-        thought_step.total_token_length = (
-            total_token_length if total_token_length is not None else 0
-        )
+        thought_step.total_token_length = total_token_length if total_token_length is not None else 0
         yield MessageProduced(
             chain_id=chain_id,
             depth=depth,
@@ -530,9 +523,7 @@ class ChainRollout(Rollout):
         # Per-turn budget hit (mini-swe's finish_reason == "length"): counted for
         # every generation so the batch summary can report looping/runaway
         # thinking, and reused below to pick the length-aware nudge.
-        filled_budget = self._generation_filled_budget(
-            new_msg, current_step, tools, generation_config
-        )
+        filled_budget = self._generation_filled_budget(new_msg, current_step, tools, generation_config)
         if filled_budget:
             chain.info["capped_turns"] = chain.info.get("capped_turns", 0) + 1
 
@@ -540,10 +531,7 @@ class ChainRollout(Rollout):
         if tool_calls:
             # A tool-carrying turn resets mini-swe's consecutive format-error streak.
             chain.info["no_tool_call_streak"] = 0
-        if (
-            max_model_len is not None
-            and thought_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
-        ):
+        if max_model_len is not None and thought_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN:
             # Hard limit: context length exceeded — always end.
             thought_step.is_terminal = True
             chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
@@ -552,8 +540,7 @@ class ChainRollout(Rollout):
             control = self.on_no_tool_call
             if control == CONTROL_RAISE:
                 raise RuntimeError(
-                    "Model produced no tool call and on_no_tool_call='raise': "
-                    f"{new_msg.get('content', '')!r}"
+                    f"Model produced no tool call and on_no_tool_call='raise': {new_msg.get('content', '')!r}"
                 )
             thought_step.is_terminal = control == CONTROL_END
             if thought_step.is_terminal:
@@ -597,14 +584,9 @@ class ChainRollout(Rollout):
                 description=nudge,
             )
             nudge_step.total_token_length = (
-                thought_step.total_token_length
-                + observation_token_length(self.agent, nudge)
-                + TOOL_OBS_PREFIX_TOKENS
+                thought_step.total_token_length + observation_token_length(self.agent, nudge) + TOOL_OBS_PREFIX_TOKENS
             )
-            if (
-                max_model_len is not None
-                and nudge_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
-            ):
+            if max_model_len is not None and nudge_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN:
                 nudge_step.is_terminal = True
                 chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
                 yield TurnResult(nudge_step, have_set_resources, False)

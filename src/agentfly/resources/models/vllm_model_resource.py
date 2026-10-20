@@ -61,9 +61,7 @@ class VLLMModelResource(BaseResource):
 
         model_name_or_path = self._spec.model_name_or_path
         if not model_name_or_path:
-            raise ValueError(
-                "VLLMModelResourceSpec.model_name_or_path is required for category='vllm'."
-            )
+            raise ValueError("VLLMModelResourceSpec.model_name_or_path is required for category='vllm'.")
 
         tp = int(self._spec.tensor_parallel_size or 1)
         pp = int(self._spec.pipeline_parallel_size)
@@ -120,10 +118,7 @@ class VLLMModelResource(BaseResource):
         while loop.time() < deadline:
             if self._process is not None and self._process.poll() is not None:
                 self._status = ResourceStatus.FAILED
-                raise RuntimeError(
-                    "vLLM service exited during startup with code "
-                    f"{self._process.returncode}."
-                )
+                raise RuntimeError(f"vLLM service exited during startup with code {self._process.returncode}.")
             try:
                 await asyncio.to_thread(
                     urllib.request.urlopen,
@@ -136,9 +131,7 @@ class VLLMModelResource(BaseResource):
                 await asyncio.sleep(1.0)
 
         self._status = ResourceStatus.FAILED
-        raise TimeoutError(
-            f"Timed out waiting for vLLM service at {self.base_url} to become ready."
-        ) from last_error
+        raise TimeoutError(f"Timed out waiting for vLLM service at {self.base_url} to become ready.") from last_error
 
     async def generate_async(
         self,

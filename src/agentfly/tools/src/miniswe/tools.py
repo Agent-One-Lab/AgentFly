@@ -84,12 +84,7 @@ def format_observation(returncode: int, output: str, exception_info: str = None)
     output field (the template's ``{%- if %}`` trimming)."""
     exc = f', "exception_info": {_tojson(exception_info)}' if exception_info else ""
     if len(output) < OUTPUT_CAP:
-        return (
-            "{\n"
-            f'  "returncode": {returncode},\n'
-            f'  "output": {_tojson(output)}{exc}\n'
-            "}"
-        )
+        return f'{{\n  "returncode": {returncode},\n  "output": {_tojson(output)}{exc}\n}}'
     return (
         "{\n"
         f'  "returncode": {returncode},\n'
@@ -148,9 +143,7 @@ async def miniswe_bash(command: str, context: Context):
         return ToolResult(
             name="bash",
             arguments={"command": command},
-            observation=format_observation(
-                1, "Error: context.metadata['image_id'] is required for the bash tool."
-            ),
+            observation=format_observation(1, "Error: context.metadata['image_id'] is required for the bash tool."),
             status="error",
         )
 
@@ -172,10 +165,7 @@ async def miniswe_bash(command: str, context: Context):
     # Fresh `bash -c` per call (mini-swe semantics), stderr merged, and the
     # subshell's exit code smuggled out through a trailing marker because
     # run_cmd only returns the output stream.
-    wrapped = (
-        f"bash -c {shlex.quote(command)} 2>&1; "
-        f"printf '\\n{_RC_MARKER}%d' $?"
-    )
+    wrapped = f"bash -c {shlex.quote(command)} 2>&1; printf '\\n{_RC_MARKER}%d' $?"
     try:
         raw = await container.run_cmd(wrapped, timeout=timeout, workdir=workdir)
     except asyncio.TimeoutError:

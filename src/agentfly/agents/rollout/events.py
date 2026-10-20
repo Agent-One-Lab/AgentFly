@@ -26,6 +26,7 @@ class FinishReason(str, Enum):
     denotes a model-requested stop; tool-requested and policy-driven stops have
     their own diagnostic labels. The labels do not decide loop control.
     """
+
     MAX_TURNS = "max_turns"
     NO_TOOL_CALLS = "no_tool_calls"
     REPEATED_NO_TOOL_CALLS = "repeated_no_tool_calls"
@@ -84,6 +85,4 @@ class RolloutError:
     error: BaseException
 
 
-RolloutEvent = Union[
-    ChainStarted, MessageProduced, ToolObserved, ChainEnded, RolloutError
-]
+RolloutEvent = Union[ChainStarted, MessageProduced, ToolObserved, ChainEnded, RolloutError]

@@ -3,6 +3,7 @@ Evaluate a single sample (dataset instance) and return the result.
 
 Use this after importing swesmith_enroot so evaluation runs with Enroot.
 """
+
 import logging
 from typing import Any
 
@@ -46,6 +47,4 @@ def evaluate_swesmith(
         KEY_MODEL: model_name,
     }
     logger.debug(f"Pred: {pred}")
-    return run_evaluation(
-        pred, sample, run_id, f2p_only=f2p_only, is_gold=is_gold, container=container
-    )
+    return run_evaluation(pred, sample, run_id, f2p_only=f2p_only, is_gold=is_gold, container=container)

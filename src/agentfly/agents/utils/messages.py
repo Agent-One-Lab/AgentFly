@@ -11,9 +11,7 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence,
 
 import numpy as np
 
-Part = Dict[
-    str, Any
-]  # e.g., {"type": "text", "text": "..."} or {"type": "image", "image": "..."}
+Part = Dict[str, Any]  # e.g., {"type": "text", "text": "..."} or {"type": "image", "image": "..."}
 Turn = Dict[str, Any]  # {"role": "...", "content": [Part, ...], ...}
 MessageDict = Dict[str, Any]  # {"messages": [Turn, ...], <other meta keys>...}
 
@@ -43,9 +41,7 @@ class Messages:
         allow_legacy_content: bool = True,
     ) -> None:
         if not isinstance(data, Mapping):
-            raise MessagesValidationError(
-                f"Message must be a dict, got {type(data).__name__}"
-            )
+            raise MessagesValidationError(f"Message must be a dict, got {type(data).__name__}")
         if "messages" not in data:
             raise MessagesValidationError("Message dict must contain a 'messages' key.")
 
@@ -77,9 +73,7 @@ class Messages:
         if ptype == "image":
             # accept either 'image' (e.g., base64) or 'image_url'
             if "image" not in p and "image_url" not in p:
-                raise MessagesValidationError(
-                    "Image part must include 'image' or 'image_url'."
-                )
+                raise MessagesValidationError("Image part must include 'image' or 'image_url'.")
             return dict(p)
 
         # Unknown part type: require at least 'type'; pass through
@@ -107,9 +101,7 @@ class Messages:
                 f"Turn{'' if idx is None else f' at index {idx}'} must be a dict, got {type(t).__name__}"
             )
         if "role" not in t:
-            raise MessagesValidationError(
-                f"Turn{'' if idx is None else f' at index {idx}'} missing 'role'."
-            )
+            raise MessagesValidationError(f"Turn{'' if idx is None else f' at index {idx}'} missing 'role'.")
         role = t["role"]
         if not isinstance(role, str):
             raise MessagesValidationError("Turn 'role' must be a string.")
@@ -119,9 +111,7 @@ class Messages:
         else:
             content = t["content"]
             if isinstance(content, list):
-                content_parts = [
-                    self._validate_part(p, i) for i, p in enumerate(content)
-                ]
+                content_parts = [self._validate_part(p, i) for i, p in enumerate(content)]
                 if len(content_parts) == 0:
                     raise MessagesValidationError(
                         f"Turn {'' if idx is None else f' at index {idx}'} 'content' must contain at least one part."
@@ -217,9 +207,7 @@ class Messages:
                 content = turn.get("content")
                 if isinstance(content, list):
                     existing = "\n".join(
-                        c.get("text", "")
-                        for c in content
-                        if isinstance(c, dict) and c.get("type") == "text"
+                        c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"
                     ).strip()
                 elif isinstance(content, str):
                     existing = content.strip()
@@ -236,15 +224,11 @@ class Messages:
         if "messages" in self._data:
             if self._data["messages"][0]["role"] == "system":
                 if enforce:
-                    self._data["messages"][0]["content"] = [
-                        {"type": "text", "text": system_prompt}
-                    ]
+                    self._data["messages"][0]["content"] = [{"type": "text", "text": system_prompt}]
                 else:
                     raise MessagesValidationError("System prompt already exists.")
             else:
-                self._data["messages"].insert(
-                    0, {"role": "system", "content": system_prompt}
-                )
+                self._data["messages"].insert(0, {"role": "system", "content": system_prompt})
 
     def __len__(self) -> int:
         return len(self._data["messages"])
@@ -333,18 +317,12 @@ class MessagesList:
         # 3) Dict with 'messages'
         if isinstance(data, Mapping):
             if "messages" not in data:
-                raise MessagesValidationError(
-                    "Dict input must contain a 'messages' key."
-                )
-            ms.append(
-                Messages(data, strict=strict, allow_legacy_content=allow_legacy_content)
-            )
+                raise MessagesValidationError("Dict input must contain a 'messages' key.")
+            ms.append(Messages(data, strict=strict, allow_legacy_content=allow_legacy_content))
             return ms
 
         if not isinstance(data, Sequence):
-            raise MessagesValidationError(
-                f"Unsupported input type: {type(data).__name__}"
-            )
+            raise MessagesValidationError(f"Unsupported input type: {type(data).__name__}")
 
         seq = list(data)
         if not seq:
@@ -359,17 +337,11 @@ class MessagesList:
                     raise MessagesValidationError(
                         f"List appears to be message items but index {i} is not a dict with 'messages'."
                     )
-                ms.append(
-                    Messages(
-                        item, strict=strict, allow_legacy_content=allow_legacy_content
-                    )
-                )
+                ms.append(Messages(item, strict=strict, allow_legacy_content=allow_legacy_content))
             return ms
 
         # 2) List[List[Turn]]  (each inner list is a list of turns)
-        if cls._is_sequence(first) and (
-            len(first) == 0 or (isinstance(first[0], Mapping) and "role" in first[0])
-        ):
+        if cls._is_sequence(first) and (len(first) == 0 or (isinstance(first[0], Mapping) and "role" in first[0])):
             for inner in seq:
                 ms.append(
                     Messages.from_turns(

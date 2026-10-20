@@ -39,11 +39,11 @@ def result_to_dataproto(
     converters = {"chain": chain_to_dataproto, "step": step_to_dataproto}
     if run_result.rollout not in converters:
         raise ValueError(
-            "RunResult.rollout must identify a supported converter ('chain' or 'step'); "
-            f"got {run_result.rollout!r}."
+            f"RunResult.rollout must identify a supported converter ('chain' or 'step'); got {run_result.rollout!r}."
         )
     return converters[run_result.rollout](
-        agent, run_result,
+        agent,
+        run_result,
         train_on_last_turn=train_on_last_turn,
         world_size=world_size,
         pad_to_multiple_of=pad_to_multiple_of,
@@ -88,15 +88,17 @@ def build_segment_batch(
     if not row_indices:
         raise ValueError("No trainable segments: the result contains no assistant messages.")
     conversations = [trajectories[b].segments[s].messages for b, s in row_indices]
-    inputs = dict(tokenize(
-        agent,
-        messages_list=conversations,
-        tokenizer=agent.tokenizer,
-        processor=agent.processor,
-        return_reward_mask=True,
-        concatenate_mm_inputs=False,
-        train_on_last_turn=train_on_last_turn,
-    ))
+    inputs = dict(
+        tokenize(
+            agent,
+            messages_list=conversations,
+            tokenizer=agent.tokenizer,
+            processor=agent.processor,
+            return_reward_mask=True,
+            concatenate_mm_inputs=False,
+            train_on_last_turn=train_on_last_turn,
+        )
+    )
     if inputs["input_ids"].shape[0] != len(row_indices):
         raise ValueError("Segment tokenization must return one row per segment.")
     if "mm_inputs" in inputs and len(inputs["mm_inputs"]) != len(row_indices):
@@ -121,11 +123,11 @@ def build_segment_batch(
         row_indices = [row_indices[i] for i in kept]
 
     outcomes = [
-        float(trajectories[b].reward if trajectories[b].reward is not None else missing_reward)
-        for b, _ in row_indices
+        float(trajectories[b].reward if trajectories[b].reward is not None else missing_reward) for b, _ in row_indices
     ]
     inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(
-        outcomes, dtype=torch.float32,
+        outcomes,
+        dtype=torch.float32,
     ).unsqueeze(dim=-1)
 
     repeat_times = [0] * len(trajectories)
@@ -198,9 +200,7 @@ def chain_to_dataproto(
         try:
             # Same diagnostic as the step path: spliced (sampled) ids vs a fresh
             # text re-tokenization, on real rows only.
-            conversations = [
-                trajectories[b].segments[s].messages for b, s in row_indices[:n_real]
-            ]
+            conversations = [trajectories[b].segments[s].messages for b, s in row_indices[:n_real]]
             drift = token_drift_stats(agent, conversations, inputs, tokenize=tokenize)
         except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
             logger.warning(f"[ChainRollout] token-drift diagnostic failed: {e}")
@@ -225,16 +225,12 @@ def chain_to_dataproto(
         # ``observation`` (which may carry an admissible-action menu that fragments
         # exact-hash grouping); fall back to ``observation`` when no anchor is set.
         post_obs = [
-            s.tool_result.anchor
-            if s.tool_result is not None and s.tool_result.anchor is not None
-            else s.observation
+            s.tool_result.anchor if s.tool_result is not None and s.tool_result.anchor is not None else s.observation
             for s in steps
         ]
         step_observations_list.append((["__init__"] + post_obs[:-1]) if post_obs else [])
         # ``step_reward[t]`` is the RAW env reward from action t (already aligned).
-        step_rewards_list.append(
-            [s.tool_result.step_reward if s.tool_result is not None else None for s in steps]
-        )
+        step_rewards_list.append([s.tool_result.step_reward if s.tool_result is not None else None for s in steps])
         # ``step_invalids[t]`` = whether action t was FORMAT-invalid — verl-agent's
         # ``alfworld_projection`` check on the model's raw output (``<action>`` +
         # ``<think>`` + no Chinese), the same definition StepRollout uses — so the GiGPO
@@ -251,14 +247,12 @@ def chain_to_dataproto(
             ]
         )
     # For discarded trajectories, mask out all response tokens for every segment row.
-    discarded = [
-        bool(t.model_dump(exclude={"segments"}).get("discarded", False))
-        for t in trajectories
-    ]
+    discarded = [bool(t.model_dump(exclude={"segments"}).get("discarded", False)) for t in trajectories]
     if any(discarded):
         discarded_tensor = torch.tensor(
             [discarded[b] for b, _ in row_indices],
-            dtype=torch.bool, device=inputs["attention_mask"].device,
+            dtype=torch.bool,
+            device=inputs["attention_mask"].device,
         ).unsqueeze(dim=-1)
         for key in ("action_mask", "reward_mask", "rm_scores"):
             if key in inputs:
@@ -286,19 +280,25 @@ def chain_to_dataproto(
         finishes = Counter(t.finish_reason for t in trajectories)
         drift_str = ""
         if drift:
-            drift_str = " token_drift={" + ", ".join(
-                f"{k.split('/', 1)[1]}={v:.4f}" for k, v in sorted(drift.items())
-            ) + "}"
+            drift_str = (
+                " token_drift={" + ", ".join(f"{k.split('/', 1)[1]}={v:.4f}" for k, v in sorted(drift.items())) + "}"
+            )
+
         # Loop-policy counters carried in Trajectory.metadata (see ChainRollout):
         # turns that hit the per-turn token cap, tool-less turns, and nudges sent.
         def _meta_sum(key):
             return sum(int((t.metadata or {}).get(key, 0) or 0) for t in trajectories)
+
         capped, no_tool, nudges = (
-            _meta_sum("capped_turns"), _meta_sum("no_tool_call_turns"), _meta_sum("no_tool_call_nudges"),
+            _meta_sum("capped_turns"),
+            _meta_sum("no_tool_call_turns"),
+            _meta_sum("no_tool_call_nudges"),
         )
-        logger.info(f"[ChainRollout] batch: rows={n_real} (+{pad_size} pad) trajs={len(trajectories)} "
+        logger.info(
+            f"[ChainRollout] batch: rows={n_real} (+{pad_size} pad) trajs={len(trajectories)} "
             f"won={won}/{len(trajectories)} finish={dict(finishes)} "
-            f"capped_turns={capped} no_tool_call_turns={no_tool} nudges={nudges}{drift_str}")
+            f"capped_turns={capped} no_tool_call_turns={no_tool} nudges={nudges}{drift_str}"
+        )
         rollout_stats = {"capped_turns": capped, "no_tool_call_turns": no_tool, "no_tool_call_nudges": nudges}
     except Exception as e:  # noqa: BLE001 — debug print must never break the run
         logger.warning(f"[ChainRollout] batch summary failed: {e}")
@@ -346,8 +346,7 @@ def step_to_dataproto(
     for traj in run_result.trajectories:
         steps = traj.steps
         if not steps and not any(
-            message.get("role") == "assistant"
-            for segment in traj.segments for message in segment.messages
+            message.get("role") == "assistant" for segment in traj.segments for message in segment.messages
         ):
             # A zero-generation rollout can retain an empty/context-only view.
             # It contributes no training rows and needs no runtime-step mapping.
@@ -360,9 +359,7 @@ def step_to_dataproto(
                 f"for trajectory {traj.chain_id!r}."
             )
         post = [
-            s.tool_result.anchor
-            if s.tool_result is not None and s.tool_result.anchor is not None
-            else s.observation
+            s.tool_result.anchor if s.tool_result is not None and s.tool_result.anchor is not None else s.observation
             for s in steps
         ]
         pre_anchors.append((["__init__"] + post[:-1]) if post else [])
@@ -401,10 +398,7 @@ def step_to_dataproto(
     anchors[:] = row_anchor
     inputs["anchor_obs"] = anchors
     inputs["step_env_reward"] = np.array(
-        [
-            float((s.tool_result.step_reward if s.tool_result is not None else None) or 0.0)
-            for s in row_step
-        ],
+        [float((s.tool_result.step_reward if s.tool_result is not None else None) or 0.0) for s in row_step],
         dtype=np.float32,
     )
     # ``is_action_valid`` is verl-agent's FORMAT check on the model's raw output
@@ -418,9 +412,7 @@ def step_to_dataproto(
     # format-invalid here as well (subsumes the earlier tool_result-None override).
     inputs["is_action_valid"] = np.array(
         [
-            action_format_valid(message_text(segment.messages[-1]), think_opened)
-            if segment.messages
-            else 0.0
+            action_format_valid(message_text(segment.messages[-1]), think_opened) if segment.messages else 0.0
             for segment in row_segment
         ],
         dtype=np.float32,
@@ -428,13 +420,12 @@ def step_to_dataproto(
     # Real vs divisor-padding rows: the per-step GiGPO estimator restricts grouping /
     # discounting to active rows (padded rows repeat the last row's non-tensors, which
     # would otherwise corrupt the trajectory/anchor groups).
-    inputs["active_masks"] = np.array(
-        [1.0] * n_real + [0.0] * pad_size, dtype=np.float32
-    )
+    inputs["active_masks"] = np.array([1.0] * n_real + [0.0] * pad_size, dtype=np.float32)
 
     # --- debug: per-step batch summary (rows, trajectories, outcomes, lengths) ---
     try:
         from collections import Counter
+
         trajs = run_result.trajectories
         n_traj = len(trajs)
         won = sum(1 for t in trajs if (t.reward or 0.0) > 0)
@@ -444,17 +435,19 @@ def step_to_dataproto(
             lens[batch_idx] += 1
         drift_str = ""
         if drift:
-            drift_str = " token_drift={" + ", ".join(
-                f"{k.split('/', 1)[1]}={v:.4f}" for k, v in sorted(drift.items())
-            ) + "}"
+            drift_str = (
+                " token_drift={" + ", ".join(f"{k.split('/', 1)[1]}={v:.4f}" for k, v in sorted(drift.items())) + "}"
+            )
         # Format-valid fraction over real rows (verl-agent's ``valid_action_ratio``).
         valid_frac = float(np.mean(inputs["is_action_valid"][:n_real])) if n_real else 0.0
-        logger.info(f"[StepRollout] per_step batch: rows={n_real} (+{pad_size} pad) "
+        logger.info(
+            f"[StepRollout] per_step batch: rows={n_real} (+{pad_size} pad) "
             f"trajs={n_traj} training_rows/traj[min/mean/max]="
-            f"{min(lens)}/{sum(lens)/max(1,n_traj):.1f}/{max(lens)} "
-            f"won={won}/{n_traj} ({100.0*won/max(1,n_traj):.1f}%) "
+            f"{min(lens)}/{sum(lens) / max(1, n_traj):.1f}/{max(lens)} "
+            f"won={won}/{n_traj} ({100.0 * won / max(1, n_traj):.1f}%) "
             f"valid_frac={valid_frac:.3f} finish={dict(finishes)}"
-            f"{drift_str}")
+            f"{drift_str}"
+        )
     except Exception as e:  # noqa: BLE001 — debug print must never break the run
         logger.warning(f"[StepRollout] batch summary failed: {e}")
 
@@ -465,7 +458,12 @@ def step_to_dataproto(
 
 
 def token_drift_stats(
-    agent, conversations, inputs, max_rows: Optional[int] = None, *, tokenize: Optional[Callable] = None,
+    agent,
+    conversations,
+    inputs,
+    max_rows: Optional[int] = None,
+    *,
+    tokenize: Optional[Callable] = None,
 ):
     """Diagnostic: how much the spliced (sampled) assistant ids differ from what
     re-tokenizing the decoded text would have produced — i.e. the retokenization
@@ -501,10 +499,7 @@ def token_drift_stats(
         stats["token_drift/frac_ids_end_with_eos"] = sum(ends) / len(ends)
 
     sample = with_ids[:max_rows]
-    stripped = [
-        [{k: v for k, v in m.items() if k != "token_ids"} for m in conversations[i]]
-        for i in sample
-    ]
+    stripped = [[{k: v for k, v in m.items() if k != "token_ids"} for m in conversations[i]] for i in sample]
     text_inputs = tokenize(
         agent,
         messages_list=stripped,
@@ -519,9 +514,7 @@ def token_drift_stats(
         a = inputs["input_ids"][i][inputs["action_mask"][i] == 1].tolist()
         b = text_inputs["input_ids"][j][text_inputs["action_mask"][j] == 1].tolist()
         rows_differ += int(a != b)
-        tok_diff.append(
-            1.0 - difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
-        )
+        tok_diff.append(1.0 - difflib.SequenceMatcher(None, a, b, autojunk=False).ratio())
     stats["token_drift/frac_rows_differ"] = rows_differ / len(sample)
     stats["token_drift/frac_tokens_differ"] = sum(tok_diff) / len(sample)
     stats["token_drift/n_sampled"] = float(len(sample))

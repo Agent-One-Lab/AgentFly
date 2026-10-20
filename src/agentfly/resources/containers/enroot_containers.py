@@ -21,9 +21,7 @@ ENROOT_CONTAINER_PREFIX = "agentfly"
 ENROOT_CLEANUP_ENV = "AF_ENROOT_CLEANUP_ON_START"
 
 
-def enroot_container_name(
-    resource_id: Optional[str] = None, prefix: str = ENROOT_CONTAINER_PREFIX
-) -> str:
+def enroot_container_name(resource_id: Optional[str] = None, prefix: str = ENROOT_CONTAINER_PREFIX) -> str:
     """Return the enroot container name for ``resource_id``: ``<prefix>-<resource_id>``.
 
     A name that already carries the prefix is returned unchanged, so re-wrapping a

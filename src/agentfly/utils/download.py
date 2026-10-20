@@ -87,9 +87,7 @@ def confirm(plan: Sequence[Tuple[str, Optional[int]]], *, what: str) -> bool:
 
 def _hf_file_size(repo_id: str, filename: str, repo_type: str = "dataset") -> int:
     try:
-        meta = get_hf_file_metadata(
-            hf_hub_url(repo_id=repo_id, filename=filename, repo_type=repo_type)
-        )
+        meta = get_hf_file_metadata(hf_hub_url(repo_id=repo_id, filename=filename, repo_type=repo_type))
         return int(meta.size or 0)
     except Exception:
         return 0
@@ -105,11 +103,7 @@ def _train_repo_files() -> Dict[str, int]:
     global _train_repo_cache
     if _train_repo_cache is None:
         info = HfApi().dataset_info(TRAIN_REPO, files_metadata=True)
-        _train_repo_cache = {
-            s.rfilename: int(s.size or 0)
-            for s in info.siblings
-            if s.rfilename.endswith(".json")
-        }
+        _train_repo_cache = {s.rfilename: int(s.size or 0) for s in info.siblings if s.rfilename.endswith(".json")}
     return _train_repo_cache
 
 
@@ -190,9 +184,7 @@ def _download_hf_files(
     os.makedirs(dest_dir, exist_ok=True)
     plan = [(f"{repo}/{name}", _hf_file_size(repo, name, repo_type)) for repo, name in files]
     if not confirm(plan, what=what):
-        raise RuntimeError(
-            f"Download of {what} declined. Set AF_ASSUME_YES=1 to allow non-interactively."
-        )
+        raise RuntimeError(f"Download of {what} declined. Set AF_ASSUME_YES=1 to allow non-interactively.")
     for repo, name in files:
         hf_hub_download(repo_id=repo, filename=name, repo_type=repo_type, local_dir=dest_dir)
 
@@ -223,9 +215,7 @@ def ensure_tool_data(tool_name: str) -> None:
         needed.append(("PeterJinGo/wiki-18-corpus", os.path.basename(corpus_gz)))
     if not os.path.exists(index_file):
         needed += [
-            ("PeterJinGo/wiki-18-e5-index", os.path.basename(part))
-            for part in index_parts
-            if not os.path.exists(part)
+            ("PeterJinGo/wiki-18-e5-index", os.path.basename(part)) for part in index_parts if not os.path.exists(part)
         ]
     _download_hf_files(needed, data_dir, what="search corpus (wiki-18) and FAISS index (e5_Flat)")
 

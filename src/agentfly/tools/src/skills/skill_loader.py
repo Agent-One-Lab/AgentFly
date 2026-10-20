@@ -60,10 +60,7 @@ def find_skills_root(context: Optional[Any] = None) -> Path:
                 return candidate.resolve()
             break
 
-    raise FileNotFoundError(
-        "skills root not found; set AF_SKILLS_ROOT or "
-        "context.metadata['skills_root']"
-    )
+    raise FileNotFoundError("skills root not found; set AF_SKILLS_ROOT or context.metadata['skills_root']")
 
 
 def safe_skill_dir(root: Path, name: str) -> Path:

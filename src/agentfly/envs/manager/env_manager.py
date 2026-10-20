@@ -25,9 +25,7 @@ class EnvironmentManager:
     _acquired_envs: dict[str, "BaseEnv"] = {}
 
     @classmethod
-    async def start(
-        cls, env_cls: type["BaseEnv"], size: int = 1, env_kwargs: dict | None = None
-    ):
+    async def start(cls, env_cls: type["BaseEnv"], size: int = 1, env_kwargs: dict | None = None):
         """
         Start a new pool for the environment class if it doesn't exist,
         or add more envs to the existing pool if the size is larger.
@@ -57,9 +55,7 @@ class EnvironmentManager:
         else:
             key = env_cls
             if key not in cls._pools:
-                raise ValueError(
-                    f"Environment class {env_cls} not found. Start the environment before acquiring."
-                )
+                raise ValueError(f"Environment class {env_cls} not found. Start the environment before acquiring.")
 
             env = await cls._pools[key].acquire()
             cls._acquired_envs[id] = env

@@ -150,7 +150,6 @@ class LocalEnvResourceSpec(BaseResourceSpec):
     init_kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
-
 class ResourceStatus(str, Enum):
     """Execution / lifecycle status of a resource."""
 

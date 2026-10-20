@@ -221,11 +221,9 @@ class BaseAgent(ABC):
             assert template is None, (
                 "For client backend, we do not support chat template. Set the template when deploying the model."
             )
-            
+
         if tool_parser is not None and tool_parser_name is not None:
-            raise ValueError(
-                "Cannot specify both tool_parser and tool_parser_name. Use only one."
-            )
+            raise ValueError("Cannot specify both tool_parser and tool_parser_name. Use only one.")
 
     def _bind_method_tools(self, tools: List) -> List:
         """Give this agent its own instance of each ``@tool``-decorated method of its class.
@@ -255,11 +253,7 @@ class BaseAgent(ABC):
             if config_class:
                 try:
                     default_instance = config_class()
-                    default_dict = {
-                        k: v
-                        for k, v in default_instance.__dict__.items()
-                        if not k.startswith("_")
-                    }
+                    default_dict = {k: v for k, v in default_instance.__dict__.items() if not k.startswith("_")}
                     default_dict.update(config_kwargs)
                     config_kwargs = default_dict
                 except Exception:
@@ -282,9 +276,7 @@ class BaseAgent(ABC):
                     config_kwargs.pop("engine_args", None)
 
             if backend == "async_vllm":
-                llm_engine = AsyncVLLMBackend(
-                    model_name_or_path, self.template, **config_kwargs
-                )
+                llm_engine = AsyncVLLMBackend(model_name_or_path, self.template, **config_kwargs)
             elif backend == "async_verl":
                 llm_engine = AsyncVerlBackend(
                     llm_engine=None,
@@ -293,7 +285,6 @@ class BaseAgent(ABC):
                     **config_kwargs,
                 )
             elif backend == "client":
-                
                 llm_engine = ClientBackend(model_name_or_path, **config_kwargs)
             else:
                 raise ValueError(f"Backend {backend} is not supported.")
@@ -316,17 +307,13 @@ class BaseAgent(ABC):
         system_prompt = self.system_prompt
         if system_prompt:
             if "{tools}" in system_prompt:
-                system_prompt = system_prompt.replace(
-                    "{tools}", json.dumps(tools, indent=4)
-                )
+                system_prompt = system_prompt.replace("{tools}", json.dumps(tools, indent=4))
             # Skills ride in the system message content (not the chat template's
             # ``chat_template_kwargs``) so hosted models (OpenAI/Gemini) advertise
             # them the same way local vLLM does. ``{skills}`` expands to the full
             # block or "" — no dangling header when the agent has no skills.
             if "{skills}" in system_prompt:
-                system_prompt = system_prompt.replace(
-                    "{skills}", self._render_skills_block()
-                )
+                system_prompt = system_prompt.replace("{skills}", self._render_skills_block())
 
         for messages in messages_list:
             if system_prompt:
@@ -345,11 +332,10 @@ class BaseAgent(ABC):
                 normalized.append(item)
             elif isinstance(item, str):
                 from ..tools.src.skills import load_skills
+
                 normalized.extend(load_skills([item]))
             else:
-                raise TypeError(
-                    f"skills entries must be Skill or str, got {type(item).__name__}"
-                )
+                raise TypeError(f"skills entries must be Skill or str, got {type(item).__name__}")
         return normalized
 
     def _render_skills_block(self) -> str:
@@ -364,14 +350,9 @@ class BaseAgent(ABC):
         if not self.skills:
             return ""
         entries = "\n".join(
-            f"<skill>\n<name>{s.name}</name>\n"
-            f"<description>{s.description}</description>\n</skill>"
-            for s in self.skills
+            f"<skill>\n<name>{s.name}</name>\n<description>{s.description}</description>\n</skill>" for s in self.skills
         )
-        return (
-            "You have the following available skills:\n"
-            f"<available_skills>\n{entries}\n</available_skills>"
-        )
+        return f"You have the following available skills:\n<available_skills>\n{entries}\n</available_skills>"
 
     def _preprocess_backends(self):
         self.llm_engine.preprocess()
@@ -382,17 +363,13 @@ class BaseAgent(ABC):
     def _initialize_monitor(self, monitors: List[str]) -> None:
         for monitor in monitors:
             if monitor == "local":
-                assert self.local_cache_dir is not None, (
-                    "local_cache_dir must be set when using local monitor."
-                )
+                assert self.local_cache_dir is not None, "local_cache_dir must be set when using local monitor."
                 self.local_run_cache_dir = f"{os.path.join(self.local_cache_dir, os.path.basename(self.model_name_or_path), datetime.now().strftime('%Y%m%d_%H%M%S'))}"
                 Monitor.add_sink("jsonl", JsonlSink(f"{self.local_run_cache_dir}/"))
             elif monitor == "wandb":
                 Monitor.add_sink(
                     "wandb",
-                    WandbSink(
-                        project=self.wandb_project_name, run_name=self.wandb_run_name
-                    ),
+                    WandbSink(project=self.wandb_project_name, run_name=self.wandb_run_name),
                 )
             else:
                 raise ValueError(f"Monitor {monitor} is not supported.")
@@ -472,9 +449,7 @@ class BaseAgent(ABC):
         return run_result
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
-        assert self.backend == "async_verl", (
-            "Only async verl backend is supported for now"
-        )
+        assert self.backend == "async_verl", "Only async verl backend is supported for now"
 
         self.llm_engine.llm_engine = llm_engine
         self.tokenizer = tokenizer
@@ -603,9 +578,7 @@ class BaseAgent(ABC):
             if isinstance(content, list) and content:
                 return str(content[0])
 
-        raise ValueError(
-            "No assistant or tool message found in trajectory when extracting final response."
-        )
+        raise ValueError("No assistant or tool message found in trajectory when extracting final response.")
 
     def parse(
         self,
@@ -737,9 +710,7 @@ class BaseAgent(ABC):
             try:
                 json.loads(arguments_str)
             except (json.JSONDecodeError, TypeError):
-                logger.warning(
-                    f"Invalid JSON in tool call arguments for {name}: {arguments_str}"
-                )
+                logger.warning(f"Invalid JSON in tool call arguments for {name}: {arguments_str}")
                 continue
 
             formatted.append(
@@ -789,17 +760,13 @@ class BaseAgent(ABC):
                 if isinstance(schema, dict):
                     tool_schemas.append(schema)
                 else:
-                    logger.warning(
-                        f"Tool {getattr(tool, 'name', 'unknown')} has invalid schema format: {type(schema)}"
-                    )
+                    logger.warning(f"Tool {getattr(tool, 'name', 'unknown')} has invalid schema format: {type(schema)}")
                     continue
 
         new_messages_list = []
         for i, response in enumerate(responses):
             backend_calls = (
-                backend_tool_calls[i]
-                if backend_tool_calls is not None and i < len(backend_tool_calls)
-                else None
+                backend_tool_calls[i] if backend_tool_calls is not None and i < len(backend_tool_calls) else None
             )
 
             if backend_calls:
@@ -811,9 +778,7 @@ class BaseAgent(ABC):
                 # Create a ChatCompletionRequest for the parser
                 # We use a minimal request structure
                 req_dict = {
-                    "messages": [
-                        {"role": "user", "content": "dummy"}
-                    ],  # Dummy message, not used for parsing
+                    "messages": [{"role": "user", "content": "dummy"}],  # Dummy message, not used for parsing
                     "tool_choice": "auto",
                 }
                 if tool_schemas:

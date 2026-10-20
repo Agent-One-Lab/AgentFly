@@ -208,9 +208,7 @@ def _is_latex_equal(str1, str2):
 )
 def is_latex_equal(str1, str2, math_mode="legacy"):
     if math_mode == "legacy":
-        if (len(str1) > 128 and repeatness(str1)) or (
-            len(str2) > 128 and repeatness(str2)
-        ):
+        if (len(str1) > 128 and repeatness(str1)) or (len(str2) > 128 and repeatness(str2)):
             return False
         return _is_latex_equal(str1, str2)
     elif math_mode == "math_verify":
@@ -493,9 +491,7 @@ def math_equal_reward(final_response: str, answer: str, **kwargs) -> float:
 
 
 @reward(name="math_equal_reward_tool")
-def math_equal_reward_tool(
-    final_response: str, answer: str, trajectory: List[Dict]
-) -> float:
+def math_equal_reward_tool(final_response: str, answer: str, trajectory: List[Dict]) -> float:
     """
     Calculate the reward for the agent's response based on the mathematical equality and tool usage.
     - 0.0 if no tool used
@@ -527,9 +523,7 @@ def math_equal_reward_tool(
     elif has_called_tool and answer_correct:
         reward = 1.0
     else:
-        raise ValueError(
-            f"Invalid prediction or trajectory for math reward with format: Trajectory: {trajectory}"
-        )
+        raise ValueError(f"Invalid prediction or trajectory for math reward with format: Trajectory: {trajectory}")
     return {
         "reward": reward,
         "acc": 1.0 if answer_correct else 0.0,
@@ -537,9 +531,7 @@ def math_equal_reward_tool(
 
 
 @reward(name="math_reward_thought_with_tool")
-def math_reward_thought_with_tool(
-    final_response: str, answer: str, trajectory: List[Dict]
-) -> float:
+def math_reward_thought_with_tool(final_response: str, answer: str, trajectory: List[Dict]) -> float:
     has_called_tool = False
     for msg in trajectory:
         if msg["role"] == "tool":
@@ -572,9 +564,7 @@ def math_reward_thought_with_tool(
     elif has_called_tool and all_have_thought and answer_correct:
         reward = 1.0
     else:
-        raise ValueError(
-            f"Invalid prediction or trajectory for math reward with format: Trajectory: {trajectory}"
-        )
+        raise ValueError(f"Invalid prediction or trajectory for math reward with format: Trajectory: {trajectory}")
     return {
         "reward": reward,
         "acc": 1.0 if answer_correct else 0.0,
@@ -613,9 +603,7 @@ def parse_thinking_response(response: str):
 
 
 @reward(name="math_equal_reward_think")
-def math_equal_reward_think(
-    final_response: str, answer: str, trajectory: List[Dict]
-) -> float:
+def math_equal_reward_think(final_response: str, answer: str, trajectory: List[Dict]) -> float:
     """
     This reward function is used to reward the agent for using thinking and tool calling. The reward contains two parts:
     format: if there is <think> in the response, and the agent has called the tool, then the reward is 1.0 if the answer is correct, otherwise 0.1. if there is no <think> or the agent has not called the tool, then the reward is 0.0.
@@ -659,14 +647,13 @@ def math_equal_reward_think(
 
 
 @reward(name="math_string_equal_reward_tool")
-def math_string_equal_reward_tool(
-    final_response: str, answer: str, trajectory: List[Dict]
-) -> float:
+def math_string_equal_reward_tool(final_response: str, answer: str, trajectory: List[Dict]) -> float:
     """Reward a math answer that was reached using a tool.
 
     Returns 0.0 if the trajectory has no tool call, 1.0 if the last number in
     ``final_response`` equals ``answer`` (compared as strings), and 0.1 otherwise.
     """
+
     def extract_last_number(s: str):
         matches = re.findall(r"\d+", s)  # find all sequences of digits
         return matches[-1] if matches else None

@@ -174,10 +174,7 @@ class RunResult(BaseModel):
         keys: set[str] = set()
         for t in self.trajectories:
             keys.update(t.metrics.keys())
-        return {
-            k: [t.metrics.get(k) for t in self.trajectories]
-            for k in sorted(keys)
-        }
+        return {k: [t.metrics.get(k) for t in self.trajectories] for k in sorted(keys)}
 
     def __len__(self) -> int:
         return len(self.trajectories)

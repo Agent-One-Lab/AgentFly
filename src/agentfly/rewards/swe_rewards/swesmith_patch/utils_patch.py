@@ -50,8 +50,14 @@ def _patch_run_patch_in_container():
         """
         if container is None:
             return _original(
-                instance, run_id, log_dir, timeout,
-                patch=patch, commit=commit, f2p_only=f2p_only, is_gold=is_gold,
+                instance,
+                run_id,
+                log_dir,
+                timeout,
+                patch=patch,
+                commit=commit,
+                f2p_only=f2p_only,
+                is_gold=is_gold,
             )
 
         # Use existing container path

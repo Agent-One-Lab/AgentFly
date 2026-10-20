@@ -22,7 +22,7 @@ class Indexer:
             import faiss
         except ImportError:
             raise ImportError(
-                "faiss is not installed; install the search extra: `uv pip install \"agentfly-rl[search]\"` "
+                'faiss is not installed; install the search extra: `uv pip install "agentfly-rl[search]"` '
                 "(or `uv sync --extra search` in a source checkout)."
             )
         self.faiss = faiss
@@ -84,9 +84,7 @@ class Indexer:
             co.shard = True  # Enable sharding (splits data)
             co.useFloat16 = True  # Critical for 21M vectors to fit VRAM
 
-            gpu_index = self.faiss.index_cpu_to_all_gpus(
-                cpu_index, co=co, ngpu=actual_gpus
-            )
+            gpu_index = self.faiss.index_cpu_to_all_gpus(cpu_index, co=co, ngpu=actual_gpus)
             return gpu_index
         except Exception as e:
             # Fallback: try single-GPU with StandardGpuResources if available
@@ -102,9 +100,7 @@ class Indexer:
                     logger.warning(f"Using single GPU (multi-GPU failed: {e})")
                     return gpu_index
                 except Exception as e2:
-                    logger.warning(
-                        "GPU index creation failed (%s), using CPU index", e2
-                    )
+                    logger.warning("GPU index creation failed (%s), using CPU index", e2)
             else:
                 logger.warning("GPU index creation failed (%s), using CPU index", e)
             return cpu_index
@@ -118,11 +114,7 @@ class Indexer:
         self.index.add(embeddings)
 
         # Update IDs
-        new_ids = (
-            ids
-            if ids is not None
-            else list(range(self.ids[-1] + 1, self.ids[-1] + 1 + embeddings.shape[0]))
-        )
+        new_ids = ids if ids is not None else list(range(self.ids[-1] + 1, self.ids[-1] + 1 + embeddings.shape[0]))
         if self.ids is not None:
             self.ids.extend(new_ids)
         else:
@@ -133,9 +125,7 @@ class Indexer:
             queries = queries.reshape(1, -1)
 
         if queries.shape[1] != self.index.d:
-            raise ValueError(
-                f"Query dimension {queries.shape[1]} doesn't match {self.index.d}"
-            )
+            raise ValueError(f"Query dimension {queries.shape[1]} doesn't match {self.index.d}")
 
         if self.similarity == "cosine":
             queries /= np.linalg.norm(queries, axis=1)[:, None]

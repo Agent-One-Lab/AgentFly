@@ -40,7 +40,4 @@ def print_trajectory(trajectory: Trajectory) -> None:
 
             for tool_call in message.get("tool_calls") or []:
                 function = tool_call["function"]
-                print(
-                    f"  Tool call: {function['name']} "
-                    f"Arguments: {function.get('arguments', '')}"
-                )
+                print(f"  Tool call: {function['name']} Arguments: {function.get('arguments', '')}")

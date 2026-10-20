@@ -70,7 +70,6 @@ class ToolLoopResult:
     terminated: bool
 
 
-
 # ---- mini-swe-agent format-error nudges (``config/mini.yaml`` ``format_error_template``,
 # mini-swe-agent 2.4.6, rendered for the "no tool calls" case). The same text appears in
 # the miniswe SFT trajectories, so it is on-distribution for models trained on them. ----
@@ -80,7 +79,7 @@ MINISWE_NO_TOOL_CALL_TEXT = (
     "MUST include at least one tool call.\n</error>\n\nHere is general guidance on how "
     "to submit correct toolcalls:\n\nEvery response needs to use the 'bash' tool at "
     "least once to execute commands.\n\nCall the bash tool with your command as the "
-    "argument:\n- Tool: bash\n- Arguments: {\"command\": \"your_command_here\"}\n\nIf "
+    'argument:\n- Tool: bash\n- Arguments: {"command": "your_command_here"}\n\nIf '
     "you want to end the task, please issue the following command: `echo "
     "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`\nwithout any other command."
 )
@@ -89,6 +88,7 @@ MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT = (
     "before you produced a tool call, so it was cut off. Respond more concisely and "
     "finish with exactly one bash tool call. If you need to think more, do so briefly."
 )
+
 
 class Rollout(ABC):
     """Base rollout strategy: shared machinery (L2) + the abstract L3 interface.
@@ -101,18 +101,20 @@ class Rollout(ABC):
 
     # Runtime-owned keys, excluded from task metadata. Execution counts are
     # derived from records, never trusted from incoming task metadata.
-    _RESERVED_INFO_KEYS = frozenset({
-        "chain_id",
-        "group_id",
-        "chain_idx",
-        "group_idx",
-        "finish_reason",
-        "rollout_time_sec",
-        "num_turns",
-        "tool_call_counts",
-        "reward",
-        "tool_metrics",
-    })
+    _RESERVED_INFO_KEYS = frozenset(
+        {
+            "chain_id",
+            "group_id",
+            "chain_idx",
+            "group_idx",
+            "finish_reason",
+            "rollout_time_sec",
+            "num_turns",
+            "tool_call_counts",
+            "reward",
+            "tool_metrics",
+        }
+    )
 
     # Parsed-message ``status`` values that mean the MODEL explicitly ended the episode
     # (an "end task" sentinel, or a parser-supplied status). Distinct from the
@@ -163,9 +165,7 @@ class Rollout(ABC):
             ("on_tool_error", on_tool_error),
         ):
             if val not in CONTROL:
-                raise ValueError(
-                    f"{label} must be one of {sorted(CONTROL)}, got {val!r}"
-                )
+                raise ValueError(f"{label} must be one of {sorted(CONTROL)}, got {val!r}")
         self.on_no_tool_call = on_no_tool_call
         self.on_invalid_tool_call = on_invalid_tool_call
         self.on_tool_error = on_tool_error
@@ -173,18 +173,14 @@ class Rollout(ABC):
             max_consecutive_no_tool_calls = int(max_consecutive_no_tool_calls)
         except (TypeError, ValueError):
             raise ValueError(
-                "max_consecutive_no_tool_calls must be a non-negative int, "
-                f"got {max_consecutive_no_tool_calls!r}"
+                f"max_consecutive_no_tool_calls must be a non-negative int, got {max_consecutive_no_tool_calls!r}"
             )
         if max_consecutive_no_tool_calls < 0:
             raise ValueError(
-                "max_consecutive_no_tool_calls must be a non-negative int, "
-                f"got {max_consecutive_no_tool_calls!r}"
+                f"max_consecutive_no_tool_calls must be a non-negative int, got {max_consecutive_no_tool_calls!r}"
             )
         if no_tool_call_message is not None and not isinstance(no_tool_call_message, str):
-            raise ValueError(
-                f"no_tool_call_message must be a str or None, got {no_tool_call_message!r}"
-            )
+            raise ValueError(f"no_tool_call_message must be a str or None, got {no_tool_call_message!r}")
         self.max_consecutive_no_tool_calls = max_consecutive_no_tool_calls
         self.no_tool_call_message = no_tool_call_message or None
         # Metrics x-axis; see resolve_global_step. A strategy instance is constructed per
@@ -368,9 +364,7 @@ class Rollout(ABC):
             )
             obs_token_length = observation_token_length(agent, observation)
             action_input_step.total_token_length = (
-                running_total_token_length
-                + obs_token_length
-                + TOOL_OBS_PREFIX_TOKENS
+                running_total_token_length + obs_token_length + TOOL_OBS_PREFIX_TOKENS
             )
             running_total_token_length = action_input_step.total_token_length
 
@@ -381,9 +375,7 @@ class Rollout(ABC):
             ):
                 action_input_step.is_terminal = True
                 chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
-                yield ToolLoopResult(
-                    action_input_step, num_tool_calls, have_set_resources, terminated=True
-                )
+                yield ToolLoopResult(action_input_step, num_tool_calls, have_set_resources, terminated=True)
                 return
 
             new_content = [{"type": "text", "text": observation}]
@@ -411,9 +403,7 @@ class Rollout(ABC):
                 # messages (same path as first generation) instead of keeping the
                 # pre-fold cumulative total.
                 try:
-                    folded_prompt_tokens = estimate_chat_prompt_tokens(
-                        agent, action_input_step, tools=tools
-                    )
+                    folded_prompt_tokens = estimate_chat_prompt_tokens(agent, action_input_step, tools=tools)
                 except ValueError:
                     folded_prompt_tokens = 0
                 action_input_step.total_token_length = folded_prompt_tokens
@@ -429,9 +419,7 @@ class Rollout(ABC):
             if action_input_step.is_terminal:
                 break
 
-        yield ToolLoopResult(
-            action_input_step, num_tool_calls, have_set_resources, terminated=False
-        )
+        yield ToolLoopResult(action_input_step, num_tool_calls, have_set_resources, terminated=False)
 
     def apply_context_folding(
         self,
@@ -468,9 +456,7 @@ class Rollout(ABC):
             # Delegate folding policy to the tool module to get a folded view
             # of the history up to this point, then append the tool message.
             # Default behavior: keep only the fresh summary (do not stack summaries).
-            folded_turns = fold_messages_with_summarize(
-                messages.messages, observation, keep_previous_summary=False
-            )
+            folded_turns = fold_messages_with_summarize(messages.messages, observation, keep_previous_summary=False)
             context.trajectory_format = "segmented"
             meta = messages.meta
             return Messages.from_turns(folded_turns, **meta), True
@@ -499,11 +485,7 @@ class Rollout(ABC):
 
             context.final_response = final_response
 
-            other_args = {
-                k: v
-                for k, v in chain.info.items()
-                if k not in ["final_response", "trajectory", "id"]
-            }
+            other_args = {k: v for k, v in chain.info.items() if k not in ["final_response", "trajectory", "id"]}
 
             reward = await calculate_reward(
                 agent.reward_fn,
@@ -518,9 +500,7 @@ class Rollout(ABC):
             chain.info["reward"] = None
 
         # Both strategies aggregate actual ToolResults, independent of Step layout.
-        chain.info["tool_metrics"] = aggregate_tool_metrics(
-            step.tool_result for step in chain.steps()
-        )
+        chain.info["tool_metrics"] = aggregate_tool_metrics(step.tool_result for step in chain.steps())
 
         # Release global resources so other rollouts can use them
         await context.release_resource(scope="global")
@@ -585,9 +565,7 @@ class Rollout(ABC):
             metrics.update(info.get("tool_metrics") or {})
 
             # Free-form bag: everything in chain.info that isn't a reserved key.
-            metadata = {
-                k: v for k, v in info.items() if k not in self._RESERVED_INFO_KEYS
-            }
+            metadata = {k: v for k, v in info.items() if k not in self._RESERVED_INFO_KEYS}
 
             trajectories.append(
                 Trajectory(

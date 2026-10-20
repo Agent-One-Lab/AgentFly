@@ -88,10 +88,7 @@ async def google_search_serper(query, env: RedisEnv):
                 context = f"{result['answerBox']['snippet']}"
             else:
                 results = result.get("organic", [])[:3]  # Choose top 3 result
-                snippets = [
-                    f"{i + 1}. {x['title']} {x['snippet']}"
-                    for i, x in enumerate(results)
-                ]
+                snippets = [f"{i + 1}. {x['title']} {x['snippet']}" for i, x in enumerate(results)]
                 context = "\n".join(snippets)
 
             env._set(query, context)

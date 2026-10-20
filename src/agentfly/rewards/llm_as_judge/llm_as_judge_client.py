@@ -31,22 +31,16 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 def get_server_ips(model: str) -> List[str]:
     """Get list of server IPs from the most recent complete server instances file for a specific model"""
-    server_status_dir = os.path.join(
-        REPO_ROOT.parent.parent, "data-process", "vllm_server", "server_status"
-    )
+    server_status_dir = os.path.join(REPO_ROOT.parent.parent, "data-process", "vllm_server", "server_status")
 
     # Clean model name for filename matching (replace / and - with _)
     model_clean = model.replace("/", "_").replace("-", "_")
-    search_pattern = os.path.join(
-        server_status_dir, f"server_instances_complete_{model_clean}_*.json"
-    )
+    search_pattern = os.path.join(server_status_dir, f"server_instances_complete_{model_clean}_*.json")
     json_files = glob.glob(search_pattern)
 
     if not json_files:
         # Fallback: try to find any server instances file and filter by model in the JSON content
-        fallback_pattern = os.path.join(
-            server_status_dir, "server_instances_complete_*.json"
-        )
+        fallback_pattern = os.path.join(server_status_dir, "server_instances_complete_*.json")
         all_files = glob.glob(fallback_pattern)
 
         for file in all_files:
@@ -55,23 +49,17 @@ def get_server_ips(model: str) -> List[str]:
                     server_info = json.load(f)
 
                 # Check if any server in this file matches our model
-                matching_servers = [
-                    info for info in server_info if info.get("model") == model
-                ]
+                matching_servers = [info for info in server_info if info.get("model") == model]
                 if matching_servers:
                     json_files = [file]
-                    logger.info(
-                        f"Found servers for model '{model}' in fallback file: {file}"
-                    )
+                    logger.info(f"Found servers for model '{model}' in fallback file: {file}")
                     break
             except Exception as e:
                 logger.warning(f"Error reading file {file}: {e}")
                 continue
 
         if not json_files:
-            raise RuntimeError(
-                f"No server instances file found for model '{model}' in {search_pattern}"
-            )
+            raise RuntimeError(f"No server instances file found for model '{model}' in {search_pattern}")
 
     # Get the most recent file
     latest_file = max(json_files, key=os.path.getctime)
@@ -87,9 +75,7 @@ def get_server_ips(model: str) -> List[str]:
             ips.append(info["ip"])
 
     if not ips:
-        raise RuntimeError(
-            f"No IPs found for model '{model}' in server instances file {latest_file}"
-        )
+        raise RuntimeError(f"No IPs found for model '{model}' in server instances file {latest_file}")
 
     logger.info(f"Found {len(ips)} server instances for model '{model}': {ips}")
     return ips
@@ -103,15 +89,11 @@ class RateLimiter:
 
     async def acquire(self):
         await self.semaphore.acquire()
-        logger.info(
-            f"Successfully acquired slot. Available slots: {self.semaphore._value}/{self.max_window_size}"
-        )
+        logger.info(f"Successfully acquired slot. Available slots: {self.semaphore._value}/{self.max_window_size}")
 
     async def release(self):
         self.semaphore.release()
-        logger.info(
-            f"Successfully released slot. Available slots: {self.semaphore._value}/{self.max_window_size}"
-        )
+        logger.info(f"Successfully released slot. Available slots: {self.semaphore._value}/{self.max_window_size}")
 
 
 class RoundRobinClient:
@@ -136,13 +118,9 @@ class RoundRobinClient:
             for ip in ips
         ]
         self.rate_limiters = rate_limiters
-        logger.info(
-            f"Initialized RoundRobinClient with {len(ips)} instances on port {port}"
-        )
+        logger.info(f"Initialized RoundRobinClient with {len(ips)} instances on port {port}")
         for i, ip in enumerate(ips):
-            logger.info(
-                f"Instance {i}: {ip}:{port} with rate limit {rate_limiters[i].max_window_size}"
-            )
+            logger.info(f"Instance {i}: {ip}:{port} with rate limit {rate_limiters[i].max_window_size}")
 
     async def get_next_available_client(self) -> tuple[AsyncOpenAI, RateLimiter]:
         # Find the instance with the most available slots
@@ -178,9 +156,7 @@ class RoundRobinClient:
             return best_client, best_limiter
         else:
             # All instances are at capacity, distribute waiting requests across all instances
-            logger.info(
-                "All instances at capacity, distributing wait across all instances"
-            )
+            logger.info("All instances at capacity, distributing wait across all instances")
 
             # Create a list of all instances that we can wait on
             wait_tasks = []
@@ -204,15 +180,11 @@ class RoundRobinClient:
                 # Find which instance became available
                 for i, task in wait_tasks:
                     if task in done:
-                        logger.info(
-                            f"Instance {i} ({self.ips[i]}:{self.port}) became available"
-                        )
+                        logger.info(f"Instance {i} ({self.ips[i]}:{self.port}) became available")
                         return self.clients[i], self.rate_limiters[i]
 
                 # This should never happen, but just in case
-                raise RuntimeError(
-                    "No instance became available despite wait completion"
-                )
+                raise RuntimeError("No instance became available despite wait completion")
             except Exception as e:
                 logger.error(f"Error while waiting for instances: {e}")
                 raise
@@ -241,9 +213,7 @@ class RoundRobinClient:
                     "available_slots": available,
                     "used_slots": used,
                     "total_slots": capacity,
-                    "utilization_percent": (used / capacity) * 100
-                    if capacity > 0
-                    else 0,
+                    "utilization_percent": (used / capacity) * 100 if capacity > 0 else 0,
                 }
             )
 
@@ -252,16 +222,12 @@ class RoundRobinClient:
             "total_capacity": total_capacity,
             "total_available": total_available,
             "total_used": total_used,
-            "overall_utilization_percent": (total_used / total_capacity) * 100
-            if total_capacity > 0
-            else 0,
+            "overall_utilization_percent": (total_used / total_capacity) * 100 if total_capacity > 0 else 0,
             "has_available_slots": total_available > 0,
             "instances": instance_details,
         }
 
-    async def wait_for_availability(
-        self, min_slots: int = 1, timeout_seconds: Optional[int] = None
-    ) -> bool:
+    async def wait_for_availability(self, min_slots: int = 1, timeout_seconds: Optional[int] = None) -> bool:
         """Wait until at least min_slots are available across all instances
 
         Args:
@@ -285,9 +251,7 @@ class RoundRobinClient:
             if timeout_seconds is not None:
                 elapsed = time.time() - start_time
                 if elapsed >= timeout_seconds:
-                    logger.warning(
-                        f"Timeout waiting for availability after {elapsed:.2f}s"
-                    )
+                    logger.warning(f"Timeout waiting for availability after {elapsed:.2f}s")
                     return False
 
             # Wait a short time before checking again
@@ -316,9 +280,7 @@ class LLMClient:
         server_ips = ["10.24.0.80"]
         # Create a rate limiter for each instance
         rate_limiters = [RateLimiter(max_window_size_per_instance) for _ in server_ips]
-        self.client_manager = RoundRobinClient(
-            server_ips, port, api_key, timeout_seconds, rate_limiters
-        )
+        self.client_manager = RoundRobinClient(server_ips, port, api_key, timeout_seconds, rate_limiters)
         logger.info(
             f"Initialized LLMClient for model '{model}' with {len(server_ips)} instances on port {port}, {max_window_size_per_instance} slots per instance"
         )
@@ -337,20 +299,14 @@ class LLMClient:
                 )
                 duration = time.time() - start_time
 
-                if (
-                    duration > self.timeout_seconds * 0.9
-                ):  # If request took more than 90% of timeout
-                    logger.warning(
-                        f"Request took {duration:.2f}s (close to timeout {self.timeout_seconds}s)"
-                    )
+                if duration > self.timeout_seconds * 0.9:  # If request took more than 90% of timeout
+                    logger.warning(f"Request took {duration:.2f}s (close to timeout {self.timeout_seconds}s)")
 
                 logger.info(f"Request completed in {duration:.2f}s")
                 return response.choices[0].message.content
             finally:
                 await rate_limiter.release()
-                logger.info(
-                    f"Released rate limiter slot. Available slots: {rate_limiter.semaphore._value}"
-                )
+                logger.info(f"Released rate limiter slot. Available slots: {rate_limiter.semaphore._value}")
         except asyncio.TimeoutError:
             logger.error(f"Request timed out after {self.timeout_seconds}s")
             return None
@@ -358,9 +314,7 @@ class LLMClient:
             logger.error(f"Error processing request: {e}")
             return None
 
-    async def process_all_inputs(
-        self, inputs_list, num_generations=1, model=None, **kwargs
-    ):
+    async def process_all_inputs(self, inputs_list, num_generations=1, model=None, **kwargs):
         try:
             # Create N tasks for each input
             all_tasks = []
@@ -371,9 +325,7 @@ class LLMClient:
                 all_tasks.extend(tasks)
 
             # Run all tasks concurrently with progress bar
-            responses = await tqdm_asyncio.gather(
-                *all_tasks, desc="Processing requests", file=sys.stdout
-            )
+            responses = await tqdm_asyncio.gather(*all_tasks, desc="Processing requests", file=sys.stdout)
 
             # Group responses by input
             grouped_responses = []
@@ -392,9 +344,7 @@ class LLMClient:
         """
         return self.client_manager.check_availability()
 
-    async def wait_for_availability(
-        self, min_slots: int = 1, timeout_seconds: Optional[int] = None
-    ) -> bool:
+    async def wait_for_availability(self, min_slots: int = 1, timeout_seconds: Optional[int] = None) -> bool:
         """Wait until at least min_slots are available across all instances
 
         Args:
@@ -404,9 +354,7 @@ class LLMClient:
         Returns:
             True if slots became available, False if timeout
         """
-        return await self.client_manager.wait_for_availability(
-            min_slots, timeout_seconds
-        )
+        return await self.client_manager.wait_for_availability(min_slots, timeout_seconds)
 
     def is_available(self) -> bool:
         """Quick check if any slots are currently available
@@ -482,9 +430,7 @@ async def llm_as_judge_client_math_reward(prediction: str, answer: str) -> float
             ),
         }
     ]
-    responses = await client.process_all_inputs(
-        [messages], model="Qwen/Qwen2.5-72B-Instruct"
-    )
+    responses = await client.process_all_inputs([messages], model="Qwen/Qwen2.5-72B-Instruct")
     if responses and responses[0] and responses[0][0]:
         output_text = responses[0][0]
         try:

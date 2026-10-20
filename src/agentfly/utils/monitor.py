@@ -126,9 +126,7 @@ class JsonlSink(BaseSink):
             with open(default_file, "w"):
                 pass
 
-            self.log_files = {
-                "default": open(default_file, "a", buffering=1, encoding="utf-8")
-            }
+            self.log_files = {"default": open(default_file, "a", buffering=1, encoding="utf-8")}
         else:
             self.log_files = {}
 
@@ -140,15 +138,11 @@ class JsonlSink(BaseSink):
             file_name = os.path.join(self.directory, f"{evt_name}.jsonl")
             with open(file_name, "w"):
                 pass
-            self.log_files[evt_name] = open(
-                file_name, "a", buffering=1, encoding="utf-8"
-            )
+            self.log_files[evt_name] = open(file_name, "a", buffering=1, encoding="utf-8")
         file_obj = self.log_files[evt_name]
 
         async with self._lock:
-            file_obj.write(
-                json.dumps(serialize_for_json(asdict(evt)), ensure_ascii=False) + "\n"
-            )
+            file_obj.write(json.dumps(serialize_for_json(asdict(evt)), ensure_ascii=False) + "\n")
 
     async def flush(self) -> None:
         for file_obj in self.log_files.values():
@@ -185,18 +179,12 @@ class WandbSink(BaseSink):
                     data = [[x, y] for x, y in zip(evt.x, evt.value)]
                     table = wandb.Table(data=data, columns=[evt.x_name, evt.name])
                     wandb.log(
-                        {
-                            evt.name: wandb.plot.line(
-                                table, evt.x_name, evt.name, title=evt.name
-                            )
-                        },
+                        {evt.name: wandb.plot.line(table, evt.x_name, evt.name, title=evt.name)},
                         commit=evt.commit,
                     )
                 elif evt.kind == "text":
                     if evt.name not in self.tables:
-                        self.tables[evt.name] = wandb.Table(
-                            columns=["step", "text"], log_mode="INCREMENTAL"
-                        )
+                        self.tables[evt.name] = wandb.Table(columns=["step", "text"], log_mode="INCREMENTAL")
                     self.tables[evt.name].add_data(evt.x, evt.value)
                     wandb.log({evt.name: self.tables[evt.name]}, commit=evt.commit)
                 else:
@@ -281,9 +269,7 @@ class Monitor:
         # Create new consumer task
         try:
             loop = asyncio.get_running_loop()
-            cls._consumer_task = loop.create_task(
-                cls._consumer_loop(), name="monitor-consumer"
-            )
+            cls._consumer_task = loop.create_task(cls._consumer_loop(), name="monitor-consumer")
             cls._running = True
         except RuntimeError:
             # No running event loop - this shouldn't happen in normal usage

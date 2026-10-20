@@ -18,6 +18,7 @@ a single ``[{"role": "user", "content": ...}]``).
 
 Builders are resolved by the same name-or-path idiom as rollouts/tools/rewards.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
@@ -98,8 +99,7 @@ class StepPromptBuilder(ABC):
         current: Dict[str, Any],
         history_length: int,
         step_index: int = 0,
-    ) -> List[Dict[str, Any]]:
-        ...
+    ) -> List[Dict[str, Any]]: ...
 
 
 class ChatWindowPromptBuilder(StepPromptBuilder):
@@ -138,9 +138,7 @@ class ChatWindowPromptBuilder(StepPromptBuilder):
         tokenizer = getattr(agent, "tokenizer", None)
         if tokenizer is not None:
             try:
-                text = tokenizer.apply_chat_template(
-                    msgs, tokenize=False, add_generation_prompt=True
-                )
+                text = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
                 return len(tokenizer(text)["input_ids"])
             except Exception:  # noqa: BLE001
                 pass
@@ -212,7 +210,6 @@ class FlatAlfworldPromptBuilder(StepPromptBuilder):
                 admissible_actions=admissible,
             )
         return [{"role": "user", "content": text}]
-
 
 
 def _history_lines(window, step_index: int) -> str:

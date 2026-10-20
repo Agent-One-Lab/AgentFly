@@ -49,9 +49,7 @@ async def startup():
     corpus_file = os.environ.get("RETRIEVER_CORPUS_FILE", DEFAULT_CORPUS)
     index_file = os.environ.get("RETRIEVER_INDEX_FILE", DEFAULT_INDEX)
     logger.info("Loading retriever: corpus=%s index=%s", corpus_file, index_file)
-    retriever = DenseRetriever(
-        corpus_file=corpus_file, index_file=index_file, max_concurrent=8
-    )
+    retriever = DenseRetriever(corpus_file=corpus_file, index_file=index_file, max_concurrent=8)
     logger.info("Retriever ready.")
 
 
@@ -67,9 +65,7 @@ async def search(req: SearchRequest):
     try:
         results = await retriever.search([req.query], top_k=req.top_k)
         docs = results[0]
-        return SearchResponse(
-            results=[DocResult(contents=d.get("contents", "")) for d in docs]
-        )
+        return SearchResponse(results=[DocResult(contents=d.get("contents", "")) for d in docs])
     except Exception as e:
         logger.exception("Search failed")
         raise HTTPException(status_code=500, detail=str(e))

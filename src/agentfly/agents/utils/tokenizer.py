@@ -24,8 +24,7 @@ def create_tokenizer(model_name_or_path: str):
     # still degrades to None for an API model id that isn't an HF repo (e.g.
     # "deepseek-v4-pro") — the tokenizer is optional for client/API backends.
     try:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_name_or_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
     except Exception:
         tokenizer = None
 
@@ -36,8 +35,7 @@ def create_processor(model_name_or_path: str):
     from transformers import AutoProcessor  # lazy: heavy import
 
     try:
-        processor = AutoProcessor.from_pretrained(
-            model_name_or_path, trust_remote_code=True)
+        processor = AutoProcessor.from_pretrained(model_name_or_path, trust_remote_code=True)
     except Exception:
         processor = None
 
@@ -86,9 +84,7 @@ def tokenize_trajectories(
         ignore_tool_calls=True,
         train_on_last_turn_only=train_on_last_turn,
     )
-    position_ids = torch.clip(
-        torch.cumsum(inputs["attention_mask"], dim=-1) - 1, min=0, max=None
-    )
+    position_ids = torch.clip(torch.cumsum(inputs["attention_mask"], dim=-1) - 1, min=0, max=None)
     inputs["position_ids"] = position_ids
 
     return inputs

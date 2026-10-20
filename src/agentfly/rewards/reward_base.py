@@ -159,10 +159,7 @@ class BaseReward:
 
         # Determine if this reward is async
         if "_is_async_call" not in cls.__dict__:
-            user_func_is_async = (
-                self.user_func is not None
-                and inspect.iscoroutinefunction(self.user_func)
-            )
+            user_func_is_async = self.user_func is not None and inspect.iscoroutinefunction(self.user_func)
             cls._is_async_call = user_func_is_async
 
         # Instance-level attributes
@@ -372,9 +369,7 @@ def reward(
     return decorator
 
 
-def register_reward(
-    reward_name: str, reward_function: BaseReward | type[BaseReward]
-) -> None:
+def register_reward(reward_name: str, reward_function: BaseReward | type[BaseReward]) -> None:
     """
     Register a reward in the registry.
 

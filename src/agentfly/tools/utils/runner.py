@@ -8,7 +8,6 @@ from typing import Any, Coroutine
 _loop_holder = {"loop": None, "thread": None}
 
 
-
 def _ensure_background_loop():
     if _loop_holder["loop"] is None:
         loop = asyncio.new_event_loop()

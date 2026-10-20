@@ -81,9 +81,7 @@ class PythonSandboxEnv(ContainerResource):
             logs = logs.decode() if hasattr(logs, "decode") else str(logs)
         except Exception:
             logs = "Could not get logs"
-        raise RuntimeError(
-            f"Sandbox did not become ready within {self._start_timeout}s.\n{logs}"
-        )
+        raise RuntimeError(f"Sandbox did not become ready within {self._start_timeout}s.\n{logs}")
 
     async def start(self) -> None:
         await super().start()
@@ -92,9 +90,7 @@ class PythonSandboxEnv(ContainerResource):
 
     async def reset(self, *args: Any, **kwargs: Any) -> Any:
         try:
-            await asyncio.wait_for(
-                self.step("globals().clear()"), timeout=20.0
-            )
+            await asyncio.wait_for(self.step("globals().clear()"), timeout=20.0)
         except (asyncio.TimeoutError, httpx.TransportError):
             await self.end()
             await super().start()

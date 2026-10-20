@@ -116,27 +116,27 @@ class ResourceEngine:
         if runner is None:
             raise ValueError(f"Unknown backend: {backend}")
         key = _pool_key(spec, backend)
-        
+
         pending_ids = []
         cond = cls._get_condition()
         async with cond:
             if key not in cls._free:
                 cls._free[key] = []
-            
+
             current_free = len(cls._free[key])
             if current_free >= size:
                 return
 
             total_existing = cls._count_for_pool(key)
             cap = spec.max_global_num
-            
+
             needed = size - current_free
             if cap is not None:
                 needed = min(needed, cap - total_existing)
-            
+
             if needed <= 0:
                 return
-            
+
             # Reserve slots with placeholders
             for _ in range(needed):
                 p_id = f"_pending_{key}_{uuid.uuid4().hex}"
@@ -237,10 +237,7 @@ class ResourceEngine:
         return resource
 
     @classmethod
-    async def release(
-        cls,
-        id: str
-    ) -> None:
+    async def release(cls, id: str) -> None:
         """Return resource to the store and unregister from acquired."""
         cond = cls._get_condition()
         async with cond:
@@ -338,4 +335,3 @@ class ResourceEngine:
             cls._free.clear()
         # Failures are ignored: every resource still gets its end() call.
         await asyncio.gather(*(resource.end() for resource in resources), return_exceptions=True)
-

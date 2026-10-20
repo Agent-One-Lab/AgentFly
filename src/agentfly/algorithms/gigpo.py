@@ -54,14 +54,14 @@ def gigpo_params(config: Any) -> Dict[str, Any]:
 # per_step: one row per environment step (StepRollout)                                  #
 # ------------------------------------------------------------------------------------ #
 def compute_gigpo_per_step_advantage(
-    token_level_rewards: torch.Tensor,             # [B, L] outcome broadcast to every step row
-    response_mask: torch.Tensor,                   # [B, L]
-    step_env_rewards: np.ndarray,                  # [B] raw per-step env reward
-    anchor_obs: np.ndarray,                        # [B] state the action was taken from
-    uid: np.ndarray,                               # [B] prompt group
-    traj_uid: np.ndarray,                          # [B] trajectory
+    token_level_rewards: torch.Tensor,  # [B, L] outcome broadcast to every step row
+    response_mask: torch.Tensor,  # [B, L]
+    step_env_rewards: np.ndarray,  # [B] raw per-step env reward
+    anchor_obs: np.ndarray,  # [B] state the action was taken from
+    uid: np.ndarray,  # [B] prompt group
+    traj_uid: np.ndarray,  # [B] trajectory
     is_action_valid: Optional[np.ndarray] = None,  # [B] 1 valid / 0 invalid
-    active_masks: Optional[np.ndarray] = None,     # [B] 1 real row / 0 divisor padding
+    active_masks: Optional[np.ndarray] = None,  # [B] 1 real row / 0 divisor padding
     gamma: float = 0.95,
     step_advantage_w: float = 1.0,
     mode: str = "mean_std_norm",
@@ -114,7 +114,12 @@ def compute_gigpo_per_step_advantage(
     n_traj = len(np.unique(sub_traj))
     outcomes = tlr.sum(dim=-1)
     print_group_diagnostics(
-        "GiGPO per_step", step_group_uids, episode_adv, step_adv, rmask, step_advantage_w,
+        "GiGPO per_step",
+        step_group_uids,
+        episode_adv,
+        step_adv,
+        rmask,
+        step_advantage_w,
         extra=(
             f"rows={len(idx)} trajs={n_traj} groups={len(np.unique(sub_uid))} "
             f"avg_steps/traj={len(idx) / max(1, n_traj):.1f} "
@@ -150,11 +155,11 @@ def gigpo_per_step(data: Any, config: Any) -> Tuple[torch.Tensor, torch.Tensor]:
 # per_segment: several turns per row (ChainRollout)                                     #
 # ------------------------------------------------------------------------------------ #
 def compute_gigpo_per_segment_advantage(
-    token_level_rewards: torch.Tensor,   # [B, L] outcome reward on the row's reward token
-    response_mask: torch.Tensor,         # [B, L] 1 on policy tokens; contiguous runs = turns
-    uid: np.ndarray,                     # [B] prompt group
-    step_observations: np.ndarray,       # [B] object array: per-turn anchor lists
-    step_rewards: np.ndarray,            # [B] object array: per-turn raw env reward lists
+    token_level_rewards: torch.Tensor,  # [B, L] outcome reward on the row's reward token
+    response_mask: torch.Tensor,  # [B, L] 1 on policy tokens; contiguous runs = turns
+    uid: np.ndarray,  # [B] prompt group
+    step_observations: np.ndarray,  # [B] object array: per-turn anchor lists
+    step_rewards: np.ndarray,  # [B] object array: per-turn raw env reward lists
     step_invalids: Optional[np.ndarray] = None,  # [B] object array: per-turn 0/1 invalid flags
     gamma: float = 1.0,
     step_advantage_w: float = 1.0,
@@ -187,9 +192,7 @@ def compute_gigpo_per_segment_advantage(
         rewards = [0.0 if r is None else float(r) for r in (step_rewards[b] or [])]
         anchors = list(step_observations[b] or [])
         if len(anchors) < len(rewards):
-            raise ValueError(
-                f"Row {b} has {len(rewards)} step rewards but only {len(anchors)} step observations."
-            )
+            raise ValueError(f"Row {b} has {len(rewards)} step rewards but only {len(anchors)} step observations.")
         invalids = list(step_invalids[b] or []) if step_invalids is not None else []
         for t, reward in enumerate(rewards):
             flat_rewards.append(reward)
@@ -209,7 +212,9 @@ def compute_gigpo_per_segment_advantage(
         flat_adv = step_norm_reward(
             torch.tensor(flat_returns, device=device, dtype=dtype),
             torch.ones(len(flat_returns), 1, device=device, dtype=dtype),
-            step_group_uids, epsilon, remove_std,
+            step_group_uids,
+            epsilon,
+            remove_std,
         )[:, 0]
         turn_ids = compute_turn_ids(response_mask)
         for k, (b, t) in enumerate(flat_positions):
@@ -217,8 +222,13 @@ def compute_gigpo_per_segment_advantage(
     step_advantages = step_advantages * response_mask
 
     print_group_diagnostics(
-        "GiGPO per_segment", step_group_uids, episode_adv, step_advantages, response_mask,
-        step_advantage_w, extra=f"rows={B} groups={len(np.unique(uid))}",
+        "GiGPO per_segment",
+        step_group_uids,
+        episode_adv,
+        step_advantages,
+        response_mask,
+        step_advantage_w,
+        extra=f"rows={B} groups={len(np.unique(uid))}",
     )
 
     advantages = episode_adv + step_advantage_w * step_advantages

@@ -34,7 +34,6 @@ The code is in markdown format, enclosed with ```python and ```. In each turn, o
 """
 
 
-
 class CodeAgent(BaseAgent):
     def __init__(
         self, model_name_or_path: str, tools: List = None, system_prompt: str = CodeAgentSystemPrompt, **kwargs

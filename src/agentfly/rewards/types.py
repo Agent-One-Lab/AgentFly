@@ -53,10 +53,7 @@ class RewardResult:
             return cls(reward=float(raw), metrics={})
         if isinstance(raw, dict):
             if "reward" not in raw:
-                raise ValueError(
-                    "reward key required when reward fn returns a dict; "
-                    f"got keys: {list(raw.keys())}"
-                )
+                raise ValueError(f"reward key required when reward fn returns a dict; got keys: {list(raw.keys())}")
             raw = dict(raw)  # don't mutate caller's dict
             reward = float(raw.pop("reward"))
             # Metrics may be given as an explicit ``metrics`` sub-dict and/or as
@@ -64,10 +61,7 @@ class RewardResult:
             explicit = raw.pop("metrics", None) or {}
             metrics = {**raw, **explicit}
             return cls(reward=reward, metrics=metrics)
-        raise ValueError(
-            f"reward fn returned {type(raw).__name__}; "
-            "expected float, int, dict, RewardResult, or None."
-        )
+        raise ValueError(f"reward fn returned {type(raw).__name__}; expected float, int, dict, RewardResult, or None.")
 
 
 class RewardReturn(TypedDict, total=False):

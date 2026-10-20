@@ -88,9 +88,7 @@ def _format_keywords(
     if not keywords:
         return text
 
-    unique_keywords = [
-        k for k in sorted(set(keywords), key=lambda s: len(s or ""), reverse=True) if k
-    ]
+    unique_keywords = [k for k in sorted(set(keywords), key=lambda s: len(s or ""), reverse=True) if k]
     if not unique_keywords:
         return text
 
@@ -100,8 +98,8 @@ def _format_keywords(
     def repl(match: re.Match[str]) -> str:
         start, end = match.start(), match.end()
         if style == "bold":
-            prev2 = text[max(0, start - 2):start]
-            next2 = text[end:end + 2]
+            prev2 = text[max(0, start - 2) : start]
+            next2 = text[end : end + 2]
             if prev2 == "**" and next2 == "**":
                 return match.group(0)
             return f"**{match.group(0)}**"

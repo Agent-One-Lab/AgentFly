@@ -25,6 +25,7 @@ def _sync_docker_like_container(container: Any) -> Any:
         return container.sync_exec_run_proxy()
     return container._container
 
+
 @reward(name="r2e_gym_reward")
 async def r2e_gym_reward(context: Context) -> dict:
     """Score an R2E-Gym / SWE-bench / SWE-smith task by running its tests in the rollout's container.
@@ -68,9 +69,7 @@ async def r2e_gym_reward(context: Context) -> dict:
             setup_container_for_reward_async(
                 _sync_docker_like_container(container),
                 dataset=dataset,
-                ds=context.metadata
-                if dataset in ("swesmith", "swebench", "swebench_verified")
-                else None,
+                ds=context.metadata if dataset in ("swesmith", "swebench", "swebench_verified") else None,
             ),
             timeout=eval_timeout + 10,
         )
@@ -97,7 +96,6 @@ async def r2e_gym_reward(context: Context) -> dict:
     return {"reward": reward, "acc": reward, "eval_timeout": 0.0, "out": out}
 
 
-
 @reward(name="swe_reward")
 async def swe_reward(context: Context) -> dict:
     """Score a SWE-smith task by extracting the agent's patch and evaluating it.
@@ -118,9 +116,7 @@ async def swe_reward(context: Context) -> dict:
         category="container",
         image=image_id,
     )
-    container = await context.acquire_resource(
-        spec=spec, id=rollout_id, scope="rollout", backend="local"
-    )
+    container = await context.acquire_resource(spec=spec, id=rollout_id, scope="rollout", backend="local")
     eval_timeout = context.metadata.get("eval_timeout", DEFAULT_EVAL_TIMEOUT)
     git_patch = await get_patch_from_runtime(
         container,
@@ -149,5 +145,3 @@ async def swe_reward(context: Context) -> dict:
         return {"reward": 1.0, "eval_timeout": 0.0}
     else:
         return {"reward": 0.0, "eval_timeout": 0.0}
-
-

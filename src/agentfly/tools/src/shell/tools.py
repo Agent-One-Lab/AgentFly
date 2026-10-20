@@ -77,6 +77,7 @@ async def _run_shell(context: Context, cmd: str) -> str:
     # the same container for a given rollout id regardless of which tool
     # creates it first, so both specs must request the mount.
     from ..file.tools import FILE_MODULE_DIR, INSTALL_PATH
+
     spec = ContainerResourceSpec(
         category="container",
         image=image_id,
@@ -104,9 +105,7 @@ async def _run_shell(context: Context, cmd: str) -> str:
         commit = context.metadata.get("git_commit_hash", None)
         if commit is not None:
             git_timeout = 300
-            await container.run_cmd(
-                "git fetch", timeout=git_timeout, workdir=workdir
-            )
+            await container.run_cmd("git fetch", timeout=git_timeout, workdir=workdir)
             await container.run_cmd(
                 f"git checkout {commit}",
                 timeout=git_timeout,

@@ -15,9 +15,7 @@ from ..agent_base import BaseAgent
 from ..rollout.structures import Step
 
 # Matches both <action>...</action> and <summarize>...</summarize> blocks.
-TOOL_TAG_PATTERN = re.compile(
-    r"<(action|summarize)>\s*(.*?)\s*</\1>", re.DOTALL | re.IGNORECASE
-)
+TOOL_TAG_PATTERN = re.compile(r"<(action|summarize)>\s*(.*?)\s*</\1>", re.DOTALL | re.IGNORECASE)
 # First closing tag (any case): strip everything after it; keep the tag itself.
 CLOSE_TOOL_TAG_PATTERN = re.compile(r"</(action|summarize)>", re.IGNORECASE)
 
@@ -69,7 +67,7 @@ Important rules:
 - Be concrete. Use specific names, numbers, and identifiers, not vague descriptions.
 - Be brief. Each bullet should be one line.
 - If a section does not apply yet, write "- (none yet)" rather than leaving it empty.
-- Do not call any tools in this turn."""
+- Do not call any tools in this turn.""",
 }
 
 CONTEXT_TRIGGER_MESSAGE_TYPE_ENV = "CONTEXT_TRIGGER_MESSAGE_TYPE"
@@ -107,9 +105,7 @@ class ActionAgent(BaseAgent):
                 try:
                     context_trigger_turns = int(env_turns)
                 except ValueError as exc:
-                    raise ValueError(
-                        f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}"
-                    ) from exc
+                    raise ValueError(f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}") from exc
 
         if context_trigger_turns is not None and context_trigger_turns < 1:
             raise ValueError("context_trigger_turns must be >= 1 when set")
@@ -126,9 +122,7 @@ class ActionAgent(BaseAgent):
         # itself; the tool exists only to execute the parsed ``<action>``. So by
         # default no tool schema is rendered into the prompt (matches verl-agent).
         kwargs.setdefault("render_tools_in_prompt", False)
-        super().__init__(
-            model_name_or_path, tool_parser_name=tool_parser_name, tools=tools, **kwargs
-        )
+        super().__init__(model_name_or_path, tool_parser_name=tool_parser_name, tools=tools, **kwargs)
 
     # Action tools whose initial observation must come from the env at rollout start.
     _WEBSHOP_TOOLS = frozenset({"webshop_browser_action", "webshop_browser"})
@@ -166,9 +160,7 @@ class ActionAgent(BaseAgent):
             format_page,
         )
 
-        env = await context.acquire_resource(
-            spec=WebShopSpec, scope="global", backend="local"
-        )
+        env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
         await env.reset(env_args=context.metadata)
         raw = env.observation
         task = extract_task(raw) or env.get_instruction_text()
@@ -184,9 +176,7 @@ class ActionAgent(BaseAgent):
         from ...envs.alfworld_env import ALFWorldSpec
         from ...tools.src.alfworld.tools import format_observation
 
-        env = await context.acquire_resource(
-            spec=ALFWorldSpec, scope="global", backend="local"
-        )
+        env = await context.acquire_resource(spec=ALFWorldSpec, scope="global", backend="local")
         meta = context.metadata or {}
         env_args = {"task_id": meta["task_id"]} if "task_id" in meta else None
         obs, info = await env.reset(env_args=env_args, split=meta.get("split", "train"))
@@ -262,9 +252,7 @@ class ActionAgent(BaseAgent):
             return ""
 
         # If the model wrapped output in <summarize>...</summarize>, keep only inner text.
-        match = re.search(
-            r"<summarize>\s*(.*?)\s*</summarize>", text, re.IGNORECASE | re.DOTALL
-        )
+        match = re.search(r"<summarize>\s*(.*?)\s*</summarize>", text, re.IGNORECASE | re.DOTALL)
         if match:
             return match.group(1).strip()
 
@@ -380,12 +368,7 @@ class ActionAgent(BaseAgent):
             "content": [{"type": "text", "text": content_text}],
             "tool_calls": formatted_tool_calls,
             "loss": True,
-            "status": "terminal"
-            if (
-                len(formatted_tool_calls) == 0
-                or end_task_terminal
-            )
-            else "continue",
+            "status": "terminal" if (len(formatted_tool_calls) == 0 or end_task_terminal) else "continue",
         }
 
     def parse(
@@ -464,8 +447,7 @@ class ActionAgent(BaseAgent):
                 traj = dict(traj)
                 segs = traj.get("trajectory_segments") or []
                 has_invalid_summarize_segment = any(
-                    self._segment_is_terminal_summarize_without_prior_action(segment)
-                    for segment in segs
+                    self._segment_is_terminal_summarize_without_prior_action(segment) for segment in segs
                 )
                 traj["discarded"] = has_invalid_summarize_segment
                 out.append(traj)

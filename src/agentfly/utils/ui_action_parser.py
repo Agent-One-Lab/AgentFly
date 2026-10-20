@@ -165,9 +165,7 @@ def parse_action_to_structure_output(
     min_pixels: int = 100 * 28 * 28,
 ) -> Optional[List[Dict[str, Any]]]:
     """Parse action text to structured output."""
-    logger.debug(
-        f"[parse_action_to_structure_output] Input text: {text[:500] if text else 'Empty text'}"
-    )
+    logger.debug(f"[parse_action_to_structure_output] Input text: {text[:500] if text else 'Empty text'}")
 
     # Handle empty or None responses
     if not text:
@@ -219,15 +217,11 @@ def parse_action_to_structure_output(
             reflection = thought_match.group(1).strip()
 
     if "Action:" not in text:
-        logger.debug(
-            "[parse_action_to_structure_output] No 'Action:' found in text, returning None"
-        )
+        logger.debug("[parse_action_to_structure_output] No 'Action:' found in text, returning None")
         return None
 
     action_str = text.split("Action: ")[-1]
-    logger.debug(
-        f"[parse_action_to_structure_output] Extracted action string: {action_str[:200]}"
-    )
+    logger.debug(f"[parse_action_to_structure_output] Extracted action string: {action_str[:200]}")
 
     # Parse multiple actions
     tmp_all_action = action_str.split(")\n\n")
@@ -246,9 +240,7 @@ def parse_action_to_structure_output(
             action_str = action_str.strip() + ")"
         all_action.append(action_str)
 
-    parsed_actions = [
-        parse_action(action.replace("\n", "\\n").lstrip()) for action in all_action
-    ]
+    parsed_actions = [parse_action(action.replace("\n", "\\n").lstrip()) for action in all_action]
 
     actions = []
     for action_instance, raw_str in zip(parsed_actions, all_action):
@@ -271,23 +263,17 @@ def parse_action_to_structure_output(
             action_inputs[param_name.strip()] = param
 
             # Handle box coordinates (only for string parameters)
-            if isinstance(param, str) and (
-                "start_box" in param_name or "end_box" in param_name
-            ):
+            if isinstance(param, str) and ("start_box" in param_name or "end_box" in param_name):
                 ori_box = param
                 # Remove box tags if present
-                ori_box = ori_box.replace("<|box_start|>", "").replace(
-                    "<|box_end|>", ""
-                )
+                ori_box = ori_box.replace("<|box_start|>", "").replace("<|box_end|>", "")
                 numbers = ori_box.replace("(", "").replace(")", "").split(",")
 
                 try:
                     for num in numbers:
                         float(num.strip())
                 except ValueError:
-                    logger.debug(
-                        f"Warning: Invalid coordinate format in '{param_name}': '{ori_box}'"
-                    )
+                    logger.debug(f"Warning: Invalid coordinate format in '{param_name}': '{ori_box}'")
                     return None
 
                 # Convert coordinates based on model type
@@ -350,9 +336,7 @@ def parsing_response_to_pyautogui_code(
         thought = response.get("thought", "")
 
         if response_id == 0:
-            pyautogui_code += (
-                f"'''\nObservation:\n{observation}\n\nThought:\n{thought}\n'''\n"
-            )
+            pyautogui_code += f"'''\nObservation:\n{observation}\n\nThought:\n{thought}\n'''\n"
         else:
             pyautogui_code += "\ntime.sleep(1)\n"
 
@@ -372,9 +356,7 @@ def parsing_response_to_pyautogui_code(
                     if key == "space":
                         key = " "
                     convert_keys.append(key)
-                pyautogui_code += (
-                    f"\npyautogui.hotkey({', '.join([repr(k) for k in convert_keys])})"
-                )
+                pyautogui_code += f"\npyautogui.hotkey({', '.join([repr(k) for k in convert_keys])})"
 
         elif action_type == "type":
             content = action_inputs.get("content", "")
@@ -390,9 +372,7 @@ def parsing_response_to_pyautogui_code(
                     if content.endswith("\n") or content.endswith("\\n"):
                         pyautogui_code += "\npyautogui.press('enter')"
                 else:
-                    pyautogui_code += (
-                        f"\npyautogui.write('{stripped_content}', interval=0.1)"
-                    )
+                    pyautogui_code += f"\npyautogui.write('{stripped_content}', interval=0.1)"
                     pyautogui_code += "\ntime.sleep(0.5)\n"
                     if content.endswith("\n") or content.endswith("\\n"):
                         pyautogui_code += "\npyautogui.press('enter')"
@@ -407,10 +387,7 @@ def parsing_response_to_pyautogui_code(
                 x1, y1, x2, y2 = eval(end_box)
                 ex = round(float((x1 + x2) / 2) * image_width, 3)
                 ey = round(float((y1 + y2) / 2) * image_height, 3)
-                pyautogui_code += (
-                    f"\npyautogui.moveTo({sx}, {sy})\n"
-                    f"\npyautogui.dragTo({ex}, {ey}, duration=1.0)\n"
-                )
+                pyautogui_code += f"\npyautogui.moveTo({sx}, {sy})\n\npyautogui.dragTo({ex}, {ey}, duration=1.0)\n"
 
         elif action_type == "scroll":
             start_box = action_inputs.get("start_box")
@@ -458,9 +435,7 @@ def parsing_response_to_pyautogui_code(
                 if action_type == "left_single" or action_type == "click":
                     pyautogui_code += f"\npyautogui.click({x}, {y}, button='left')"
                 elif action_type == "left_double":
-                    pyautogui_code += (
-                        f"\npyautogui.doubleClick({x}, {y}, button='left')"
-                    )
+                    pyautogui_code += f"\npyautogui.doubleClick({x}, {y}, button='left')"
                 elif action_type == "right_single":
                     pyautogui_code += f"\npyautogui.click({x}, {y}, button='right')"
                 elif action_type == "hover":

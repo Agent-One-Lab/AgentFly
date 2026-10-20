@@ -20,9 +20,7 @@ if TYPE_CHECKING:
 def load_corpus(corpus_path: str):
     import datasets
 
-    corpus = datasets.load_dataset(
-        "json", data_files=corpus_path, split="train", num_proc=4
-    )
+    corpus = datasets.load_dataset("json", data_files=corpus_path, split="train", num_proc=4)
     return corpus
 
 
@@ -42,15 +40,9 @@ class DenseRetriever:
         self.model = AutoModel.from_pretrained("intfloat/e5-base-v2")
 
     async def search(self, queries: list[str], top_k: int):
-        batch_dict = self.tokenizer(
-            queries, padding=True, truncation=True, max_length=512, return_tensors="pt"
-        )
+        batch_dict = self.tokenizer(queries, padding=True, truncation=True, max_length=512, return_tensors="pt")
         outputs = self.model(**batch_dict)
-        embeddings = (
-            average_pool(outputs.last_hidden_state, batch_dict["attention_mask"])
-            .detach()
-            .numpy()
-        )
+        embeddings = average_pool(outputs.last_hidden_state, batch_dict["attention_mask"]).detach().numpy()
 
         score_ids_list = self.indexer.search(embeddings, top_k)
         ids_list = []
@@ -82,9 +74,7 @@ async def dense_retrieve(query: str):
 
         ensure_tool_data("async_dense_retrieve")  # same corpus + index, if missing (approval-gated)
         GLOBAL_RETRIEVER = DenseRetriever(
-            corpus_file=os.path.join(
-                AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"
-            ),
+            corpus_file=os.path.join(AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"),
             index_file=os.path.join(AF_CACHE_DIR, "data", "search", "e5_Flat.index"),
         )
     doc_list = await GLOBAL_RETRIEVER.search(query, 3)

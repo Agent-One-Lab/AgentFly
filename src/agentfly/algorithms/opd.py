@@ -81,8 +81,10 @@ def compute_teacher_log_probs(batch: Any, teacher_config: Any) -> Tuple[torch.Te
     if input_ids.is_nested or attention_mask.is_nested:
         raise ValueError("teacher step expects dense (padded) input_ids and attention_mask")
     if input_ids.shape != attention_mask.shape or input_ids.dim() != 2:
-        raise ValueError(f"input_ids {tuple(input_ids.shape)} and attention_mask "
-                         f"{tuple(attention_mask.shape)} must be the same [B, L] shape")
+        raise ValueError(
+            f"input_ids {tuple(input_ids.shape)} and attention_mask "
+            f"{tuple(attention_mask.shape)} must be the same [B, L] shape"
+        )
 
     mask = attention_mask.to(torch.bool).cpu()
     lengths = mask.sum(dim=1)
@@ -134,14 +136,12 @@ def think_position_mask(
     next_ids = torch.zeros_like(input_ids)
     next_ids[:, :-1] = input_ids[:, 1:]
     is_end = ((next_ids == think_end_token_id) & gen).long()
-    ends_before = torch.cumsum(is_end, dim=1) - is_end            # ends strictly before t, row-wide
+    ends_before = torch.cumsum(is_end, dim=1) - is_end  # ends strictly before t, row-wide
     previous = torch.zeros_like(gen)
     previous[:, 1:] = gen[:, :-1]
     turn_start = gen & ~previous
     # ends_before is non-decreasing, so the running max over turn starts is its value at this turn's start.
-    at_turn_start = torch.cummax(
-        torch.where(turn_start, ends_before, torch.full_like(ends_before, -1)), dim=1
-    ).values
+    at_turn_start = torch.cummax(torch.where(turn_start, ends_before, torch.full_like(ends_before, -1)), dim=1).values
     return gen & (ends_before == at_turn_start)
 
 
@@ -235,8 +235,7 @@ def compute_opd_metrics(batch: Any, config: Any) -> Dict[str, float]:
     weights = torch.ones_like(k1)
     if options["think_weight"] != 1.0:
         weights = torch.where(think, torch.full_like(k1, options["think_weight"]), weights)
-    metrics["opd/distill_rms"] = rms(
-        weights * torch.clamp(teacher - old, -options["clamp"], options["clamp"]), mask)
+    metrics["opd/distill_rms"] = rms(weights * torch.clamp(teacher - old, -options["clamp"], options["clamp"]), mask)
 
     try:
         from ..verl.trainer.ppo.core_algos import compute_grpo_outcome_advantage

@@ -31,25 +31,19 @@ def parse_react_step(text: str) -> Dict[str, Optional[str]]:
     result = {"thought": None, "action": None, "input": None}
 
     # Pattern for Thought:
-    thought_pattern = re.compile(
-        r"Thought:\s*(.*?)(?=\s*(?:Action:|Input:|$))", re.IGNORECASE | re.DOTALL
-    )
+    thought_pattern = re.compile(r"Thought:\s*(.*?)(?=\s*(?:Action:|Input:|$))", re.IGNORECASE | re.DOTALL)
     thought_match = thought_pattern.search(text)
     if thought_match:
         result["thought"] = thought_match.group(1).strip()
 
     # Pattern for Action:
-    action_pattern = re.compile(
-        r"Action:\s*(.*?)(?=\s*(?:Thought:|Input:|$))", re.IGNORECASE | re.DOTALL
-    )
+    action_pattern = re.compile(r"Action:\s*(.*?)(?=\s*(?:Thought:|Input:|$))", re.IGNORECASE | re.DOTALL)
     action_match = action_pattern.search(text)
     if action_match:
         result["action"] = action_match.group(1).strip()
 
     # Pattern for Input:
-    input_pattern = re.compile(
-        r"Input:\s*(.*?)(?=\s*(?:Thought:|Action:|$))", re.IGNORECASE | re.DOTALL
-    )
+    input_pattern = re.compile(r"Input:\s*(.*?)(?=\s*(?:Thought:|Action:|$))", re.IGNORECASE | re.DOTALL)
     input_match = input_pattern.search(text)
     if input_match:
         result["input"] = input_match.group(1).strip()
@@ -101,13 +95,9 @@ class ReactAgent(BaseAgent):
             task_info = TaskInfoTemplate.format(task_info=task_info)
 
         tool_schemas = ToolSchemasTemplate.format(
-            tool_schemas="\n".join(
-                json.dumps(schema, indent=4) for schema in schema_list
-            )
+            tool_schemas="\n".join(json.dumps(schema, indent=4) for schema in schema_list)
         )
-        system_prompt = ReactSystemPromptTemplate.format(
-            task_info=task_info, tools=tool_schemas
-        )
+        system_prompt = ReactSystemPromptTemplate.format(task_info=task_info, tools=tool_schemas)
 
         # The schemas are already in the system prompt text above; don't ALSO
         # render the chat template's tools block (that would show them twice).

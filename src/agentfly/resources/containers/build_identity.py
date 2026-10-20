@@ -15,6 +15,7 @@ server-side clone (build-time ``RUN git clone`` is captured via the Dockerfile
 text). The historical empty-clone digest suffix is preserved byte-for-byte so
 existing ``harbor-v3`` ECR tags stay valid.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -70,9 +71,7 @@ def build_context_archive(
                 tf.addfile(info)
         if override_files:
             missing = ", ".join(sorted(override_files))
-            raise FileNotFoundError(
-                f"build-context override targets do not exist: {missing}"
-            )
+            raise FileNotFoundError(f"build-context override targets do not exist: {missing}")
 
     compressed = io.BytesIO()
     with gzip.GzipFile(fileobj=compressed, mode="wb", filename="", mtime=0) as gz:
@@ -118,9 +117,7 @@ def build_identity(
 ) -> dict:
     """Content identity dict (no archive bytes). ``registry_url`` adds
     ``image_uri`` (the pullable ECR reference)."""
-    build_tag, context_key, _ = build_artifact(
-        environment_dir, repository, dockerfile_transform=dockerfile_transform
-    )
+    build_tag, context_key, _ = build_artifact(environment_dir, repository, dockerfile_transform=dockerfile_transform)
     out = {
         "build_tag": build_tag,
         "context_digest": context_key.rsplit("/", 1)[-1].removesuffix(".tar.gz"),

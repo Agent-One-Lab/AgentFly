@@ -22,6 +22,7 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
     Tries strict JSON first; then looks for fenced JSON blocks and
     substring-extracts list/object payloads.
     """
+
     def _has_unquoted_colon(value: str) -> bool:
         in_string = False
         escaped = False
@@ -47,12 +48,10 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
             stripped = line.strip()
             if stripped.startswith('"') and (stripped.endswith('"') or stripped.endswith('",')):
                 if not _has_unquoted_colon(stripped):
-                    indent = line[:len(line) - len(line.lstrip())]
+                    indent = line[: len(line) - len(line.lstrip())]
                     has_comma = stripped.endswith(",")
                     raw_value = stripped[:-1].strip() if has_comma else stripped
-                    fixed_lines.append(
-                        f'{indent}"question": {raw_value}{"," if has_comma else ""}'
-                    )
+                    fixed_lines.append(f'{indent}"question": {raw_value}{"," if has_comma else ""}')
                     changed = True
                     continue
             fixed_lines.append(line)
@@ -74,7 +73,7 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
                 fixed_lines.append(line)
                 continue
             if stripped.startswith('"index"') and not in_object:
-                indent = line[:len(line) - len(line.lstrip())]
+                indent = line[: len(line) - len(line.lstrip())]
                 fixed_lines.append(f"{indent}{{")
                 fixed_lines.append(line)
                 in_object = True
@@ -99,12 +98,12 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
         except Exception:
             pass
 
-        for start_char, end_char in (('[', ']'), ('{', '}')):
+        for start_char, end_char in (("[", "]"), ("{", "}")):
             start = candidate.find(start_char)
             end = candidate.rfind(end_char)
             if start != -1 and end != -1 and end > start:
                 try:
-                    parsed = json.loads(candidate[start:end + 1])
+                    parsed = json.loads(candidate[start : end + 1])
                     coerced = _coerce_list(parsed)
                     if coerced is not None:
                         return coerced
@@ -144,12 +143,14 @@ def _extract_json_list(output_str: str) -> List[Dict[str, Any]]:
 
 logger = logging.getLogger(__name__)
 
+
 # Multi-model VLM endpoint config: model at index i uses server at index i.
 # Configure via the VLM_MODELS / VLM_SERVER_IPS environment variables, each a
 # comma-separated list. The two must have the same length; see
 # examples/train_scripts/simuscene/test_vlm_as_judge_train.sh for an example.
 def _parse_csv_env(name: str) -> List[str]:
     return [item.strip() for item in os.getenv(name, "").split(",") if item.strip()]
+
 
 VLM_MODELS: List[str] = _parse_csv_env("VLM_MODELS")
 VLM_SERVER_IPS: List[str] = _parse_csv_env("VLM_SERVER_IPS")
@@ -266,12 +267,13 @@ def _build_api_model_spec(
 def _result_is_true(value: Any) -> bool:
     return str(value).strip().lower() == "true"
 
+
 def extract_vlm_questions_from_data(data: Dict[str, Any]) -> Tuple[str, str, List[Dict]]:
     """Extract VLM questions and summary from data
-    
+
     Args:
         data: Dictionary containing vlm_questions data
-        
+
     Returns:
         Tuple of (all_questions_str, summarize, questions_list)
     """
@@ -290,55 +292,54 @@ def extract_vlm_questions_from_data(data: Dict[str, Any]) -> Tuple[str, str, Lis
         return "", summarize, []
 
     questions_list = [q for q in questions_raw if isinstance(q, dict)]
-    all_questions = "\n".join(
-        f"{q.get('index', '')}. {q.get('question', '')}" for q in questions_list
-    ).strip()
+    all_questions = "\n".join(f"{q.get('index', '')}. {q.get('question', '')}" for q in questions_list).strip()
     logger.info("Extracted %d questions from VLM data", len(questions_list))
     return all_questions, summarize, questions_list
 
 
 def calculate_weighted_reward(results: List[Dict], questions_list: List[Dict]) -> float:
     """Calculate weighted reward based on VLM results and question weights
-    
+
     Args:
         results: List of VLM evaluation results
         questions_list: Original questions with weights
-        
+
     Returns:
         Weighted reward score between 0.0 and 1.0
     """
     if not results or not questions_list:
         return 0.0
-    
+
     # Create weight mapping
     weight_map = {}
     for q in questions_list:
         idx = str(q.get("index", ""))
         weight = float(q.get("weight", 1.0))
         weight_map[idx] = weight
-    
+
     scores = []
     weights = []
-    
+
     for result in results:
         idx = str(result.get("index", ""))
         result_value = str(result.get("result", "")).strip().lower()
-        
+
         # Get weight for this question
         weight = weight_map.get(idx, 1.0)
-        
+
         # Calculate score based on result
         if result_value == "true":
             score = 1.0
         else:
             score = 0.0
-        
+
         scores.append(score)
         weights.append(weight)
-    
+
     reward = sum(scores) / len(scores) if scores else 0.0
-    
+
     return reward
+
 
 def pass_fail_reward(results: List[Dict], questions_list: List[Dict]) -> float:
     """Calculate a binary pass/fail score from VLM results.
@@ -348,11 +349,7 @@ def pass_fail_reward(results: List[Dict], questions_list: List[Dict]) -> float:
     if not results or not questions_list:
         return 0.0
 
-    result_map = {
-        str(r.get("index", "")).strip(): r
-        for r in results
-        if str(r.get("index", "")).strip()
-    }
+    result_map = {str(r.get("index", "")).strip(): r for r in results if str(r.get("index", "")).strip()}
 
     for question in questions_list:
         idx = str(question.get("index", "")).strip()
@@ -377,11 +374,7 @@ def _all_true_pass(results: List[Dict], questions_list: List[Dict]) -> bool:
     if not results or not questions_list:
         return False
 
-    result_map = {
-        str(r.get("index", "")).strip(): r
-        for r in results
-        if str(r.get("index", "")).strip()
-    }
+    result_map = {str(r.get("index", "")).strip(): r for r in results if str(r.get("index", "")).strip()}
 
     for question in questions_list:
         idx = str(question.get("index", "")).strip()
@@ -406,11 +399,7 @@ def _true_rate(results: List[Dict], questions_list: List[Dict]) -> float:
     if not questions_list:
         return 0.0
 
-    result_map = {
-        str(r.get("index", "")).strip(): r
-        for r in results
-        if str(r.get("index", "")).strip()
-    }
+    result_map = {str(r.get("index", "")).strip(): r for r in results if str(r.get("index", "")).strip()}
 
     true_count = 0
     for question in questions_list:
@@ -519,7 +508,6 @@ def _format_model_label(model_result: Dict[str, Any]) -> str:
     if server_ip:
         return f"{model_name}@{server_ip}"
     return model_name
-
 
 
 def _calculate_vlm_per_model_stats(
@@ -694,9 +682,7 @@ def vlm_specs_from_globals() -> List[APIModelResourceSpec]:
         # TEMP (GLM replicas, revert after the LLM-judge run): an entry may list replicas of
         # the same model as "ip1|ip2|ip3"; each reward call picks one at random.
         replicas = [ip.strip() for ip in server_ip.split("|") if ip.strip()]
-        specs.append(
-            _build_api_model_spec(model=model_name.strip(), server_ip=random.choice(replicas))
-        )
+        specs.append(_build_api_model_spec(model=model_name.strip(), server_ip=random.choice(replicas)))
     return specs
 
 
@@ -871,12 +857,8 @@ def _build_multi_model_metrics(
         model_name = str(spec.model_name_or_path)
         result = model_results[idx] if idx < len(model_results) else {}
         metrics[f"model_pass@{model_name}"] = 1.0 if bool(result.get("passed")) else 0.0
-        metrics[f"model_response_success@{model_name}"] = (
-            1.0 if bool(result.get("response_success")) else 0.0
-        )
-        metrics[f"model_format_success@{model_name}"] = (
-            1.0 if bool(result.get("format_success")) else 0.0
-        )
+        metrics[f"model_response_success@{model_name}"] = 1.0 if bool(result.get("response_success")) else 0.0
+        metrics[f"model_format_success@{model_name}"] = 1.0 if bool(result.get("format_success")) else 0.0
     for threshold in range(1, model_count + 1):
         metrics[f"pass#{threshold}"] = 1.0 if pass_count >= threshold else 0.0
 
@@ -898,10 +880,7 @@ def _build_multi_model_metrics(
 
 @reward(name="vlm_as_judge_pass_reward")
 async def vlm_as_judge_pass_reward(
-    final_response: str, 
-    vlm_questions: Dict[str, Any] = None,
-    context: Optional[Context] = None,
-    **data_fields
+    final_response: str, vlm_questions: Dict[str, Any] = None, context: Optional[Context] = None, **data_fields
 ) -> Dict[str, float]:
     """Render the response's simulation code to a video and have VLM judges check it.
 
@@ -974,7 +953,6 @@ async def vlm_as_judge_pass_reward(
         _cleanup_video(video_path)
 
 
-
 @reward(name="vlm_as_judge_pass_reward_multi_model")
 async def vlm_as_judge_pass_reward_multi_model(
     final_response: str,
@@ -1042,6 +1020,7 @@ async def vlm_as_judge_pass_reward_multi_model(
         return metrics
     finally:
         _cleanup_video(video_path)
+
 
 def _per_question_vote(
     model_results: List[Dict[str, Any]],
@@ -1259,9 +1238,7 @@ async def llm_as_judge_pass_reward_multi_model(
                     logger.error("LLM judge evaluation failed: %s", r.get("error"))
             return _zero_llm_judge_metrics(model_specs, code_extracted)
 
-        metrics = _build_multi_model_metrics(
-            model_results, model_specs, _video_generation_metrics(code_extracted=True)
-        )
+        metrics = _build_multi_model_metrics(model_results, model_specs, _video_generation_metrics(code_extracted=True))
         for key in ("video_saved", "video_opened"):
             metrics.pop(key, None)
         labels = _per_question_vote(model_results, judge_questions)

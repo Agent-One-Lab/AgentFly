@@ -61,13 +61,12 @@ def _error(msg: str) -> str:
 def _ensure_loaded(context: Context, name: str):
     store = loaded_skills(context)
     if name not in store:
-        raise LookupError(
-            f"skill {name!r} is not loaded; call load_skill first"
-        )
+        raise LookupError(f"skill {name!r} is not loaded; call load_skill first")
     return store[name]
 
 
 # --- container mode: copy the skill into the task container, read/run there ---
+
 
 def _container_mode(context: Context) -> bool:
     """True when skills are delivered INSIDE the task container (the driver sets
@@ -82,7 +81,8 @@ async def _acquire_container(context: Context):
     if not image_id:
         raise LookupError("container-mode skills require context.metadata['image_id']")
     spec = ContainerResourceSpec(
-        category="container", image=image_id,
+        category="container",
+        image=image_id,
         docker_host=(context.metadata or {}).get("docker_host"),
     )
     return await context.acquire_resource(id=context.rollout_id, spec=spec)
@@ -112,12 +112,12 @@ async def _run_script_in_container(context, workdir, target, args, stdin, timeou
     timed_out)."""
     container = await _acquire_container(context)
     interp = _container_interpreter(target)
-    parts = ([interp, shlex.quote(target)] if interp else [shlex.quote(target)])
+    parts = [interp, shlex.quote(target)] if interp else [shlex.quote(target)]
     invocation = " ".join(parts + [shlex.quote(a) for a in args])
     if stdin:
         b64 = base64.b64encode(stdin.encode("utf-8")).decode("ascii")
         invocation = f"printf %s {shlex.quote(b64)} | base64 -d | {invocation}"
-    cmd = f"cd {shlex.quote(workdir)} && ( {invocation} ) 2>&1; echo \"__RC__$?\""
+    cmd = f'cd {shlex.quote(workdir)} && ( {invocation} ) 2>&1; echo "__RC__$?"'
     try:
         out = await container.run_cmd(cmd, timeout=timeout)
     except asyncio.TimeoutError:
@@ -125,7 +125,7 @@ async def _run_script_in_container(context, workdir, target, args, stdin, timeou
     idx = out.rfind("__RC__")
     if idx < 0:
         return out, -1, False
-    rc_tail = out[idx + len("__RC__"):].strip().splitlines()
+    rc_tail = out[idx + len("__RC__") :].strip().splitlines()
     try:
         rc = int(rc_tail[0]) if rc_tail else -1
     except ValueError:
@@ -164,8 +164,7 @@ async def load_skill(name: str, context: Context = None):
             await _stage_skill(context, container, dest, skill_dir)
         except Exception as exc:  # noqa: BLE001
             return _error(f"failed to stage skill into container: {exc}")
-        entry = {"dir": dest, "host_dir": str(skill_dir), "files": manifest,
-                 "version": version, "container": True}
+        entry = {"dir": dest, "host_dir": str(skill_dir), "files": manifest, "version": version, "container": True}
     loaded_skills(context)[name] = entry
 
     return json.dumps(
@@ -206,8 +205,7 @@ async def read_skill_file(skill: str, path: str, context: Context = None):
         target = f"{entry['dir']}/{rel}"
         try:
             container = await _acquire_container(context)
-            out = await container.run_cmd(
-                f"head -c {_MAX_FILE_BYTES + 1} -- {shlex.quote(target)}", timeout=60)
+            out = await container.run_cmd(f"head -c {_MAX_FILE_BYTES + 1} -- {shlex.quote(target)}", timeout=60)
         except Exception as exc:  # noqa: BLE001
             return _error(f"failed to read skill file from container: {exc}")
         truncated = len(out.encode("utf-8", "replace")) > _MAX_FILE_BYTES
@@ -296,7 +294,8 @@ async def run_skill_script(
         target = f"{entry['dir']}/{rel}"
         try:
             out, exit_code, timed_out = await _run_script_in_container(
-                context, entry["dir"], target, arg_list, stdin, timeout)
+                context, entry["dir"], target, arg_list, stdin, timeout
+            )
         except Exception as exc:  # noqa: BLE001
             return _error(f"failed to run skill script in container: {exc}")
         stdout_b, stderr_b = out.encode("utf-8", "replace"), b""

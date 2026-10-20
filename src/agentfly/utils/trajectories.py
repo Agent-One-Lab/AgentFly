@@ -88,9 +88,7 @@ def main(
 
         os.makedirs(output_dir, exist_ok=True)
         with open(
-            os.path.join(
-                output_dir, os.path.basename(model_name_or_path) + "_responses.json"
-            ),
+            os.path.join(output_dir, os.path.basename(model_name_or_path) + "_responses.json"),
             "w",
         ) as f:
             json.dump(responses, f, indent=2)

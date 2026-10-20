@@ -53,9 +53,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
                 try:
                     context_trigger_turns = int(env_turns)
                 except ValueError as exc:
-                    raise ValueError(
-                        f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}"
-                    ) from exc
+                    raise ValueError(f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}") from exc
         if context_trigger_turns is not None and context_trigger_turns < 1:
             raise ValueError("context_trigger_turns must be >= 1 when set")
 
@@ -132,9 +130,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
         ).strip()
 
         # If the model wrapped output in <summarize>...</summarize>, keep only inner text.
-        match = re.search(
-            r"<summarize>\s*(.*?)\s*</summarize>", text, re.IGNORECASE | re.DOTALL
-        )
+        match = re.search(r"<summarize>\s*(.*?)\s*</summarize>", text, re.IGNORECASE | re.DOTALL)
         if match:
             return match.group(1).strip()
 
@@ -205,7 +201,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
         if tool_name == "summarize":
             return True
         return super().validate_tool_call(tool_call)
-    
+
     async def execute_tool_call(
         self,
         context,

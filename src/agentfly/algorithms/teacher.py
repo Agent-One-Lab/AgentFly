@@ -96,9 +96,14 @@ class TeacherEndpoints:
         if raw["status"] == "ready" and not urls:
             raise ValueError(f"Teacher endpoints file {path} is ready but lists no urls")
         return cls(
-            name=str(raw["name"]), model=str(raw["model"]), max_model_len=int(raw["max_model_len"]),
-            status=raw["status"], urls=urls, revision=raw.get("revision"),
-            tp_size=int(raw.get("tp_size", 1)), dp_size=int(raw.get("dp_size", 1)),
+            name=str(raw["name"]),
+            model=str(raw["model"]),
+            max_model_len=int(raw["max_model_len"]),
+            status=raw["status"],
+            urls=urls,
+            revision=raw.get("revision"),
+            tp_size=int(raw.get("tp_size", 1)),
+            dp_size=int(raw.get("dp_size", 1)),
             slurm_job=None if raw.get("slurm_job") is None else str(raw["slurm_job"]),
             written_at=raw.get("written_at"),
         )
@@ -166,9 +171,7 @@ class TeacherClient:
 
     # ---- public API ------------------------------------------------------------------------
 
-    async def score(
-        self, sequences: Sequence[Sequence[int]], topk: int = 0
-    ) -> Tuple[List[np.ndarray], ScoreStats]:
+    async def score(self, sequences: Sequence[Sequence[int]], topk: int = 0) -> Tuple[List[np.ndarray], ScoreStats]:
         """Per-token log-probabilities for each sequence, in input order.
 
         Returns ``(logprobs, stats)`` where ``logprobs[k]`` is a float32 array of
@@ -247,9 +250,7 @@ class TeacherClient:
         stats.seconds = time.monotonic() - started
         return [results[unique[k]] for k in keys], stats
 
-    def score_blocking(
-        self, sequences: Sequence[Sequence[int]], topk: int = 0
-    ) -> Tuple[List[np.ndarray], ScoreStats]:
+    def score_blocking(self, sequences: Sequence[Sequence[int]], topk: int = 0) -> Tuple[List[np.ndarray], ScoreStats]:
         """Synchronous :meth:`score` on a private event loop (e.g. from a trainer worker thread)."""
         try:
             asyncio.get_running_loop()
@@ -267,8 +268,7 @@ class TeacherClient:
             )
         if self.expect_revision is not None and endpoints.revision != self.expect_revision:
             raise TeacherIdentityError(
-                f"teacher {endpoints.name!r} is at revision {endpoints.revision!r}, "
-                f"expected {self.expect_revision!r}"
+                f"teacher {endpoints.name!r} is at revision {endpoints.revision!r}, expected {self.expect_revision!r}"
             )
         return endpoints
 

@@ -95,9 +95,7 @@ def parse_docstring(docstring):
         description = "\n".join(line.strip() for line in lines)
         return {"description": description, "params": {}}
     else:
-        description = "\n".join(
-            line.strip() for line in lines[:param_section_index]
-        ).strip()
+        description = "\n".join(line.strip() for line in lines[:param_section_index]).strip()
 
     params = {}
     current_param = None
@@ -153,22 +151,16 @@ def validate_schema(name, description, signature, docs):
     docs_params = docs["params"]
     for param, param_info in docs_params.items():
         if param not in signature:
-            raise ValueError(
-                f"Parameter {param} in docstring not found in function signature."
-            )
+            raise ValueError(f"Parameter {param} in docstring not found in function signature.")
         if (
             ("type" in param_info and "type" in signature[param])
             and param_info["type"]
             and signature[param]["type"]
             and (param_info["type"] != signature[param]["type"])
         ):
-            raise ValueError(
-                f'Parameter {param} type mismatch: "{param_info["type"]}" != "{signature[param]["type"]}"'
-            )
+            raise ValueError(f'Parameter {param} type mismatch: "{param_info["type"]}" != "{signature[param]["type"]}"')
 
-    required_params = [
-        param for param in signature if "default" not in signature[param]
-    ]
+    required_params = [param for param in signature if "default" not in signature[param]]
     properties = {}
     for param in signature:
         properties[param] = {}
@@ -207,7 +199,12 @@ def validate_schema(name, description, signature, docs):
         # Safety net: any unmapped / unknown annotation becomes a string so
         # the emitted schema only ever uses valid JSON Schema types.
         if param_info.get("type") not in (
-            "string", "integer", "number", "boolean", "array", "object",
+            "string",
+            "integer",
+            "number",
+            "boolean",
+            "array",
+            "object",
         ):
             param_info["type"] = "string"
 

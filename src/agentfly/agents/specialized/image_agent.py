@@ -150,7 +150,8 @@ class ImageEditingAgent(BaseAgent):
             tools=tools,
             **kwargs,
         )
-# --8<-- [end:class_method_tool_init]
+
+    # --8<-- [end:class_method_tool_init]
 
     def store_image(self, image: Image.Image) -> str:
         """Store an image in the instance database and return its ID"""
@@ -178,9 +179,7 @@ class ImageEditingAgent(BaseAgent):
             if isinstance(response, dict):
                 response_text = response["response_text"]
                 if response["tool_calls"] and len(response["tool_calls"]) > 0:
-                    tool_calls = [
-                        response["tool_calls"][0]
-                    ]  # We only support one tool call for now
+                    tool_calls = [response["tool_calls"][0]]  # We only support one tool call for now
                 else:
                     tool_calls = []
                 new_messages_list.append(
@@ -228,9 +227,7 @@ class ImageEditingAgent(BaseAgent):
                     if content["type"] == "image":
                         image = open_image_from_any(content["image"])
                         image_id = self.store_image(image)
-                message["content"].insert(
-                    0, {"type": "text", "text": f"Image id: {image_id}"}
-                )
+                message["content"].insert(0, {"type": "text", "text": f"Image id: {image_id}"})
                 break
 
     async def run(self, messages: List[dict], **kwargs):
@@ -283,4 +280,5 @@ class ImageEditingAgent(BaseAgent):
 
         result = {"observation": f"Image Id: {new_image_id}", "image": image_base64}
         return result
+
     # --8<-- [end:class_method_tool_method]

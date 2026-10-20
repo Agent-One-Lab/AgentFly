@@ -72,7 +72,9 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
 
 
 @tool(name="read_file", max_length=10000)
-async def read_file(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, context: Context = None):
+async def read_file(
+    path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, context: Context = None
+):
     """
     Reads a file from the workspace with line numbers.
     Args:
@@ -84,9 +86,7 @@ async def read_file(path: str, start_line: Optional[int] = None, end_line: Optio
 
 
 @tool(name="edit_file", max_length=10000)
-async def edit_file(
-    path: str, search_block: str, replace_block: str, context: Context
-):
+async def edit_file(path: str, search_block: str, replace_block: str, context: Context):
     """
     Surgically replaces a block of text in a file. Only replaces the first occurrence of search_block.
     Args:
@@ -117,9 +117,7 @@ async def list_files(path: str = ".", max_depth: int = 3, context: Context = Non
 
 
 @tool(name="grep_search", max_length=10000)
-async def grep_search(
-    pattern: str, path: str = ".", include: str = "", context: Context = None
-):
+async def grep_search(pattern: str, path: str = ".", include: str = "", context: Context = None):
     """
     Search for a regex pattern across all files in a directory.
     Args:
@@ -127,9 +125,7 @@ async def grep_search(
         path: Directory to search in.
         include: Glob filter, e.g. "*.py" for Python files only.
     """
-    return await _run_file_tool(
-        context, "grep_search", {"pattern": pattern, "path": path, "include": include}
-    )
+    return await _run_file_tool(context, "grep_search", {"pattern": pattern, "path": path, "include": include})
 
 
 @tool(name="create_file", max_length=10000)
@@ -140,9 +136,7 @@ async def create_file(path: str, content: str = "", context: Context = None):
         path: Relative path for the new file.
         content: Initial file body (default empty).
     """
-    return await _run_file_tool(
-        context, "create_file", {"path": path, "content": content}
-    )
+    return await _run_file_tool(context, "create_file", {"path": path, "content": content})
 
 
 @tool(name="run_python", max_length=10000)
@@ -153,9 +147,7 @@ async def run_python(path: str, timeout: int = 60, context: Context = None):
         path: Relative path to a .py file inside the workspace.
         timeout: Max seconds for the subprocess (default 60).
     """
-    return await _run_file_tool(
-        context, "python", {"path": path, "timeout": timeout}
-    )
+    return await _run_file_tool(context, "python", {"path": path, "timeout": timeout})
 
 
 @tool(name="undo_edit", max_length=10000)

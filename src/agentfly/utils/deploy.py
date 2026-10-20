@@ -45,7 +45,7 @@ def vllm_serve(
         allowed_local_media_path_option = f"--allowed-local-media-path {allowed_local_media_path}"
     else:
         allowed_local_media_path_option = ""
-    
+
     if override_generation_config:
         # Quoted: the value is JSON (e.g. '{"temperature": 0.6}') and the command runs in a shell.
         override_generation_config_option = f"--override-generation-config {shlex.quote(override_generation_config)}"

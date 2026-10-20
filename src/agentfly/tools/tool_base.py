@@ -125,10 +125,7 @@ class BaseTool:
 
         # Use __dict__ to avoid triggering __getattr__ in metaclass
         if "_is_async_call" not in cls.__dict__:
-            user_func_is_async = (
-                self.user_func is not None
-                and inspect.iscoroutinefunction(self.user_func)
-            )
+            user_func_is_async = self.user_func is not None and inspect.iscoroutinefunction(self.user_func)
             cls._is_async_call = user_func_is_async
 
         # Auto-register the tool instance by default
@@ -148,9 +145,7 @@ class BaseTool:
             is_method = True
         return is_method, instance
 
-    def _initialize_from_function(
-        self, func: Callable, name: str | None = None, description: str | None = None
-    ):
+    def _initialize_from_function(self, func: Callable, name: str | None = None, description: str | None = None):
         """
         Initialize the tool from a function and extract schema.
         Sets class attributes if they don't exist, otherwise uses existing class attributes.
@@ -170,20 +165,11 @@ class BaseTool:
         cls = type(self)
 
         # Extract schema if not already set (check class attributes)
-        if (
-            "schema" not in cls.__dict__
-            or cls.schema is None
-            or "args" not in cls.__dict__
-            or cls.args is None
-        ):
+        if "schema" not in cls.__dict__ or cls.schema is None or "args" not in cls.__dict__ or cls.args is None:
             signature = extract_signatures(func)
             docs = parse_docstring(inspect.getdoc(func))
             final_name = name or getattr(cls, "name", None) or func.__name__
-            final_desc = (
-                description
-                or docs.get("summary", "")
-                or getattr(cls, "description", "")
-            )
+            final_desc = description or docs.get("summary", "") or getattr(cls, "description", "")
 
             validated_schema = validate_schema(final_name, final_desc, signature, docs)
 
@@ -350,9 +336,7 @@ class BaseTool:
 
     # ========== Registration ==========
     @classmethod
-    def register(
-        cls, tool_obj=None, name: str | None = None, auto_register: bool = True
-    ):
+    def register(cls, tool_obj=None, name: str | None = None, auto_register: bool = True):
         """
         Register a tool (class or instance) in the global tool registry.
 
@@ -464,8 +448,7 @@ async def submit_tool_call(
     # real name and list what is actually available, so the hint is actionable.
     if tool_name not in allowed_tool_names:
         return invalid_call(
-            f'Tool "{tool_name}" does not exist. '
-            f"Available tools: {', '.join(allowed_tool_names)}.",
+            f'Tool "{tool_name}" does not exist. Available tools: {", ".join(allowed_tool_names)}.',
             tool_input if isinstance(tool_input, dict) else {"raw": tool_input},
         )
 
@@ -502,8 +485,7 @@ async def submit_tool_call(
     if unknown:
         expected = ", ".join(tool_args.keys()) or "(none)"
         return invalid_call(
-            f'Unknown argument(s) {", ".join(unknown)} for tool "{tool_name}". '
-            f"Expected arguments: {expected}.",
+            f'Unknown argument(s) {", ".join(unknown)} for tool "{tool_name}". Expected arguments: {expected}.',
             dict(tool_input_json),
         )
 
@@ -539,6 +521,7 @@ if __name__ == "__main__":
             int: The sum of a and b.
         """
         return a + b
+
     # --8<-- [end:addition_tool_example]
 
     @tool(description="Concatenates two strings.")
@@ -577,6 +560,7 @@ if __name__ == "__main__":
             """
             # Use self.api_key here
             return f"Result for '{query}' using API key: {self.api_key[:5]}..."
+
     # --8<-- [end:api_tool_example]
 
     # Tool is automatically registered on initialization

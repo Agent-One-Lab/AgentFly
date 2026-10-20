@@ -109,9 +109,7 @@ def tool(
         tool_class_name = f"_Tool_{final_name}"
         tool_class = _CallableToolClass(
             tool_class_name,
-            (
-                BaseTool,
-            ),  # Inherit from Tool class - ensures isinstance(tool_class(), Tool) == True
+            (BaseTool,),  # Inherit from Tool class - ensures isinstance(tool_class(), Tool) == True
             {
                 "name": final_name,
                 "description": final_desc,

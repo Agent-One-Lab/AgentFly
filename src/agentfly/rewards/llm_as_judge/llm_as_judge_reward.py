@@ -6,9 +6,7 @@ from ..reward_base import reward
 
 
 @reward(name="llm_as_judge_reward")
-def llm_as_judge_reward(
-    prediction: str, golden_answer: str, llm_backend
-) -> Dict[str, float]:
+def llm_as_judge_reward(prediction: str, golden_answer: str, llm_backend) -> Dict[str, float]:
     """
     Reward function that uses an LLM as a judge to evaluate the quality of predictions.
 

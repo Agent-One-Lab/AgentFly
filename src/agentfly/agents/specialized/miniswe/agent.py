@@ -55,9 +55,7 @@ def _oneline(value: str) -> str:
 SKILL_HEADER_SINGLE = "A Skill is available for this task:"
 
 
-def render_skill_block(
-    skills: List[Dict[str, str]], root: str = SKILLS_ROOT, style: str = "multi"
-) -> str:
+def render_skill_block(skills: List[Dict[str, str]], root: str = SKILLS_ROOT, style: str = "multi") -> str:
     """Render the per-skill lines.
 
     ``style="multi"``: the current collection/eval format
@@ -77,8 +75,7 @@ def render_skill_block(
         description = _oneline(skill.get("description", ""))
         directory = _oneline(skill.get("directory") or skill.get("name") or "")
         lines.append(
-            f"- {name}: {description}\n"
-            f"{location_prefix}Location: {root}/{directory}/ (read its SKILL.md and follow it)"
+            f"- {name}: {description}\n{location_prefix}Location: {root}/{directory}/ (read its SKILL.md and follow it)"
         )
     return "\n".join(lines)
 
@@ -110,9 +107,7 @@ def build_system_prompt(
 def build_instance_message(task: str, system_information: str = "") -> str:
     """User turn: prefix + task VERBATIM (keep instruction.md's trailing
     newline) + separator + boilerplate with the container uname filled in."""
-    boilerplate = INSTANCE_BOILERPLATE.replace(
-        SYSTEM_INFORMATION_SENTINEL, system_information
-    )
+    boilerplate = INSTANCE_BOILERPLATE.replace(SYSTEM_INFORMATION_SENTINEL, system_information)
     return f"{INSTANCE_PREFIX}{task}{INSTANCE_SEPARATOR}{boilerplate}"
 
 

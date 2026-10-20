@@ -19,6 +19,7 @@ records. Each generation produces a :class:`~agentfly.agents.types.Segment`;
 the standalone training converter reads these segments and uses the internal
 ``trajectory.steps`` records for the corresponding environment signals.
 """
+
 import asyncio
 import json
 import logging
@@ -80,9 +81,7 @@ class StepRollout(Rollout):
         self.project_actions = project_actions
         self.history_length = history_length
         self.max_prompt_length = max_prompt_length
-        self.prompt_builder = resolve_prompt_builder(
-            prompt_builder, max_prompt_length=max_prompt_length
-        )
+        self.prompt_builder = resolve_prompt_builder(prompt_builder, max_prompt_length=max_prompt_length)
         self.agent = None
         # Rollout metric reporting (mirrors ChainRollout): emit agent/rollout/* to the
         # monitor once the whole rollout is drained.
@@ -138,23 +137,35 @@ class StepRollout(Rollout):
                 }
                 specs.append((traj_uid, uid, group_idx, chain_idx, task_messages, meta))
 
-        sem = (
-            asyncio.Semaphore(int(max_concurrent_chains))
-            if max_concurrent_chains is not None
-            else None
-        )
+        sem = asyncio.Semaphore(int(max_concurrent_chains)) if max_concurrent_chains is not None else None
 
         async def drive(spec) -> Trajectory:
             traj_uid, uid, group_idx, chain_idx, task_messages, meta = spec
             if sem is not None:
                 async with sem:
                     return await self._run_trajectory(
-                        agent, traj_uid, uid, group_idx, chain_idx, task_messages,
-                        meta, max_turns, generation_config, context_config,
+                        agent,
+                        traj_uid,
+                        uid,
+                        group_idx,
+                        chain_idx,
+                        task_messages,
+                        meta,
+                        max_turns,
+                        generation_config,
+                        context_config,
                     )
             return await self._run_trajectory(
-                agent, traj_uid, uid, group_idx, chain_idx, task_messages,
-                meta, max_turns, generation_config, context_config,
+                agent,
+                traj_uid,
+                uid,
+                group_idx,
+                chain_idx,
+                task_messages,
+                meta,
+                max_turns,
+                generation_config,
+                context_config,
             )
 
         results = await asyncio.gather(*(drive(s) for s in specs), return_exceptions=True)
@@ -216,8 +227,8 @@ class StepRollout(Rollout):
         # task_description — verl-agent uses goal_desc_human_anns_prob=0.0 (templated goals).
         initial_obs = context.metadata.get("_flat_initial_obs", "")
         task_description = (
-            context.metadata.get("_flat_task_description")      # set by the env hook (WebShop)
-            or self._extract_task(str(initial_obs))              # ALFWorld: "Your task is to: …"
+            context.metadata.get("_flat_task_description")  # set by the env hook (WebShop)
+            or self._extract_task(str(initial_obs))  # ALFWorld: "Your task is to: …"
             or meta.get("task_description", "")
         )
         current: Dict[str, Any] = {
@@ -255,8 +266,14 @@ class StepRollout(Rollout):
                 messages=Messages.from_turns(prompt_messages),
             )
             action_msg, _ = await generate_response(
-                agent, None, gen_step, tools, step, traj_uid,
-                generation_config, context,
+                agent,
+                None,
+                gen_step,
+                tools,
+                step,
+                traj_uid,
+                generation_config,
+                context,
                 use_token_ids=self.use_token_ids,
             )
             full_messages.append(action_msg)
@@ -284,8 +301,7 @@ class StepRollout(Rollout):
                 control = self.on_no_tool_call
                 if control == CONTROL_RAISE:
                     raise RuntimeError(
-                        "Model produced no tool call and on_no_tool_call='raise': "
-                        f"{self._message_text(action_msg)!r}"
+                        f"Model produced no tool call and on_no_tool_call='raise': {self._message_text(action_msg)!r}"
                     )
                 if control == CONTROL_END:
                     finish_reason = FinishReason.NO_TOOL_CALLS
@@ -303,8 +319,13 @@ class StepRollout(Rollout):
 
             tool_call = tool_calls[0]
             result = await agent.execute_tool_call(
-                context, tool_call, Messages.from_turns(prompt_messages),
-                None, traj_uid, step, have_set_resources,
+                context,
+                tool_call,
+                Messages.from_turns(prompt_messages),
+                None,
+                traj_uid,
+                step,
+                have_set_resources,
             )
             have_set_resources = True
 
@@ -330,13 +351,15 @@ class StepRollout(Rollout):
 
             # Record the just-acted step into history (pre-action obs + the action taken),
             # then advance ``current`` to the resulting state.
-            history.append({
-                "raw_obs": current["raw_obs"],
-                "obs": current["obs"],
-                "response": self._message_text(action_msg),   # full text (chat window)
-                "action": self._extract_action(tool_call),     # clean action (flat builder)
-                "admissible": current["admissible"],
-            })
+            history.append(
+                {
+                    "raw_obs": current["raw_obs"],
+                    "obs": current["obs"],
+                    "response": self._message_text(action_msg),  # full text (chat window)
+                    "action": self._extract_action(tool_call),  # clean action (flat builder)
+                    "admissible": current["admissible"],
+                }
+            )
             current = {
                 "raw_obs": result.anchor if result.anchor is not None else obs_text,
                 "obs": obs_text,
@@ -377,10 +400,7 @@ class StepRollout(Rollout):
         # (The episode reward above used ``full_messages``; segments are the training
         # units.)
         return Trajectory(
-            segments=(
-                [Segment(messages=s.messages.messages) for s in steps]
-                if steps else [Segment(messages=[])]
-            ),
+            segments=([Segment(messages=s.messages.messages) for s in steps] if steps else [Segment(messages=[])]),
             reward=outcome,
             metrics=reward_extras,
             group_id=uid,
@@ -409,7 +429,7 @@ class StepRollout(Rollout):
         """
         marker = "Your task is to: "
         i = obs.find(marker)
-        return obs[i + len(marker):].strip() if i != -1 else ""
+        return obs[i + len(marker) :].strip() if i != -1 else ""
 
     @staticmethod
     def _extract_action(tool_call) -> str:

@@ -40,7 +40,6 @@ def open_image_from_any(src: str | Image.Image, *, timeout: int = 10) -> Image.I
         resp.raise_for_status()
         return Image.open(io.BytesIO(resp.content))
 
-
     # 2) Detect a base-64 string ------------------------------------------------------
     #    • data-URI style:  "data:image/png;base64,……"
     #    • bare base-64    :  "iVBORw0KGgoAAAANSUhEUgAABVYA…"

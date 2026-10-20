@@ -100,6 +100,7 @@ class SnapshotUnavailable(RuntimeError):
 @dataclass
 class DaytonaExecResult:
     """docker-py / enroot ExecResult-compatible: (exit_code, output)."""
+
     exit_code: int
     output: bytes
 
@@ -131,14 +132,9 @@ def daytona_client() -> Any:
         try:
             from daytona import Daytona, DaytonaConfig
         except ImportError as e:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "The daytona engine requires the Daytona SDK: pip install daytona"
-            ) from e
+            raise RuntimeError("The daytona engine requires the Daytona SDK: pip install daytona") from e
         if not os.environ.get("DAYTONA_API_KEY"):
-            raise RuntimeError(
-                "DAYTONA_API_KEY is not set — the daytona container engine "
-                "cannot authenticate."
-            )
+            raise RuntimeError("DAYTONA_API_KEY is not set — the daytona container engine cannot authenticate.")
         kwargs: Dict[str, Any] = {"api_key": os.environ["DAYTONA_API_KEY"]}
         if os.environ.get("DAYTONA_API_URL"):
             kwargs["api_url"] = os.environ["DAYTONA_API_URL"]
@@ -149,6 +145,7 @@ def daytona_client() -> Any:
 
 
 # --- resources --------------------------------------------------------------
+
 
 def _parse_mem_gb(mem_limit: Optional[Union[str, int]]) -> Optional[int]:
     """Docker-style ``mem_limit`` -> whole GiB (rounded up), or None.
@@ -165,16 +162,16 @@ def _parse_mem_gb(mem_limit: Optional[Union[str, int]]) -> Optional[int]:
         s = str(mem_limit).strip().lower()
         mult = 1.0
         if s.endswith("g") or s.endswith("gb"):
-            mult, s = 1024 ** 3, s.rstrip("b").rstrip("g")
+            mult, s = 1024**3, s.rstrip("b").rstrip("g")
         elif s.endswith("m") or s.endswith("mb"):
-            mult, s = 1024 ** 2, s.rstrip("b").rstrip("m")
+            mult, s = 1024**2, s.rstrip("b").rstrip("m")
         elif s.endswith("k") or s.endswith("kb"):
             mult, s = 1024, s.rstrip("b").rstrip("k")
         try:
             byts = float(s) * mult
         except ValueError:
             return None
-    return max(1, int(-(-byts // (1024 ** 3))))
+    return max(1, int(-(-byts // (1024**3))))
 
 
 def _resources_for(spec: Optional[ContainerResourceSpec]) -> Any:
@@ -192,14 +189,12 @@ def _resources_for(spec: Optional[ContainerResourceSpec]) -> Any:
     mem_gb = _parse_mem_gb(getattr(spec, "mem_limit", None) if spec else None)
     if mem_gb:
         if mem_gb > tuning.max_memory_gb:
-            logger.warning("daytona: clamping memory %sGiB -> %sGiB",
-                           mem_gb, tuning.max_memory_gb)
+            logger.warning("daytona: clamping memory %sGiB -> %sGiB", mem_gb, tuning.max_memory_gb)
         kwargs["memory"] = min(mem_gb, tuning.max_memory_gb)
     disk_gb = getattr(spec, "disk_gb", None) if spec else None
     if disk_gb:
         if int(disk_gb) > tuning.max_disk_gb:
-            logger.warning("daytona: clamping disk %sGiB -> %sGiB",
-                           int(disk_gb), tuning.max_disk_gb)
+            logger.warning("daytona: clamping disk %sGiB -> %sGiB", int(disk_gb), tuning.max_disk_gb)
         kwargs["disk"] = min(int(disk_gb), tuning.max_disk_gb)
     gpus = getattr(spec, "gpus", None) if spec else None
     if gpus:
@@ -213,6 +208,7 @@ def _resources_for(spec: Optional[ContainerResourceSpec]) -> Any:
 
 
 # --- image / snapshot -------------------------------------------------------
+
 
 def _context_digest(dockerfile: str, build_context: Optional[str]) -> str:
     """Stable hash of the Dockerfile plus every file it could COPY in.
@@ -263,8 +259,9 @@ def _image_from(dockerfile: str, build_context: Optional[str]) -> Any:
 
     tmp = tempfile.mkdtemp(prefix="agentfly-daytona-ctx-")
     if build_context and os.path.isdir(build_context):
-        shutil.copytree(build_context, tmp, dirs_exist_ok=True, symlinks=True,
-                        ignore=_IGNORE_CONTEXT, ignore_dangling_symlinks=True)
+        shutil.copytree(
+            build_context, tmp, dirs_exist_ok=True, symlinks=True, ignore=_IGNORE_CONTEXT, ignore_dangling_symlinks=True
+        )
     df_path = os.path.join(tmp, "Dockerfile")
     with open(df_path, "w", encoding="utf-8") as f:
         f.write(dockerfile if dockerfile.endswith("\n") else dockerfile + "\n")
@@ -306,9 +303,13 @@ def _wait_active(client: Any, name: str, timeout: float) -> bool:
     return False
 
 
-def ensure_snapshot(dockerfile: str, build_context: Optional[str] = None,
-                    *, resources: Any = None,
-                    timeout: float = _DEFAULT_DAYTONA.snapshot_build_timeout) -> str:
+def ensure_snapshot(
+    dockerfile: str,
+    build_context: Optional[str] = None,
+    *,
+    resources: Any = None,
+    timeout: float = _DEFAULT_DAYTONA.snapshot_build_timeout,
+) -> str:
     """Build-once/reuse a snapshot for ``dockerfile`` and return its name.
 
     Idempotent and safe to call concurrently from many rollouts: an existing
@@ -343,8 +344,7 @@ def ensure_snapshot(dockerfile: str, build_context: Optional[str] = None,
         try:
             client.snapshot.create(
                 CreateSnapshotParams(name=name, image=image, resources=resources),
-                on_logs=lambda chunk: logger.debug("daytona build %s: %s",
-                                                   name, chunk.rstrip()),
+                on_logs=lambda chunk: logger.debug("daytona build %s: %s", name, chunk.rstrip()),
                 timeout=timeout,
             )
         except Exception as e:  # noqa: BLE001
@@ -354,8 +354,7 @@ def ensure_snapshot(dockerfile: str, build_context: Optional[str] = None,
             if "already exists" in msg or "conflict" in msg:
                 if _wait_active(client, name, timeout):
                     return name
-            if ("access denied" in msg or "forbidden" in msg
-                    or "unauthorized" in msg or "permission" in msg):
+            if "access denied" in msg or "forbidden" in msg or "unauthorized" in msg or "permission" in msg:
                 raise SnapshotUnavailable(str(e)) from e
             raise RuntimeError(f"daytona snapshot build failed for {name}: {e}") from e
         finally:
@@ -368,12 +367,13 @@ def ensure_snapshot(dockerfile: str, build_context: Optional[str] = None,
 
 # --- start ------------------------------------------------------------------
 
+
 def _delete_by_name_label(client: Any, cname: str) -> int:
     """Delete sandboxes tagged with our ``agentfly.name`` label. Best-effort."""
     try:
         from daytona import ListSandboxesQuery
-        stale = list(client.list(ListSandboxesQuery(
-            labels={**_MANAGED_LABEL, "agentfly.name": cname})))
+
+        stale = list(client.list(ListSandboxesQuery(labels={**_MANAGED_LABEL, "agentfly.name": cname})))
     except Exception as e:  # noqa: BLE001
         logger.debug("daytona: could not list sandboxes for %s: %s", cname, e)
         return 0
@@ -434,12 +434,12 @@ def start_daytona_container(
     build_context = getattr(spec, "build_context", None) if spec else None
 
     with _snapshots_denied_lock:
-        try_snapshot = (dockerfile and tuning.snapshots != "off"
-                        and not _snapshots_denied)
+        try_snapshot = dockerfile and tuning.snapshots != "off" and not _snapshots_denied
     if not snapshot and try_snapshot:
         try:
-            snapshot = ensure_snapshot(dockerfile, build_context, resources=resources,
-                                       timeout=tuning.snapshot_build_timeout)
+            snapshot = ensure_snapshot(
+                dockerfile, build_context, resources=resources, timeout=tuning.snapshot_build_timeout
+            )
         except SnapshotUnavailable as e:
             if tuning.snapshots == "on":
                 raise
@@ -451,7 +451,9 @@ def start_daytona_container(
                     "daytona: snapshot registration denied (%s) — falling back to a "
                     "declarative per-sandbox build for the rest of this run. Images "
                     "will be rebuilt per container; grant snapshot write scope to "
-                    "this API key to get build-once reuse.", e)
+                    "this API key to get build-once reuse.",
+                    e,
+                )
     if not snapshot and image and _snapshot_state(client, image) == "active":
         snapshot = image
 
@@ -462,23 +464,17 @@ def start_daytona_container(
         # Declarative build: the Dockerfile + context are shipped with the
         # create call and built server-side, per sandbox.
         built, ctx_dir = _image_from(dockerfile, build_context)
-        params = CreateSandboxFromImageParams(
-            image=built, resources=resources, **common)
+        params = CreateSandboxFromImageParams(image=built, resources=resources, **common)
     else:
         if not image:
-            raise ValueError(
-                "daytona engine needs one of spec.snapshot, spec.dockerfile, "
-                "or image"
-            )
-        params = CreateSandboxFromImageParams(
-            image=image, resources=resources, **common)
+            raise ValueError("daytona engine needs one of spec.snapshot, spec.dockerfile, or image")
+        params = CreateSandboxFromImageParams(image=image, resources=resources, **common)
 
     try:
         sandbox = client.create(
             params,
             timeout=create_timeout,
-            on_snapshot_create_logs=lambda chunk: logger.debug(
-                "daytona build %s: %s", cname, chunk.rstrip()),
+            on_snapshot_create_logs=lambda chunk: logger.debug("daytona build %s: %s", cname, chunk.rstrip()),
         )
     except BaseException:
         # A create that fails DURING the build still leaves a sandbox record
@@ -493,8 +489,7 @@ def start_daytona_container(
         if ctx_dir:
             shutil.rmtree(ctx_dir, ignore_errors=True)
 
-    c = DaytonaContainer(cname, sandbox=sandbox, image=snapshot or image,
-                         workdir=workdir, spec=spec)
+    c = DaytonaContainer(cname, sandbox=sandbox, image=snapshot or image, workdir=workdir, spec=spec)
     try:
         c.reload()
         if workdir:
@@ -505,13 +500,13 @@ def start_daytona_container(
             if not os.path.exists(src):
                 continue
             if ":" in dest_spec and "ro" in dest_spec.split(":", 1)[1]:
-                logger.debug("daytona: mount %s is ro in spec; uploaded rw "
-                             "(no bind mounts on Daytona)", dest)
+                logger.debug("daytona: mount %s is ro in spec; uploaded rw (no bind mounts on Daytona)", dest)
             c.copy_to(src, dest)
         if ports:
             logger.warning(
-                "daytona: host port mapping %s ignored — use preview_link(port) "
-                "for external access to a sandbox port", sorted(ports))
+                "daytona: host port mapping %s ignored — use preview_link(port) for external access to a sandbox port",
+                sorted(ports),
+            )
     except BaseException:
         # Never leak a sandbox on a partially-failed start: the engine drops the
         # id on failure and would otherwise have no handle left to delete it.
@@ -531,9 +526,14 @@ class DaytonaContainer(ContainerResource):
     the handle methods below.
     """
 
-    def __init__(self, name: str, sandbox: Any, image: Optional[str] = None,
-                 workdir: Optional[str] = None,
-                 spec: Optional[ContainerResourceSpec] = None):
+    def __init__(
+        self,
+        name: str,
+        sandbox: Any,
+        image: Optional[str] = None,
+        workdir: Optional[str] = None,
+        spec: Optional[ContainerResourceSpec] = None,
+    ):
         self.name = name
         self.sandbox = sandbox
         self.image = image
@@ -579,8 +579,7 @@ class DaytonaContainer(ContainerResource):
         try:
             self.sandbox.delete()
         except Exception as e:  # noqa: BLE001 - teardown must never raise
-            logger.warning("daytona: failed to delete sandbox %s: %s",
-                           self.sandbox_id, e)
+            logger.warning("daytona: failed to delete sandbox %s: %s", self.sandbox_id, e)
 
     async def kill_async(self, timeout: int = 10, **_) -> None:
         await asyncio.to_thread(self.kill)
@@ -596,8 +595,7 @@ class DaytonaContainer(ContainerResource):
 
     # ---- exec -----------------------------------------------------------
 
-    def _exec(self, cmd: Union[str, List[str]], workdir, user,
-              environment, timeout) -> DaytonaExecResult:
+    def _exec(self, cmd: Union[str, List[str]], workdir, user, environment, timeout) -> DaytonaExecResult:
         command = cmd if isinstance(cmd, str) else shlex.join(cmd)
         if user:
             # No per-exec user flag on Daytona; drop privileges the way the
@@ -616,8 +614,7 @@ class DaytonaContainer(ContainerResource):
         except Exception as e:  # noqa: BLE001
             msg = str(e).lower()
             if timeout is not None and ("timeout" in msg or "timed out" in msg):
-                raise asyncio.TimeoutError(
-                    f"daytona exec timed out after {timeout}s") from e
+                raise asyncio.TimeoutError(f"daytona exec timed out after {timeout}s") from e
             raise
         out = getattr(res, "result", None)
         if out is None:
@@ -641,9 +638,7 @@ class DaytonaContainer(ContainerResource):
         timeout: Optional[float] = None,
         **_,
     ) -> DaytonaExecResult:
-        return await asyncio.to_thread(
-            self._exec, cmd, workdir, user, environment, timeout
-        )
+        return await asyncio.to_thread(self._exec, cmd, workdir, user, environment, timeout)
 
     def exec_run(
         self,
@@ -658,8 +653,7 @@ class DaytonaContainer(ContainerResource):
 
     # ---- copy (mirror enroot Container.put_archive / copy_to) ------------
 
-    def put_archive(self, path: str, data: Union[bytes, Any],
-                    timeout: float = 300) -> bool:
+    def put_archive(self, path: str, data: Union[bytes, Any], timeout: float = 300) -> bool:
         """Extract a tar archive into the sandbox at ``path``.
 
         Daytona has no ``docker cp``; the tar is uploaded to a temp file and
@@ -674,15 +668,16 @@ class DaytonaContainer(ContainerResource):
             f"mkdir -p {shlex.quote(path)} && "
             f"tar -xf {shlex.quote(remote_tar)} -C {shlex.quote(path)} && "
             f"rm -f {shlex.quote(remote_tar)}",
-            None, None, None, timeout,
+            None,
+            None,
+            None,
+            timeout,
         )
         if res.exit_code != 0:
-            logger.warning("daytona: put_archive into %s failed: %s",
-                           path, res.output.decode(errors="replace")[-500:])
+            logger.warning("daytona: put_archive into %s failed: %s", path, res.output.decode(errors="replace")[-500:])
         return res.exit_code == 0
 
-    def copy_to(self, local_path: str, container_path: str,
-                timeout: float = 300) -> None:
+    def copy_to(self, local_path: str, container_path: str, timeout: float = 300) -> None:
         """Copy a local file/dir into the sandbox.
 
         Mirrors enroot/docker ``copy_to``: for a directory, its CONTENTS are
@@ -692,19 +687,17 @@ class DaytonaContainer(ContainerResource):
         if os.path.isdir(local_path):
             tar_cmd = ["tar", "-C", local_path, "-cf", "-", "."]
         else:
-            tar_cmd = ["tar", "-C", os.path.dirname(local_path), "-cf", "-",
-                       os.path.basename(local_path)]
-        p = subprocess.run(tar_cmd, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, check=True)
+            tar_cmd = ["tar", "-C", os.path.dirname(local_path), "-cf", "-", os.path.basename(local_path)]
+        p = subprocess.run(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         if not self.put_archive(container_path, p.stdout, timeout=timeout):
             raise RuntimeError(f"copy_to failed: {self.name}:{container_path}")
 
-    async def copy_to_async(self, local_path: str, container_path: str,
-                            timeout: float = 300) -> None:
+    async def copy_to_async(self, local_path: str, container_path: str, timeout: float = 300) -> None:
         await asyncio.to_thread(self.copy_to, local_path, container_path, timeout)
 
 
 # --- housekeeping -----------------------------------------------------------
+
 
 def reap_stale_sandboxes(max_age_min: int = 180) -> int:
     """Delete our own sandboxes older than ``max_age_min``; return the count.
@@ -737,8 +730,7 @@ def reap_stale_sandboxes(max_age_min: int = 180) -> int:
             sb.delete()
             deleted += 1
         except Exception as e:  # noqa: BLE001
-            logger.debug("daytona: reap failed for %s: %s",
-                         getattr(sb, "id", "?"), e)
+            logger.debug("daytona: reap failed for %s: %s", getattr(sb, "id", "?"), e)
     if deleted:
         logger.info("daytona: reaped %d stale sandboxes", deleted)
     return deleted
