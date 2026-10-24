@@ -391,7 +391,20 @@ class DockerContainer(ContainerResource):
         """
         local_path = os.path.abspath(local_path)
         if os.path.isdir(local_path):
-            tar_cmd = ["tar", "-C", local_path, "-cf", "-", "."]
+            # The daemon rejects the WHOLE archive when one symlink points outside the destination
+            # ('invalid symlink ... -> ../../x'), leaving e.g. a skill dir empty (2026-10-11,
+            # oaustegard/claude-skills/exploring-data). Leave out dangling/escaping symlinks only.
+            root = os.path.realpath(local_path)
+            skip = []
+            for dp, dns, fns in os.walk(local_path):
+                for x in dns + fns:
+                    p = os.path.join(dp, x)
+                    if os.path.islink(p):
+                        t = os.path.realpath(p)
+                        if not os.path.exists(p) or not (t == root or t.startswith(root + os.sep)):
+                            skip.append("./" + os.path.relpath(p, local_path))
+            excl = ["--anchored", "--no-wildcards"] + [f"--exclude={x}" for x in skip] if skip else []
+            tar_cmd = ["tar", "-C", local_path] + excl + ["-cf", "-", "."]
         else:
             tar_cmd = ["tar", "-C", os.path.dirname(local_path), "-cf", "-",
                        os.path.basename(local_path)]

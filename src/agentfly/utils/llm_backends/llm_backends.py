@@ -642,6 +642,17 @@ class AsyncVerlBackend(LLMBackend):
         return response_texts
 
 
+def _keepalive_socket_options():
+    """SO_KEEPALIVE with a 60s idle / 30s interval / 5 probes (where supported)."""
+    import socket
+    options = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+    for name, value in (("TCP_KEEPIDLE", 60), ("TCP_KEEPINTVL", 30),
+                        ("TCP_KEEPCNT", 5)):
+        if hasattr(socket, name):
+            options.append((socket.IPPROTO_TCP, getattr(socket, name), value))
+    return options
+
+
 class ClientBackend(LLMBackend):
     """OpenAI-compatible and Google Gemini client backend for remote API inference.
 
@@ -687,7 +698,22 @@ class ClientBackend(LLMBackend):
         else:
             import openai  # lazy: heavy import
 
-            self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
+            # TCP keepalive on every connection. A turn with a huge context can
+            # sit in PREFILL for minutes before its first token; a NAT / load
+            # balancer on the path (Azure SNAT idles out at ~4 min) then drops
+            # the mapping SILENTLY and the client waits on a half-open socket
+            # until the request timeout — observed: 15 builder conversations
+            # frozen for up to 26 min with zero bytes flowing while the server
+            # showed no connection at all. Keepalive probes keep the mapping
+            # alive, and turn a genuinely dead peer into a ReadError (retried
+            # below) within ~3.5 min instead of an hour.
+            self.client = openai.OpenAI(
+                base_url=base_url, api_key=api_key,
+                http_client=httpx.Client(
+                    transport=httpx.HTTPTransport(
+                        socket_options=_keepalive_socket_options(), retries=0),
+                    timeout=httpx.Timeout(3600.0, connect=30.0),
+                    follow_redirects=True))
 
         # --- rate limiting (token bucket, 1 r/s = 60 r/m)
         self._tokens = asyncio.Semaphore(max_requests_per_minute)
@@ -878,6 +904,19 @@ class ClientBackend(LLMBackend):
         """
         import openai  # lazy: heavy import (used in the except clauses below)
 
+        # A tool-less assistant turn is recorded with ``tool_calls: []``. vLLM
+        # accepts that, but OpenAI-strict servers (api.deepseek.com) reject the
+        # WHOLE request: "Invalid 'messages[N].tool_calls': empty array". That
+        # only surfaces when the run continues past such a turn
+        # (on_no_tool_call="continue"), i.e. right after a builder's final
+        # summary. Drop the empty field on the wire; the trajectory is untouched.
+        messages = [
+            ({k: v for k, v in m.items() if k != "tool_calls"}
+             if isinstance(m, dict) and "tool_calls" in m and not m["tool_calls"]
+             else m)
+            for m in messages
+        ]
+
         logger.debug(f"[ClientBackend] OpenAI model_name: {self.model_name}")
         logger.debug(f"[ClientBackend] OpenAI messages: {len(messages)}")
         logger.debug(f"[ClientBackend] OpenAI kwargs: {kwargs}")
@@ -948,11 +987,18 @@ class ClientBackend(LLMBackend):
 
         stream_kwargs = dict(kwargs)
         stream_kwargs["stream"] = True
+        # For a STREAM, httpx's read timeout is the gap between chunks, not the
+        # whole generation: a live stream sends a token every fraction of a
+        # second, so a long idle gap means the stream is dead -> APITimeoutError
+        # -> retried by the caller. (Default 900s leaves room for a long prefill.)
+        stream_timeout = httpx.Timeout(
+            float(self.timeout), connect=30.0,
+            read=float(os.environ.get("AF_STREAM_IDLE_TIMEOUT") or 900))
         try:
             stream = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                timeout=self.timeout,
+                timeout=stream_timeout,
                 stream_options={"include_usage": True},
                 **stream_kwargs,
             )
@@ -961,7 +1007,7 @@ class ClientBackend(LLMBackend):
             stream = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                timeout=self.timeout,
+                timeout=stream_timeout,
                 **stream_kwargs,
             )
 

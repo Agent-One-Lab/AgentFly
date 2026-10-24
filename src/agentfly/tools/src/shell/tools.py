@@ -29,6 +29,18 @@ _SHELL_COMMAND_FILTER = CommandFilter(
     ],
 )
 
+# Opt-in relaxed filter for TRUSTED authoring rollouts (context.metadata
+# ['shell_filter'] == "relaxed"): package installs, downloads, docker and
+# background processes are allowed — a task author must be able to try the tools
+# a task depends on and start local services. The destructive rules stay on.
+# Default (RL / untrusted policy rollouts) is unchanged.
+_DESTRUCTIVE_RULES = {"rm_rf_root", "fork_bomb", "dd_device", "mkfs",
+                      "stress_test", "crypto_mining"}
+_RELAXED_SHELL_COMMAND_FILTER = CommandFilter()
+_RELAXED_SHELL_COMMAND_FILTER.rules = [
+    r for r in _RELAXED_SHELL_COMMAND_FILTER.rules if r.name in _DESTRUCTIVE_RULES
+]
+
 
 def _log_enroot_memory(cmd: str, inner: Exception) -> None:
     logger.error(
@@ -62,7 +74,10 @@ async def _run_shell(context: Context, cmd: str) -> str:
     if not image_id:
         return "Error: context.metadata['image_id'] is required for shell tool."
 
-    allowed, block_reason = _SHELL_COMMAND_FILTER.check(cmd)
+    command_filter = (_RELAXED_SHELL_COMMAND_FILTER
+                      if context.metadata.get("shell_filter") == "relaxed"
+                      else _SHELL_COMMAND_FILTER)
+    allowed, block_reason = command_filter.check(cmd)
     if not allowed:
         return block_reason
 

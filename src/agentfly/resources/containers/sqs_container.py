@@ -58,6 +58,12 @@ _CREATE_BACKOFF_BASE = 10.0
 _CREATE_BACKOFF_MAX = 120.0
 
 
+
+# Arrival-order keys for STREAM chunks from a consumer that sends no seq_num.
+_UNSEQUENCED_BASE = 1 << 40
+# After STREAM_END, how long to wait for chunks that are still in flight.
+_STREAM_END_GRACE_SEC = 8.0
+
 def _cfg(spec: Any, name: str, env: str, default: Optional[str] = None) -> Optional[str]:
     val = getattr(spec, name, None) if spec is not None else None
     if not val:
@@ -266,12 +272,48 @@ class SqsTransport:
         req_id = msg["req_id"]
         self._sqs.send_message(QueueUrl=self.queue_url, MessageBody=json.dumps(msg))
 
-        parts: List[bytes] = []
+        # STREAM chunks carry a ``seq_num``. The reply channel is a STANDARD SQS
+        # queue: no ordering and at-least-once delivery, so chunks of a long
+        # output arrive out of order, duplicated, and sometimes AFTER the
+        # STREAM_END. Assemble by seq_num, drop duplicates, and when the end
+        # arrives with chunks still missing, wait a short grace period for them
+        # (then fall back to STREAM_END's own content, which the consumer fills
+        # with the full output). Appending in arrival order corrupted long exec
+        # results ("== test exit" before "== solve exit", truncated tails).
+        chunks: Dict[int, bytes] = {}
+        unsequenced = 0
+        end: Optional[dict] = None
+        end_deadline = 0.0
         status, last = 0, {}
         deadline = time.time() + timeout
+
+        def _missing() -> bool:
+            if not chunks:
+                return False
+            seqs = [k for k in chunks if k < _UNSEQUENCED_BASE]
+            if not seqs:
+                return False
+            last_seq = (end or {}).get("seq_num")
+            upper = last_seq if isinstance(last_seq, int) and last_seq > max(seqs) \
+                else max(seqs) + 1
+            return any(k not in chunks for k in range(min(min(seqs), 0), upper))
+
+        def _finish():
+            body = b"".join(chunks[k] for k in sorted(chunks))
+            tail = self._decode(end) if end else b""
+            if tail and tail.strip() not in (b"[EXIT]", b""):
+                # Authoritative full output: use it when chunks were lost (or
+                # none arrived); never APPEND it (that doubles every byte).
+                if not body or _missing():
+                    body = tail
+            return status, body, end
+
         while time.time() < deadline:
+            if end is not None and (not _missing() or time.time() >= end_deadline):
+                return _finish()
             resp = self._sqs.receive_message(
-                QueueUrl=self.channel, MaxNumberOfMessages=10, WaitTimeSeconds=10)
+                QueueUrl=self.channel, MaxNumberOfMessages=10,
+                WaitTimeSeconds=1 if end is not None else 10)
             for m in resp.get("Messages", []):
                 self._sqs.delete_message(QueueUrl=self.channel,
                                          ReceiptHandle=m["ReceiptHandle"])
@@ -285,20 +327,23 @@ class SqsTransport:
                 status = r.get("status_code") or status
                 kind = r.get("type")
                 if kind == "STREAM":
-                    chunk = self._decode(r)
-                    if chunk:
-                        parts.append(chunk)
+                    seq = r.get("seq_num")
+                    if not isinstance(seq, int):      # old consumer: keep arrival order
+                        seq = _UNSEQUENCED_BASE + unsequenced
+                        unsequenced += 1
+                    if seq not in chunks:             # at-least-once: drop duplicates
+                        chunks[seq] = self._decode(r) or b""
                     deadline = time.time() + timeout   # keepalive resets clock
                     continue
                 if kind == "STREAM_END":
-                    # STREAM_END's content is the consumer's end marker
-                    # ("[EXIT]"), not output — the real bytes came in the
-                    # STREAM chunks. Appending it corrupts every exec result.
-                    chunk = self._decode(r)
-                    if chunk and chunk.strip() not in (b"[EXIT]", b""):
-                        parts.append(chunk)
-                    return status, b"".join(parts), r
+                    # STREAM_END's content is the consumer's end marker ("[EXIT]")
+                    # or the full output as a fallback — see _finish().
+                    end = r
+                    end_deadline = time.time() + _STREAM_END_GRACE_SEC
+                    continue
                 return status, self._decode(r), r      # FULL
+        if end is not None:
+            return _finish()
         raise TimeoutError(f"[sqs] no reply for {method} {path} in {timeout}s")
 
     # -- docker-ish operations -------------------------------------------
