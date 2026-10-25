@@ -17,7 +17,12 @@ from enroot.errors import APIError, EnrootError
 from enroot.errors import TimeoutError as EnrootTimeoutError
 
 from .containers import ContainerResource
-from .containers.enroot_containers import enroot_container_name
+from .containers.enroot_containers import (
+    enroot_container_name,
+    record_container,
+    require_enroot,
+    start_background_sweep,
+)
 from .local_env_resource import LocalEnvResource
 from .models import APIModelResource, VLLMModelResource
 from .types import (
@@ -48,7 +53,10 @@ async def _start_enroot_container(
     :func:`~agentfly.resources.containers.enroot_containers.enroot_container_name`);
     the returned resource's ``resource_id`` is that container name.
     """
+    require_enroot()
+    start_background_sweep()  # once per process: remove containers whose owner process has ended
     name = enroot_container_name(resource_id)
+    record_container(name)  # before creating, so a crash right after still leaves a record
     image = spec.image or "ubuntu:22.04"
     timeout_sec = 1800.0 if timeout is None else timeout
     create_kwargs: Dict[str, Any] = {

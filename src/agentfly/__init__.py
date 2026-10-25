@@ -4,9 +4,8 @@ Importing the package sets up its per-user directories and container settings, e
 overridable with an environment variable of the same name:
 
 - ``AF_HOME`` (``~/.agentfly``): the root of AgentFly's state.
-- ``AF_CACHE_DIR`` / ``AF_DATA_DIR``: downloaded tool data, enroot images and datasets.
+- ``AF_CACHE_DIR`` / ``AF_DATA_DIR``: downloaded tool data and datasets.
 - ``AF_CONFIG_DIR``: user-editable config, seeded from the packaged defaults on first run.
-- ``ENROOT_HOME``: enroot's data directory (images under ``images/``).
 - ``AF_CONTAINER_HOME``: AgentFly's directory inside task containers (skills and tool helpers).
 
 The public API lives in the subpackages: :mod:`agentfly.agents`, :mod:`agentfly.tools`,
@@ -29,7 +28,13 @@ def configure_logging(level: str = "INFO") -> None:
     warnings by default. ``agentfly train`` calls this with ``"INFO"`` so training logs include the
     per-batch summaries; setting the ``AF_LOG_LEVEL`` environment variable does the same in every
     process that imports AgentFly (including Ray workers).
+
+    It also limits the ``httpx`` and ``huggingface_hub`` loggers to warnings, so a process whose
+    root logger is at INFO (e.g. with ``VERL_LOGGING_LEVEL=INFO``) does not print a line for every
+    Hugging Face file check.
     """
+    for name in ("httpx", "huggingface_hub"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     logger = logging.getLogger("agentfly")
     logger.setLevel(level.upper())
     if not any(getattr(h, "_agentfly", False) for h in logger.handlers):
@@ -78,16 +83,6 @@ def _seed_config_dir() -> None:
 
 
 _seed_config_dir()
-
-ENROOT_HOME = os.getenv("ENROOT_HOME", os.path.join(AF_CACHE_DIR, "enroot"))
-
-if not os.path.exists(os.path.join(ENROOT_HOME, "images")):
-    os.makedirs(os.path.join(ENROOT_HOME, "images"))
-
-if os.getenv("ENROOT_DEBUG", "0") == "1":
-    ENROOT_DEBUG = True
-else:
-    ENROOT_DEBUG = False
 
 
 # Container-side agentfly home: where skills + tool helpers are placed INSIDE the

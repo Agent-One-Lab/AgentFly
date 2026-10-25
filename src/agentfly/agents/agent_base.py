@@ -225,6 +225,23 @@ class BaseAgent(ABC):
         if tool_parser is not None and tool_parser_name is not None:
             raise ValueError("Cannot specify both tool_parser and tool_parser_name. Use only one.")
 
+        # Names and import references ("pkg.mod:tool") are resolved by AutoAgent and the training
+        # config; constructing an agent directly takes the objects themselves.
+        agent_cls = type(self).__name__
+        for t in tools or []:
+            if isinstance(t, str):
+                raise TypeError(
+                    f"{agent_cls}(tools=...) takes tool objects (e.g. `from agentfly.tools import calculator`); "
+                    f'got the string {t!r}. To use tool names or import references ("pkg.mod:tool"), '
+                    "build the agent with AutoAgent.from_config(...)."
+                )
+        if isinstance(reward_fn, str):
+            raise TypeError(
+                f"{agent_cls}(reward_fn=...) takes a reward object (e.g. a `@reward` function); got the string "
+                f"{reward_fn!r}. To use reward names or import references, build the agent with "
+                "AutoAgent.from_config(...) and reward_name."
+            )
+
     def _bind_method_tools(self, tools: List) -> List:
         """Give this agent its own instance of each ``@tool``-decorated method of its class.
 
@@ -247,33 +264,17 @@ class BaseAgent(ABC):
 
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         if isinstance(model_name_or_path, str):
-            # Backend params: all keys in backend_config except "backend". Optionally merge with default config.
+            # Backend params: all keys in backend_config except "backend", over the backend's defaults.
             config_kwargs = {k: v for k, v in self.backend_config.items() if k != "backend"}
             config_class = BACKEND_CONFIGS.get(backend)
-            if config_class:
-                try:
-                    default_instance = config_class()
-                    default_dict = {k: v for k, v in default_instance.__dict__.items() if not k.startswith("_")}
-                    default_dict.update(config_kwargs)
-                    config_kwargs = default_dict
-                except Exception:
-                    pass
-
-            # For async_vllm, prefer explicit kwargs like tensor/data parallel sizes over
-            # a default config's pre-built engine_args placeholder.
-            if backend == "async_vllm":
-                explicit_async_vllm_keys = {
-                    "tensor_parallel_size",
-                    "data_parallel_size",
-                    "pipeline_parallel_size",
-                    "max_model_len",
-                    "gpu_memory_utilization",
-                    "dtype",
-                    "quantization",
-                    "trust_remote_code",
-                }
-                if any(k in self.backend_config for k in explicit_async_vllm_keys):
-                    config_kwargs.pop("engine_args", None)
+            # async_vllm passes its keys straight to vLLM's AsyncEngineArgs, which has its own defaults.
+            # Building AsyncVLLMConfig() here would create a throwaway AsyncEngineArgs for vLLM's default
+            # model (and log about it) and would hide the user's keys behind that placeholder.
+            if config_class and backend != "async_vllm":
+                default_instance = config_class()
+                default_dict = {k: v for k, v in default_instance.__dict__.items() if not k.startswith("_")}
+                default_dict.update(config_kwargs)
+                config_kwargs = default_dict
 
             if backend == "async_vllm":
                 llm_engine = AsyncVLLMBackend(model_name_or_path, self.template, **config_kwargs)
@@ -557,28 +558,32 @@ class BaseAgent(ABC):
 
     def extract_final_response(self, messages: List[Dict[str, Any]]) -> str:
         """
-        Extract the final response text from a trajectory.
+        Extract the agent's final answer from a trajectory; rewards receive it as ``final_response``.
 
-        We scan messages in reverse order and take the last assistant/tool
-        message as the final response.
+        It is the output of a *finishing* tool (one declared with ``status="finish"`` or
+        ``"terminal"``, such as ``answer_math`` / ``answer_qa``) if the episode ended with one,
+        otherwise the text of the last assistant message. Results of ordinary tools (calculator,
+        search, code, ...) are never the answer: if the episode stopped right after one (for
+        example at ``max_turns``), the model's last message is graded, not the tool output.
         """
+        finishing_tools = {t.name for t in self.tools if getattr(t, "status", None) in ("finish", "terminal")}
         for msg in reversed(messages):
-            last_message_role = msg.get("role")
-            if last_message_role not in ("assistant", "tool"):
+            role = msg.get("role")
+            if role == "tool" and msg.get("tool_name") not in finishing_tools:
                 continue
-            content = msg.get("content") or []
-            if (
-                isinstance(content, list)
-                and content
-                and isinstance(content[0], dict)
-                and content[0].get("type") == "text"
-            ):
-                return content[0].get("text", "")
-            # Fallback: stringify first content part if structure is unexpected
+            if role not in ("assistant", "tool"):
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                return content
             if isinstance(content, list) and content:
+                if isinstance(content[0], dict) and content[0].get("type") == "text":
+                    return content[0].get("text", "")
+                # Fallback: stringify first content part if structure is unexpected
                 return str(content[0])
+            return ""
 
-        raise ValueError("No assistant or tool message found in trajectory when extracting final response.")
+        raise ValueError("No assistant message found in trajectory when extracting final response.")
 
     def parse(
         self,

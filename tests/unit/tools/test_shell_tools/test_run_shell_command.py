@@ -8,7 +8,6 @@ from agentfly.tools.src.shell.tools import run_shell_command
 IMAGE_ID = "swebench/swesmith.x86_64.andialbrecht_1776_sqlparse.e57923b3"
 
 
-@pytest.mark.skip(reason="enroot container-start anomaly for this case (image starts for pwd/ls but not echo); needs a dedicated container box to debug")
 @pytest.mark.asyncio
 async def test_run_shell_command_echo():
     context = Context(

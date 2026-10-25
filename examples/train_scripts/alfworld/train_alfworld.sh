@@ -8,8 +8,9 @@ num_chains=4  # More chains for better exploration
 mini_batch_size=$((train_batch_size * num_chains))
 max_model_len=8192
 kl_coef=0.01
-train_dataset="./data/rlhf/alfworld/alfworld_train_tasks_flat.json"
-eval_dataset="./data/rlhf/alfworld/alfworld_val_tasks.json"
+# Downloaded from Agent-One/AgentFly-Train on first use if missing.
+train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
+eval_dataset="./data/rlhf/alfworld/alfworld_valid_seen_tasks.json"
 tools="[alfworld_step]"
 reward_name="alfworld_episode_reward"
 adv_estimator=reinforce_plus_plus

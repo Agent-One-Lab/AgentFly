@@ -19,7 +19,7 @@ The ALFWorld reward system provides sparse, outcome-based evaluation for task co
 This example shows how the ALFWorld reward is used with a ReactAgent:
 
 ```python
-from agentfly.agents.react.react_agent import ReactAgent
+from agentfly.agents import ReactAgent
 from agentfly.rewards import alfworld_episode_reward
 
 from agentfly.tools.src.alfworld.tools import alfworld_step
@@ -42,7 +42,7 @@ react_agent = ReactAgent(
     "Qwen/Qwen2.5-7B-Instruct",
     tools=tools,
     reward_fn=alfworld_episode_reward,  # Reward function integrated
-    template="qwen-chat",
+    template="qwen2.5-no-system-tool",
     task_info=task_info,
     backend_config={"backend": "async_vllm"},
     debug=True

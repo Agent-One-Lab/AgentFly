@@ -15,6 +15,7 @@ from .enroot_containers import (
     ENROOT_CONTAINER_PREFIX,
     clear_agentfly_containers,
     enroot_container_name,
+    sweep_orphaned_containers,
 )
 
 # name -> submodule, imported on first access.
@@ -49,6 +50,7 @@ __all__ = [
     "ENROOT_CONTAINER_PREFIX",
     "clear_agentfly_containers",
     "enroot_container_name",
+    "sweep_orphaned_containers",
     "DaytonaContainer",
     "start_daytona_container",
     "ensure_snapshot",

@@ -491,15 +491,21 @@ def math_equal_reward(final_response: str, answer: str, **kwargs) -> float:
 
 
 @reward(name="math_equal_reward_tool")
-def math_equal_reward_tool(final_response: str, answer: str, trajectory: List[Dict]) -> float:
+def math_equal_reward_tool(final_response: str, answer: str, trajectory: List[Dict]) -> dict:
     """
     Calculate the reward for the agent's response based on the mathematical equality and tool usage.
     - 0.0 if no tool used
     - 0.1 if tool used but answer incorrect
     - 1.0 if tool used and answer correct
 
+    The answer is compared symbolically, and must be either inside ``\\boxed{...}`` or the
+    whole response (e.g. ``"72"``): an answer stated in prose ("She sold 72 clips.") counts as
+    incorrect, so ask for ``\\boxed{}`` in the system prompt. ``final_response`` is the model's
+    last message (or an answer tool's output), never a calculator result; see
+    :meth:`~agentfly.agents.BaseAgent.extract_final_response`.
+
     Args:
-        prediction (str): The agent's predicted answer
+        final_response (str): The agent's final answer
         answer (str): The correct answer
         trajectory (List[Dict]): The agent's conversation trajectory
 

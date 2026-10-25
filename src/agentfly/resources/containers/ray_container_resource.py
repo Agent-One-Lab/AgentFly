@@ -133,7 +133,7 @@ class _RayEnrootContainerActorBase:
     ):
         from enroot import from_env
 
-        from .enroot_containers import enroot_container_name
+        from .enroot_containers import enroot_container_name, record_container, require_enroot, start_background_sweep
 
         if spec.category != "container":
             raise ValueError(f"RayEnrootContainerActor supports only category 'container', got {spec.category!r}")
@@ -152,6 +152,9 @@ class _RayEnrootContainerActorBase:
             "environment": spec.environment or {},
             "mount": spec.mount or {},
         }
+        require_enroot()  # checked on the node the actor runs on
+        start_background_sweep()  # once per actor process, on this node
+        record_container(name)
         client = from_env()
         try:
             self._container = client.containers.create(image, **create_kwargs)
@@ -187,10 +190,13 @@ class _RayEnrootContainerActorBase:
 
     async def kill_container(self) -> None:
         if getattr(self, "_container", None) is not None:
+            from .enroot_containers import forget_container
+
             if hasattr(self._container, "kill_async"):
                 await self._container.kill_async()
             else:
                 self._container.kill()
+            forget_container(self._container.name)
             self._container = None
 
     async def copy_to(self, local_path: str, container_path: str, timeout: float = 300) -> None:

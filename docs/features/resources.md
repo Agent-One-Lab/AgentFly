@@ -52,6 +52,7 @@ without manually managing resource ids.
 Sharing behavior is determined by **spec + scope**:
 
 - Same rollout + same `ResourceSpec` + same scope -> shared resource instance.
+- Same rollout + different kinds of resource (e.g. two images, or an env and a model) -> separate instances. Without an explicit `id`, the first kind gets the rollout id and each other kind `<rollout id>-<hash>`; an explicit `id` reused for a different kind raises `ValueError`.
 - Different rollouts -> isolated resource instances by default.
 - Pool size and scaling are configured in the spec/engine, not in tool business logic.
 
@@ -84,14 +85,28 @@ should not instantiate container resources directly.
 
 Every enroot container AgentFly starts is named `agentfly-<resource id>` (or
 `agentfly-<random>` when no id is given), so AgentFly's containers are recognizable in
-`enroot list` next to anything else on the node. `agentfly train` uses that prefix to
-sweep leftovers before the trainer starts: a previous run that was killed (job time
-limit, OOM, lost Ray worker) never released its containers, and the sweep force-removes
-every `agentfly-*` container on the launching node
-(`enroot.clear_enroot_containers(prefix="agentfly-")`, enroot-py >= 0.1.2). It only sees the node it
-runs on; in a multi-node cluster each worker keeps its own leftovers. Set
-`AF_ENROOT_CLEANUP_ON_START=0` to skip the sweep, for example when two training jobs
-share a node.
+`enroot list` next to anything else on the node.
+
+### Container lifetime and cleanup
+
+Containers belong to the process's resource pool, not to an agent or a single `agent.run()`:
+when a rollout ends they go back to the pool, so later runs in the same process reuse them
+warm. They are ended when you call `await ResourceEngine.close()` (training does this when it
+finishes).
+
+If the process ends without that (a script that simply finishes, a crash, `kill -9`, a job time
+limit), its containers are orphaned. AgentFly keeps an owner record for each container it creates
+(under `$AF_CACHE_DIR/enroot/owners/`), and the next AgentFly process that starts a container on
+the same machine removes, in the background, the containers whose owner process has ended;
+`agentfly train` also does this before training starts. Containers of processes that are still
+running, containers made outside AgentFly (enroot-py or the enroot CLI directly), and containers
+it cannot judge (another machine, or a process inside a different container) are never touched,
+so this is safe on shared nodes. Set `AF_ENROOT_SWEEP=0` to keep orphans, for example to inspect
+one after a crash.
+
+Containers left by AgentFly versions before 0.2.0 have no owner record; remove them once with
+`agentfly.resources.containers.clear_agentfly_containers()`, which removes **every**
+`agentfly-*` container on the machine, so run it only when no other AgentFly job uses it.
 
 For API details, see:
 
@@ -113,7 +128,7 @@ The following are the same shape: a tool or reward declares a `Context` paramete
 Notes:
 
 - The tool takes `context: Context` as its second parameter; AgentFly injects this automatically during rollouts.
-- Same `(spec, scope)` pair within the same rollout returns the **same** resource instance, so subsequent calls see persistent variable state inside the sandbox.
+- Same `(spec, scope)` pair within the same rollout returns the **same** resource instance. (For `code_interpreter` this means the same container, but each call still runs in a fresh Python process, so variables don't carry over between calls.)
 
 ### Reward: sharing the rollout's sandbox
 

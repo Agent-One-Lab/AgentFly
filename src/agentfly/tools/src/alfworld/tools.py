@@ -46,7 +46,6 @@ def format_observation(observation: str, commands) -> str:
 @tool(
     name="alfworld_step",
     description="Take an action in the ALFWorld environment and return the resulting observation plus the admissible actions for the new state.",
-    stateful=True,
 )
 async def alfworld_step(action: str, context: Context):
     """

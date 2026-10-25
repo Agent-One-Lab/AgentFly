@@ -108,6 +108,7 @@ nav:
     - start/cli.md
     - start/configuration.md
     - start/build_your_own_task.md
+    - start/custom_environment.md
   - Features & Concepts:
     - features/system_architecture.md
     - features/agent_rollout.md

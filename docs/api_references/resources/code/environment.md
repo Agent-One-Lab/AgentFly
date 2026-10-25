@@ -19,17 +19,14 @@ Most users should not instantiate `PythonSandboxEnv` directly. Instead, acquire 
 - `Context.acquire_resource(spec=PythonSandboxSpec, scope=..., backend=...)`
 - tools/rewards during rollouts (recommended)
 
-## Security Features
+## Limits
 
-The environment implements multiple security layers:
+* **Own filesystem**: each environment runs in its own container (enroot by default)
+* **Per-call limits**: 10 s wall time, 8 CPU-seconds, 1 GiB memory
+* **Blocked modules**: `subprocess`, `multiprocessing`, `ctypes` and other process/system modules
+* **Fresh process per call**: no state carries over between `step` calls
 
-* **Container Isolation**: Each environment runs in a separate Docker container
-* **Read-only Filesystem**: Container filesystem is mounted read-only
-* **Capability Dropping**: All Linux capabilities are dropped (``cap_drop=["ALL"]``)
-* **Process Limits**: Limited to 256 processes (``pids_limit=256``)
-* **Resource Limits**: CPU and memory usage are strictly controlled
-* **Network Isolation**: Containers use isolated bridge networks
-* **Timeout Protection**: Execution timeouts prevent infinite loops
+It is not a security boundary (open network, runs as your user): see [Limits and isolation](index.md#limits-and-isolation).
 
 ## Usage Examples
 
@@ -73,17 +70,15 @@ except Exception:
     result = await env.step("print('Recovered!')")
 ```
 
-### State persistence within sessions:
+### No state between steps:
 
 ```python
-# Variables persist between steps
+# Each step is a fresh Python process
 await env.step("x = [1, 2, 3]")
-await env.step("x.append(4)")
-result = await env.step("print(x)")
-# Output: [1, 2, 3, 4]
-
-# Reset clears state
-await env.reset()
 result = await env.step("print(x)")
 # Output: NameError: name 'x' is not defined
+
+# Put everything a computation needs in one step
+result = await env.step("x = [1, 2, 3]\nx.append(4)\nprint(x)")
+# Output: [1, 2, 3, 4]
 ```

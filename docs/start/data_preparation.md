@@ -13,7 +13,7 @@ A dataset is a single JSON file holding a JSON array:
 ]
 ```
 
-Each item must be a dict. There is **no fixed schema** beyond a small set of conventional fields described below — anything extra you put in the dict becomes available to your tools and rewards.
+Each item must be a dict. There is **no fixed schema** beyond a small set of conventional fields described below — anything extra you put in the dict becomes available to your rewards (by parameter name) and tools (through `context.metadata`).
 
 ## Predefined Fields
 
@@ -21,14 +21,17 @@ These keys have special meaning to the rollout layer:
 
 | Field | Required | Purpose |
 |---|---|---|
-| `question` | usually | Forms the user turn. The rollout wraps it as `[{"role": "user", "content": question}]` if no explicit `messages` is provided. |
+| `question` | usually | Forms the user turn: `[{"role": "user", "content": question}]`. `prompt`, `instruction` or `problem` work too (the first present, in that order, wins). |
+| `image` | optional | Attached to that user turn (a path, bytes, base64 string or data URI); images over 1536×1536 pixels are downscaled. |
 | `messages` | optional | If supplied, replaces the auto-generated user turn. Use this when you need a pre-built multi-turn prompt or multi-modal content (text + images). |
 
-Everything else is freeform: any field you add to the dict is forwarded into the rollout context and made available to tools and rewards by **name match** (see *Additional Fields* below). Common conventional names like `answer` are not built-in — they work only because the reward functions in `agentfly.rewards` happen to declare matching parameter names.
+Training and `agent.run()` turn rows into prompts the same way (`agentfly.agents.utils.messages.row_to_messages`), so you can pass the rows of a training file straight to `agent.run(messages=rows)` to smoke-test it.
+
+Everything else is freeform: any field you add to the dict is kept as the rollout's metadata. Rewards receive it by **parameter name**, and tools read it from `context.metadata` (see *Additional Fields* below). Common conventional names like `answer` are not built-in — they work only because the reward functions in `agentfly.rewards` happen to declare matching parameter names.
 
 ## Additional Fields
 
-Beyond the predefined keys, you can add any task-specific fields you need. They flow through the rollout and get auto-injected into your tools and rewards if the function signature declares a parameter with the same name.
+Beyond the predefined keys, you can add any task-specific fields you need. They are kept as the rollout's metadata (`context.metadata`, and `trajectory.metadata` in the result). A reward receives a field when its signature declares a parameter with the same name; a tool reads it from `context.metadata`.
 
 For example, given:
 
@@ -48,7 +51,14 @@ async def my_webshop_reward(final_response: str, context: Context, task_id: int)
     ...
 ```
 
-will receive `task_id=111` automatically. The same applies to tools: any tool whose signature declares `price_upper: float` will get it injected.
+will receive `task_id=111` automatically. Tools work differently: their parameters are what the **model** fills in, so dataset fields are not passed by name. A tool that needs one declares a `context` parameter (hidden from the model) and reads it:
+
+```python
+@tool(name="search_products")
+async def search_products(query: str, context: Context) -> str:
+    price_upper = context.metadata.get("price_upper")  # 30.0 for the task above
+    ...
+```
 
 This is how task-specific configuration (golden moves in chess, environment task ids in ALFWorld, attribute lists in WebShop) reaches the reward and the tool layer without a global registry.
 
@@ -84,7 +94,7 @@ Used with `math_equal_reward_tool`, which reads `final_response` and `answer`.
 
 ### ALFWorld
 
-`data/rlhf/alfworld/alfworld_train_tasks_flat.json` — task ids that the env uses to load the right scenario:
+`data/rlhf/alfworld/alfworld_train_tasks.json` (3,553 tasks), with `alfworld_valid_seen_tasks.json` (140) and `alfworld_valid_unseen_tasks.json` (134) for validation. `agentfly train` downloads them from [`Agent-One/AgentFly-Train`](https://huggingface.co/datasets/Agent-One/AgentFly-Train) when missing. Each task names the scenario the env loads:
 
 ```json
 {
@@ -92,8 +102,10 @@ Used with `math_equal_reward_tool`, which reads `final_response` and `answer`.
     "answer": "...",
     "messages": [{"role": "user", "content": "..."}],
     "task_id": "trial_T20190907_203141_178191",
+    "split": "train",
     "task_description": "Put the pen on the wooden shelf",
-    "task_type": "pick_and_place_simple"
+    "task_type": "pick_and_place_simple",
+    "data_source": "alfworld_train.json"
 }
 ```
 
@@ -161,7 +173,7 @@ The tasks replay the goals verl-agent draws for its WebShop environment, so resu
 }
 ```
 
-The shell tool reads `image_id` and `git_commit_hash` from the rollout context's metadata to pick up the right container per task.
+The SWE tools read `image_id` from the rollout context's metadata to pick the task's container, and, when present, `git_commit_hash` (a commit or branch) to check out before the agent's first command. SWE-smith tasks set it to the task's bug branch (the `instance_id`).
 
 ## Multi-Modal Data
 

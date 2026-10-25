@@ -8,7 +8,7 @@
 | **Python** | 3.12.x — `pyproject.toml` enforces `>=3.12,<3.13`. Newer or older versions will fail to install. |
 | **GPU** | NVIDIA GPU(s) with CUDA. Required by vLLM and the verl trainer. The shipped `train_*.sh` scripts target 1 to 8 GPUs (`trainer.n_gpus_per_node=1` for `train_example.sh`, up to `=8` for the bigger tasks); per-GPU VRAM scales with model size (Qwen 3B fits comfortably on a single 80 GB card; 32B benefits from multi-GPU). |
 | **Sudo** | Needed once, to install **enroot** (used by `code_interpreter`, `alfworld`, `webshop`, `scienceworld`, and any container-backed tool). Skip if you only need the lighter tools (`calculator`, retrieval API, etc.). |
-| **Disk** | A few hundred GB headroom recommended: HuggingFace model weights, enroot images under `$AF_CACHE_DIR/enroot/`, and (for retrieval tasks) the Wikipedia corpus + FAISS index downloaded into `$AF_CACHE_DIR/data/search/` (~30 GB). Defaults live under `~/.agentfly/cache/`. |
+| **Disk** | A few hundred GB headroom recommended: HuggingFace model weights, enroot images under `$ENROOT_IMAGES_PATH` (default `~/.cache/enroot/images/`; SWE tasks need several TB, see [SWE Task Setup](../examples/swe.md)), and (for retrieval tasks) the Wikipedia corpus + FAISS index downloaded into `$AF_CACHE_DIR/data/search/` (~30 GB). Defaults live under `~/.agentfly/cache/`. |
 | **uv** | The reference setup uses [uv](https://docs.astral.sh/uv/) (`bash install.sh` installs it if missing). uv provisions Python 3.12, manages a project-local `.venv`, and installs from the committed `uv.lock`. |
 
 If you only want to **run** agents — no RL training, no container-backed tools — `uv sync` alone is enough. The `[verl]` extra and the enroot install are training- and environment-specific.

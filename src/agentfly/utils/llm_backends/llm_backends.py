@@ -150,7 +150,6 @@ class LLMBackend:
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
-            logger.warning(f"[AsyncVerlBackend] splice continuity check failed: {e}")
             logger.warning("[AsyncVerlBackend] splice continuity check failed: %s", e)
 
     def preprocess(self):
@@ -735,23 +734,17 @@ class ClientBackend(LLMBackend):
         # Standard parameters
         if "temperature" in kwargs:
             config_kwargs["temperature"] = kwargs["temperature"]
-        elif self.temperature:
-            config_kwargs["temperature"] = self.temperature
 
         # Map 'n' to 'candidate_count'
         if "n" in kwargs:
             config_kwargs["candidate_count"] = kwargs["n"]
         elif "candidate_count" in kwargs:
             config_kwargs["candidate_count"] = kwargs["candidate_count"]
-        elif self.n:
-            config_kwargs["candidate_count"] = self.n
 
         if "max_tokens" in kwargs:
             config_kwargs["max_output_tokens"] = kwargs["max_tokens"]
         elif "max_new_tokens" in kwargs:
             config_kwargs["max_output_tokens"] = kwargs["max_new_tokens"]
-        elif self.max_tokens:
-            config_kwargs["max_output_tokens"] = self.max_tokens
 
         # FIX: Move tools into the config dictionary. Only when non-empty: agents that
         # don't render tools pass ``[]`` (see BaseAgent.prompt_tools), and an empty

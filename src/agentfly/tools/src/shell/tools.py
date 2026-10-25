@@ -19,6 +19,7 @@ from enroot.errors import (
 from ....core import Context
 from ....resources import ContainerResourceSpec
 from ...decorator import tool
+from ...utils.task_repo import checkout_task_commit
 from .command_filter import CommandFilter
 
 WORKSPACE_DIR = "/testbed"
@@ -71,21 +72,14 @@ async def _run_shell(context: Context, cmd: str) -> str:
         return block_reason
 
     rollout_id = context.rollout_id
-    # Mount the file-tool helper too, so an agent that mixes this shell tool
-    # with the file tools (create_file/edit_file/...) shares ONE container
-    # that always has file_manager available — the resource engine returns
-    # the same container for a given rollout id regardless of which tool
-    # creates it first, so both specs must request the mount.
-    from ..file.tools import FILE_MODULE_DIR, INSTALL_PATH
-
+    # Same spec as the file tools, so an agent mixing both shares one container (the resource
+    # engine returns the rollout's container whichever tool acquires it first). No mounts: enroot
+    # can only mount onto paths that exist in the image; the file tools copy their helper in.
     spec = ContainerResourceSpec(
         category="container",
         image=image_id,
-        mount={FILE_MODULE_DIR: f"{INSTALL_PATH}:ro,rbind"},
         docker_host=context.metadata.get("docker_host"),
     )
-    is_acquired = context.is_spec_acquired(spec)
-
     container = await context.acquire_resource(
         id=rollout_id,
         spec=spec,
@@ -99,18 +93,10 @@ async def _run_shell(context: Context, cmd: str) -> str:
     # would fail with `chdir to cwd ("/testbed") ... no such file or directory`.
     workdir = context.metadata.get("workdir") or WORKSPACE_DIR
 
-    if not is_acquired:
-        # Used for swe-smith, we need to checkout the specific commit first.
-        # Use a bounded timeout so git operations cannot hang indefinitely.
-        commit = context.metadata.get("git_commit_hash", None)
-        if commit is not None:
-            git_timeout = 300
-            await container.run_cmd("git fetch", timeout=git_timeout, workdir=workdir)
-            await container.run_cmd(
-                f"git checkout {commit}",
-                timeout=git_timeout,
-                workdir=workdir,
-            )
+    # SWE-smith: put the repo on the task's bug branch before the first command.
+    error = await checkout_task_commit(container, context)
+    if error:
+        return error
 
     # We limit the memory to 1g for the shell command to avoid the container being killed by the system.
     try:

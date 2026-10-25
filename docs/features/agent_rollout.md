@@ -22,13 +22,21 @@ Intuitively, for each query, we generate one response, and call the tool, append
 In contrast to chain-search, tree-search generates multiple responses in each turn, trying to explore more action space for each query and obtain tree-based trajectories. Compared to single chain, tree-search will more likely to obtain both successful and failed trajectories, therefore better for RL learning.
 
 ### Filtering
-Some studies show that some trajectories with specific patterns will lead to failture of agent reinforcement learning, even if their rewards are given accurately. SimpleTIR found a pattern, which they call void turns that "contain fragmented code or repetitive sentences and are often triggered by the premature generation of an eos token" [1].
+Some studies show that some trajectories with specific patterns will lead to failure of agent reinforcement learning, even if their rewards are given accurately. SimpleTIR found a pattern, which they call void turns that "contain fragmented code or repetitive sentences and are often triggered by the premature generation of an eos token" [1].
 
 ### Single-Turn v.s. Multi-Turn
-We found that training with shorter turns are more stable then training with longer turns, as shown in our report. This is also validated in other studies like GiGPO [1] and SimpleTIR. Another proposal is to convert multi-turn rollout into single-turn, which have the following benifits: (1) Memory efficient: we can only include the tool call and observations in history. Advantages, losses are only calculated in current turn response. (2) Stable: Training on single turn is much more stable than multi-turn.
+We found that training with shorter turns are more stable than training with longer turns, as shown in our report. This is also validated in other studies like GiGPO [2] and SimpleTIR [1]. Another proposal is to convert multi-turn rollout into single-turn, which has the following benefits: (1) Memory efficient: we can only include the tool call and observations in history. Advantages, losses are only calculated in current turn response. (2) Stable: Training on single turn is much more stable than multi-turn.
 
 ### Our strategy
-Currently, we adopt chain-based rollout. For each query, we initially generate *n* responses. Therefore we maintain *n* chains. For all generations, we use a fixed temperature. We will explore more on this and we also welcome your contributions!
+AgentFly provides two rollout strategies, chosen per call with `agent.run(rollout=...)` or in training
+with `agent.run_config.rollout`:
+
+- **`chain`** (default): for each query we start *n* chains (`num_chains`) and extend each with the
+  full conversation history, at a fixed temperature.
+- **`step`**: each generation sees a bounded window of recent history (`rollout_config`), and every
+  generation becomes its own training row, the single-turn conversion described above.
+
+We will explore more on this and we also welcome your contributions!
 
 
 [1] SimpleTIR: End-to-End Reinforcement Learning for Multi-Turn Tool-Integrated Reasoning
@@ -60,15 +68,12 @@ The same `Segment` type is used by both strategies:
 
 Segments may repeat earlier messages as context. They are not disjoint transcript
 slices, and concatenating them does not reconstruct the original episode.
-Message dictionaries retain their existing fields, including sampled `token_ids`,
-tool calls, and multimodal content. The segment wrapper does not change loss masks
-or reward assignment.
+Messages keep all their fields, including sampled `token_ids`, tool calls, and
+multimodal content.
 
 To construct results directly, import `Segment`, `Trajectory`, and `RunResult` from
-`agentfly.agents`. Replace the former bare segment lists with
-`Segment(messages=[...])`; serialized segments now have the shape
-`{"messages": [...]}`. Consumers must use `.messages` rather than iterate the
-segment object itself.
+`agentfly.agents` and wrap each conversation as `Segment(messages=[...])`; a serialized
+segment has the shape `{"messages": [...]}`.
 
 Both strategies preserve task fields in `Trajectory.metadata` (excluding reserved
 fields such as the separately stored trajectory/group identifiers). Execution time
@@ -76,21 +81,17 @@ is recorded in `rollout_time_sec`, from episode setup through resource cleanup,
 excluding time waiting for a concurrency slot. With no reward function configured,
 `reward` is `None`; a computed zero reward remains `0.0`.
 
-The former `agent.timing_data` accessor is removed; read
-`result.trajectories[i].rollout_time_sec` for an episode's duration. This is not
-the total batch wall time.
+`result.trajectories[i].rollout_time_sec` is one episode's duration, not the total
+batch wall time.
 
 Both strategies report `agent/rollout/time/min`, `max`, and `avg` from these
 trajectory durations. Missing durations (`None`) are skipped, while `0.0` is valid.
 If no duration is available, timing summaries and slowest-trajectory logging are
 skipped; an empty batch emits no end-of-rollout summary events.
 
-The existing `agent/rollout/slowest_message` event now contains a serialized
-`Trajectory`, like `agent/rollout/sample_trajectory`, for both chain and step.
-Its payload uses `segments` instead of the former top-level `messages`; metadata,
-reward, metrics, and identifiers follow the `Trajectory` schema, and internal
-`steps` remain excluded. Duration ties select the first trajectory in result order.
-Log consumers expecting the old chain-specific payload must update accordingly.
+`agent/rollout/slowest_message` logs the slowest trajectory, serialized like
+`agent/rollout/sample_trajectory` (the `Trajectory` schema without internal `steps`).
+Duration ties select the first trajectory in result order.
 
 Execution counts are also stored on each trajectory: `num_turns` counts completed
 model generations, and `tool_call_counts` maps each tool-result name to its number
@@ -102,16 +103,16 @@ Both rollouts derive these fields from runtime records, not segment messages:
 chain counts its generation nodes and tool results, while step counts its generation
 records and attached tool results. Repeated history, context folding, and observation
 roles do not affect the counts. They survive serialization even though `steps` do not.
-No tool-execution behavior changes: step still executes only the first proposed
-call in a generation, while chain can execute multiple calls.
+Step rollouts execute only the first proposed call in a generation, while chain
+rollouts can execute several.
 
-`agent/rollout/avg_turns`, `avg_tool_calls`, and `tool_calls/<name>` now aggregate
-these fields. `None` means unavailable (including older results) and is excluded
+`agent/rollout/avg_turns`, `avg_tool_calls`, and `tool_calls/<name>` aggregate
+these fields. `None` means unavailable and is excluded
 from the corresponding average; `0` turns and `{}` tool counts are measured zeros
 and are included. Per-tool averages use all trajectories with known tool counts,
 including those with zero calls to that tool. If no counts are available, the
 corresponding events are omitted; reporting does not infer counts from messages.
-`agent/rollout/avg_segments` remains the average number of context segments.
+`agent/rollout/avg_segments` is the average number of context segments.
 
 ### The metrics step
 
@@ -164,8 +165,8 @@ For a scored trajectory, both training converters broadcast the full outcome rew
 `R` to every retained training segment: `[R, ..., R]`, including earlier
 context-folded chain views.
 The reward is placed on each segment's reward-mask token; it is not divided by the
-number of segments or discounted here. Raw environment step rewards and downstream
-advantage computation are unchanged.
+number of segments or discounted here; step rewards are handled separately by the
+advantage estimator.
 
 `Trajectory.metrics` contains reward-function extras and numeric tool averages in
 both strategies. Tool metrics are grouped by tool name and metric key, using
@@ -173,21 +174,16 @@ both strategies. Tool metrics are grouped by tool name and metric key, using
 as 0/1. The first-class `ToolResult.step_reward` is included as a logging average
 when supplied; the original per-call rewards remain unchanged in the runtime
 records. Tool aggregates take precedence over reward extras with the same
-`tool/...` key, matching the existing chain convention. They are collected even
-when no episode reward function is configured.
+`tool/...` key. They are collected even when no episode reward function is configured.
 
-This migration unifies the conversation container, not the entire training-signal
-protocol. `Trajectory.steps` remains an internal, non-serialized compatibility
-channel for existing advantage estimators. Its rollout-specific semantics and the
-runtime step records are unchanged.
+`Trajectory.steps` is an internal, non-serialized channel that carries
+rollout-specific training signals (per-step rewards) to the advantage estimators.
 
 Both exporters use the internal `rollout.conversion.build_segment_batch` helper
 for segment flattening, tokenization, equal outcome rewards, metric expansion,
 and row padding. It returns a single trajectory/segment index mapping, including
-padding copies, which each exporter uses to align its own step signals. The helper
-does not inspect runtime `steps` or rollout state, and introduces no new result
-types. Existing exporter-specific missing-value rules and trainer layouts remain
-unchanged. Multimodal metadata is repeated alongside its padded token row.
+padding copies, which each exporter uses to align its own step signals.
+Multimodal metadata is repeated alongside its padded token row.
 
 ### Explicit training conversion
 
@@ -199,15 +195,14 @@ result = await agent.run(messages=messages, max_turns=10, rollout="step")
 batch = agent.to_verl_dataproto(result, pad_to_multiple_of=8)
 ```
 
-Conversion dispatches from this field, not the agent's latest-run caches. An
-earlier result can be converted after another run, including a different rollout.
+Conversion dispatches from this field, so an earlier result can be converted after
+another run, including one with a different rollout.
 Keep the agent's tokenization configuration unchanged (tokenizer, processor,
 template, prompt tools, and maximum length).
 
-`run()` records execution, independently of training. Its result retains empty
+`run()` records execution, independently of training. Its result keeps empty
 and context-only segments, including a freshly folded context that was never
-followed by a generation. ActionAgent's experimental postprocessing policies are
-retained but disabled by default.
+followed by a generation.
 
 Only conversion selects training rows. It skips segments without assistant
 messages before tokenization, then skips rows whose action mask contains no
@@ -223,26 +218,19 @@ Per-row multimodal data and step signals follow the same selection. If no
 trainable rows remain, conversion raises a clear `ValueError`; it does not
 silently return an empty training batch.
 
-The no-argument conversion API is no longer supported. Manually constructed
-results default to `rollout=None` for inference/inspection; training conversion
-rejects missing and unsupported identifiers explicitly. Custom execution
-strategies are still supported, but registering one does not automatically add a
-stateless training converter; its result must use a supported protocol or callers
-must provide their own conversion outside the rollout interface.
+Manually constructed results default to `rollout=None`, which is fine for inference
+and inspection; training conversion rejects a missing or unsupported identifier.
+A custom rollout strategy needs only a `run()` method returning a `RunResult`. To train
+on its results, it must produce one of the supported layouts (`"chain"` or `"step"`), or you
+convert them yourself.
 
-The only required rollout method is `run()`, returning a `RunResult`.
-Inference-only custom rollouts do not need any training methods. The former
-`Rollout.to_dataproto` and `Rollout.tokenize_trajectories` methods, including the
-built-in strategy wrappers, have been removed. Training callers use
-`agent.to_verl_dataproto(result)`; tokenization-only inspection and tests can
-call `agentfly.agents.utils.tokenizer.tokenize_trajectories` directly with
-explicit conversations and the agent's tokenizer. The training converter
-already calls that utility internally; callers do not need to tokenize first.
+For tokenization-only inspection, call `agentfly.agents.utils.tokenizer.tokenize_trajectories`
+with explicit conversations and the agent's tokenizer; `agent.to_verl_dataproto(result)` already
+does this internally.
 
-The marker survives serialization, but internal `Trajectory.steps` do not.
-Use the in-memory result for training; JSON is not a complete training snapshot.
-This removes conversion's last-run dependency, not all shared state from agent
-execution, and does not make concurrent calls to `agent.run` generally safe.
+The `rollout` marker survives serialization, but internal `Trajectory.steps` do not, so
+use the in-memory result for training; JSON is not a complete training snapshot.
+Concurrent calls to `agent.run` on the same agent are not supported.
 
 ## Loop Control
 
@@ -291,9 +279,6 @@ A `raise` control still raises an exception rather than returning a trajectory
 with an error label. A context-length stop in the chain retains `max_model_len`,
 even if the tool also requested an end.
 
-Previously, chain rollouts reported all tool stops as `terminal`. Consumers that
-used that label for tool/environment completion should now handle the specific
-tool-stop labels above. Existing step-rollout label strings are unchanged.
 
 ### The run policies
 
@@ -332,7 +317,7 @@ await agent.run(
 By default a tool does **not** control the flow — it only reports what happened via `status` (`success` / `error` / `invalid`). A tool opts in to steering by returning `control` in its result dict:
 
 ```python
-@tool(name="alfworld_step", stateful=True)
+@tool(name="alfworld_step")
 async def alfworld_step(action: str, context: "Context"):
     obs, reward, done, info = await env.step(action)
     won = bool(info.get("won"))

@@ -43,6 +43,9 @@ async def _run(src: str) -> str:
     # 3️⃣  return result or propagate sandbox error
     if proc.returncode != 0:
         detail = (stderr or b"").decode()[:8_192]
+        if not detail.strip() and proc.returncode < 0:
+            # Killed by a signal with no message: the CPU-time or memory limit was hit.
+            detail = f"Process killed (signal {-proc.returncode}): CPU time or memory limit exceeded"
         raise HTTPException(400, detail)
     return stdout.decode()[:16_384]  # truncate overly chatty output
 

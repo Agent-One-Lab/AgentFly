@@ -6,25 +6,35 @@ from agentfly.tools import code_interpreter
 
 def test_code_schema():
     schema = code_interpreter.schema
-    print(schema)
+    assert schema["function"]["name"] == "code_interpreter"
+    assert schema["function"]["parameters"]["required"] == ["code"]
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_code_run():
     context = Context(rollout_id="demo")
     result = await code_interpreter(code='print("A print test")', context=context)
-    print(result)
     await context.end_resource(scope="global")
-    print("done")
+    assert result.observation.strip() == "A print test", result.observation
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_code_sees_top_level_names():
+    # Functions must see top-level functions and imports, as in a normal script.
+    context = Context(rollout_id="demo")
+    code = "import math\ndef fib(n):\n    return n if n < 2 else fib(n - 1) + fib(n - 2)\nprint(fib(10), round(math.pi, 2))"
+    result = await code_interpreter(code=code, context=context)
+    await context.end_resource(scope="global")
+    assert result.observation.strip() == "55 3.14", result.observation
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_code_hang():
     context = Context(rollout_id="demo")
     result = await code_interpreter(code="while True:\n  pass", context=context)
-    print(result)
     await context.end_resource(scope="global")
-    print("done")
+    # The CPU-time limit (8 s) fires before the 10 s wall-clock limit.
+    assert "limit exceeded" in result.observation or "timed out" in result.observation.lower(), result.observation
 
 
 # @pytest.mark.asyncio(loop_scope="session")

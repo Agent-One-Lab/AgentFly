@@ -20,6 +20,34 @@ class MessagesValidationError(ValueError):
     pass
 
 
+# Dataset fields that hold the task prompt, in priority order (the first one present wins).
+QUESTION_KEYS = ("prompt", "question", "instruction", "problem")
+
+
+def row_to_messages(row: Mapping[str, Any]) -> MessageDict:
+    """Turn a dataset row into an agent input item: the rule both training and ``agent.run`` use.
+
+    The prompt (the first of :data:`QUESTION_KEYS` present) becomes a user turn, with the row's
+    ``image`` (if any) attached as a data URI. Every other field is carried over for tools and
+    rewards; a row's own ``messages`` field, if present, replaces the generated turn.
+    """
+    question = next((row[k] for k in QUESTION_KEYS if k in row), None)
+    if question is None:
+        raise MessagesValidationError(
+            f"Row has no prompt field: expected 'messages' or one of {', '.join(QUESTION_KEYS)}; "
+            f"got keys {sorted(row)}."
+        )
+    content: List[Part] = [{"type": "text", "text": question}]
+    if "image" in row:
+        from ...utils.vision import any_to_pil, auto_resize_image, image_to_data_uri
+
+        uri = image_to_data_uri(auto_resize_image(any_to_pil(row["image"])))
+        content.append({"type": "image_url", "image_url": {"url": uri}})
+    item: MessageDict = {"messages": [{"role": "user", "content": content}], "question": question}
+    item.update({k: v for k, v in row.items() if k != "question"})
+    return item
+
+
 class Messages:
     """
     One message item (a dict with key 'messages'). Validates that each turn has:
@@ -314,10 +342,10 @@ class MessagesList:
         default_meta = dict(default_meta or {})
         ms = cls(strict=strict, allow_legacy_content=allow_legacy_content)
 
-        # 3) Dict with 'messages'
+        # 3) Dict with 'messages' (or a dataset row with a prompt field)
         if isinstance(data, Mapping):
             if "messages" not in data:
-                raise MessagesValidationError("Dict input must contain a 'messages' key.")
+                data = row_to_messages(data)
             ms.append(Messages(data, strict=strict, allow_legacy_content=allow_legacy_content))
             return ms
 
@@ -330,13 +358,16 @@ class MessagesList:
 
         first = seq[0]
 
-        # 1) List[Dict] each with 'messages'
-        if isinstance(first, Mapping) and "messages" in first:
+        # 1) List[Dict], each with 'messages' or a prompt field (dataset rows, as in training)
+        if isinstance(first, Mapping) and ("messages" in first or any(k in first for k in QUESTION_KEYS)):
             for i, item in enumerate(seq):
-                if not isinstance(item, Mapping) or "messages" not in item:
-                    raise MessagesValidationError(
-                        f"List appears to be message items but index {i} is not a dict with 'messages'."
-                    )
+                if not isinstance(item, Mapping):
+                    raise MessagesValidationError(f"Item {i} is a {type(item).__name__}, expected a dict.")
+                if "messages" not in item:
+                    try:
+                        item = row_to_messages(item)
+                    except MessagesValidationError as e:
+                        raise MessagesValidationError(f"Item {i}: {e}") from None
                 ms.append(Messages(item, strict=strict, allow_legacy_content=allow_legacy_content))
             return ms
 
@@ -367,8 +398,8 @@ class MessagesList:
 
         raise MessagesValidationError(
             "Input does not match any accepted format. "
-            "Supported: list of dicts with 'messages', list of turn-lists, "
-            "single dict with 'messages', or a single list of turn dicts."
+            "Supported: list of dicts with 'messages' or a prompt field (dataset rows: "
+            f"{', '.join(QUESTION_KEYS)}), list of turn-lists, single dict, or a single list of turn dicts."
         )
 
     # ---- collection API ----

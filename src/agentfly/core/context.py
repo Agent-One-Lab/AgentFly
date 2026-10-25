@@ -7,6 +7,7 @@ for tools and rewards that need to run in containers or access shared resources.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from ..resources.types import BaseResource, BaseResourceSpec, ContainerResourceSpec
@@ -66,6 +67,7 @@ class Context:
         self.rollout_resource_ids: List[str] = []
         self.global_resource_ids: Set[str] = set()
         self._resource_acquired: Set[str] = set()
+        self._default_ids: Dict[str, str] = {}  # spec key -> default resource id in this rollout
         self.last_acquire_was_first: bool = False
 
     @property
@@ -143,8 +145,8 @@ class Context:
                 if meta_mount:
                     spec.mount = {**meta_mount, **(spec.mount or {})}
 
-        resource_id = id or self.rollout_id
         spec_key = _spec_key(spec)
+        resource_id = id or self._default_id(spec_key)
         self.last_acquire_was_first = spec_key not in self._resource_acquired
         if scope == "rollout":
             if resource_id not in self.rollout_resource_ids:
@@ -161,6 +163,21 @@ class Context:
         self._resource_acquired.add(spec_key)
 
         return resource
+
+    def _default_id(self, spec_key: str) -> str:
+        """The resource id used when the caller passes none.
+
+        The first kind of resource a rollout acquires gets the rollout id; each other kind gets
+        ``<rollout id>-<hash of its spec key>``, so different resources in one rollout never share
+        an id, while every acquire of the same kind (a tool and its reward) gets the same one.
+        """
+        if spec_key not in self._default_ids:
+            if not self._default_ids:
+                self._default_ids[spec_key] = self.rollout_id
+            else:
+                digest = hashlib.sha1(spec_key.encode()).hexdigest()[:8]
+                self._default_ids[spec_key] = f"{self.rollout_id}-{digest}"
+        return self._default_ids[spec_key]
 
     async def reset_resource(
         self,

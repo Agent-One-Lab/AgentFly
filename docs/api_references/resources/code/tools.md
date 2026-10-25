@@ -14,8 +14,8 @@ The Code environment provides tools for executing Python code in secure, isolate
 
 **Tool Configuration:**
 - **ResourceSpec**: `PythonSandboxSpec`
-- **Resource scope**: `global` (the sandbox is released when the rollout ends)
-- **Stateful behavior**: variable state persists within the same acquired sandbox instance.
+- **Resource scope**: `global`: sandboxes come from a pool shared by all rollouts and are returned to it when a rollout ends.
+- **No state between calls**: every call runs in a fresh Python process, so variables and imports from earlier calls are gone.
 
 ## Usage Examples
 
@@ -28,7 +28,7 @@ In AgentFly rollouts, `code_interpreter` is invoked via a tool call and receives
 Real-world usage with ReactAgent for problem-solving:
 
 ```python
-from agentfly.agents.react.react_agent import ReactAgent
+from agentfly.agents import ReactAgent
 from agentfly.rewards.code_reward import code_reward_test
 
 # Task information for the agent
@@ -40,7 +40,7 @@ react_agent = ReactAgent(
     "Qwen/Qwen2.5-7B-Instruct",
     tools=[code_interpreter],
     reward_fn=code_reward_test,
-    template="qwen-chat",
+    template="qwen2.5-no-system-tool",
     task_info=task_info,
     backend_config={"backend": "async_vllm"},
     debug=True

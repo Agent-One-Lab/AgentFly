@@ -53,7 +53,7 @@ from agentfly.envs.webshop_text_env import WebShopSpec
 
 When an agent uses a reward function, it will automatically detect and fill several special fields when they appear in the reward signature: `final_response`, `trajectory`, and (via `Context`) the rollout-level identifiers.
 
-- `final_response`: The final response the agent generates for the task.
+- `final_response`: The agent's final answer: the output of an answer tool (one declared with `status="finish"`, like `answer_math`) if the episode ended with one, otherwise the model's last message. Ordinary tool results (calculator, search, code) are never the final response, so leave `max_turns` room for the model to answer after its last tool call.
 - `trajectory`: The whole interaction trajectory.
 - `context`: The rollout execution context, which knows the rollout id, group id and provides `acquire_resource` for sharing environments with tools.
 

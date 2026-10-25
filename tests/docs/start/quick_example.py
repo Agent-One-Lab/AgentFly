@@ -1,4 +1,18 @@
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
+
+
+@pytest.mark.gpu
+def test_first_agent_script(tmp_path):
+    # Run the docs' complete script as a script: this also checks its __main__ guard.
+    script = Path(__file__).with_name("first_agent_script.py")
+    out = subprocess.run([sys.executable, str(script)], cwd=tmp_path, capture_output=True, text=True, timeout=1800)
+    assert out.returncode == 0, out.stderr[-3000:]
+    assert "4 trajectories" in out.stdout
+    assert (tmp_path / "result.json").exists() and (tmp_path / "conversations.jsonl").exists()
 
 
 @pytest.mark.gpu

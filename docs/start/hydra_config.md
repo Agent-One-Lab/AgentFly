@@ -2,7 +2,7 @@
 
 AgentFly trains via verl's PPO trainer (`python3 -m agentfly.cli train ...`), which is Hydra-driven. Every key in your training script of the form `namespace.path=value` overrides a node in the underlying Hydra config tree.
 
-The full schema lives upstream in verl: `verl/verl/trainer/config/ppo_trainer.yaml`. This page lists the **keys you actually need to set** in practice, organized by namespace, with notes on what each one controls. For the canonical end-to-end example, see [First Training](first_training.md).
+The full schema is `ppo_trainer.yaml`, AgentFly's copy of verl's trainer config with the `agent.*` keys added (see *Where to Look When You Need More*). This page lists the **keys you actually need to set** in practice, organized by namespace, with notes on what each one controls. For the canonical end-to-end example, see [First Training](first_training.md).
 
 ## Namespaces at a Glance
 
@@ -167,7 +167,15 @@ The WebShop chain-rollout script wires the above together: it starts a local Ray
 
 ## Where to Look When You Need More
 
-- **Full Hydra schema** — `verl/verl/trainer/config/ppo_trainer.yaml`. Everything not listed above is in there with defaults.
-- **Generated schemas** — `verl/verl/trainer/config/_generated_ppo_trainer.yaml` (the materialized config tree, useful for grepping).
-- **Per-run config dump** — Run with `agent.use_agent=True ... +hydra.job.chdir=False trainer.print_config=True` (when supported) to see the exact resolved config for a run.
+- **Full config with defaults** — print it, or one section of it, with Hydra's `--cfg job` (add your overrides to see their effect):
+
+    ```bash
+    agentfly train --cfg job                     # everything
+    agentfly train --cfg job --package agent     # only agent.*
+    ```
+
+- **Schema files** — `agentfly/verl/trainer/config/ppo_trainer.yaml` inside the installed package
+  (find it with `python -c "import agentfly.verl.trainer.config as c; print(c.__path__[0])"`); in a source
+  checkout this is `verl/verl/trainer/config/`. `_generated_ppo_trainer.yaml` next to it is the fully
+  expanded tree, useful for grepping.
 - **Other shipped scripts** — `examples/train_scripts/{webshop,alfworld,scienceworld,search,swe,vqa,...}/` show domain-specific overrides (different reward names, tools, batch sizes, sequence-parallel settings).

@@ -51,9 +51,7 @@ async def req_async(query, n=10):
 @tool(
     name="google_search",
     description="Get relevant information from Google Search.",
-    stateful=True,
     env_cls=RedisEnv,
-    pool_size=1,
 )
 async def google_search_serper(query, env: RedisEnv):
     """

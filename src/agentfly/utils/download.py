@@ -120,7 +120,7 @@ def ensure_training_files(local_paths: Sequence[str]) -> None:
     TRAIN_REPO by basename (via TRAIN_ALIASES when the repo name differs).
 
     Files not present in TRAIN_REPO are skipped with a note — they must be
-    provided by the user (e.g. R2E-Gym, GUI, infoseek datasets).
+    provided by the user (e.g. GUI and infoseek datasets).
     """
     repo_files = None
     plan: List[Tuple[str, str, int]] = []  # (local_path, hf_name, size)

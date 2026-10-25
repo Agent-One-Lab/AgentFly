@@ -18,6 +18,7 @@ import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
 
+from ... import AF_DATA_DIR
 from ...utils.llm_backends.llm_backends import ClientBackend
 from ..types import BaseResource, ResourceStatus, VLLMModelResourceSpec
 
@@ -38,6 +39,9 @@ class VLLMModelResource(BaseResource):
         self._resource_id = resource_id or f"vllm-{uuid.uuid4().hex[:8]}"
         self._startup_timeout = startup_timeout
         self._process: Optional[subprocess.Popen] = None
+        # vLLM's output goes here, so a failed start can say why.
+        self._log_path = os.path.join(AF_DATA_DIR, "logs", f"{self._resource_id}.log")
+        self._log_file = None
         self._status: ResourceStatus = ResourceStatus.PENDING
         self._backend: Optional[ClientBackend] = None
 
@@ -95,11 +99,13 @@ class VLLMModelResource(BaseResource):
         cmd.extend(["--port", str(port)])
         env = os.environ.copy()
         logger.info("[VLLMModelResource] Launching vLLM service: %s", " ".join(cmd))
+        os.makedirs(os.path.dirname(self._log_path), exist_ok=True)
+        self._log_file = open(self._log_path, "w")
         self._process = subprocess.Popen(
             cmd,
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=self._log_file,
+            stderr=subprocess.STDOUT,
             preexec_fn=os.setsid,
         )
         self._backend = ClientBackend(
@@ -118,7 +124,10 @@ class VLLMModelResource(BaseResource):
         while loop.time() < deadline:
             if self._process is not None and self._process.poll() is not None:
                 self._status = ResourceStatus.FAILED
-                raise RuntimeError(f"vLLM service exited during startup with code {self._process.returncode}.")
+                raise RuntimeError(
+                    f"vLLM service exited during startup with code {self._process.returncode}. "
+                    f"Last lines of its log ({self._log_path}):\n{self._log_tail()}"
+                )
             try:
                 await asyncio.to_thread(
                     urllib.request.urlopen,
@@ -131,7 +140,16 @@ class VLLMModelResource(BaseResource):
                 await asyncio.sleep(1.0)
 
         self._status = ResourceStatus.FAILED
-        raise TimeoutError(f"Timed out waiting for vLLM service at {self.base_url} to become ready.") from last_error
+        raise TimeoutError(
+            f"Timed out waiting for vLLM service at {self.base_url} to become ready (log: {self._log_path})."
+        ) from last_error
+
+    def _log_tail(self, lines: int = 20) -> str:
+        try:
+            with open(self._log_path, errors="replace") as f:
+                return "".join(f.readlines()[-lines:])
+        except OSError:
+            return "(log unavailable)"
 
     async def generate_async(
         self,
@@ -176,6 +194,9 @@ class VLLMModelResource(BaseResource):
         self._status = ResourceStatus.STOPPED
         self._process = None
         self._backend = None
+        if self._log_file is not None:
+            self._log_file.close()
+            self._log_file = None
 
     async def close(self) -> None:
         await self.end()

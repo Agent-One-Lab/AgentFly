@@ -72,3 +72,16 @@ async def test_rollout_tool_calls_reach_the_right_agent():
     await run_tool(second, 1)
     assert result.status == "success" and result.observation == "4"
     assert (first.count, second.count) == (4, 1)
+
+
+def test_string_tools_and_rewards_get_a_clear_error():
+    # Direct construction takes objects; names and import references go through AutoAgent.
+    kwargs = dict(
+        model_name_or_path="Qwen/Qwen2.5-0.5B-Instruct",
+        backend_config={"backend": "client", "base_url": "http://localhost:1/v1", "api_key": "EMPTY"},
+        monitors=[],
+    )
+    with pytest.raises(TypeError, match="takes tool objects.*AutoAgent.from_config"):
+        HFAgent(tools=["calculator"], **kwargs)
+    with pytest.raises(TypeError, match="takes a reward object.*AutoAgent.from_config"):
+        HFAgent(reward_fn="math_equal_reward", **kwargs)

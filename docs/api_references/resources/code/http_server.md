@@ -41,9 +41,11 @@ The server uses a subprocess-based execution model:
 4. **Result Collection**: stdout/stderr are captured and returned
 5. **Cleanup**: Process groups are killed on timeout or completion
 
-The execution flow ensures that:
+As a result:
 
-* No code can escape the sandbox environment
-* Resource usage is strictly controlled
+* Each execution starts from a clean interpreter; nothing carries over between requests
+* Memory (1 GiB) and CPU time (8 s) are capped per execution, and wall time (10 s) by the parent
 * Long-running or infinite loops are terminated
-* Multiple concurrent executions are safely isolated
+* Concurrent executions run in separate processes
+
+This is resource control, not a security sandbox: see [Limits and isolation](index.md#limits-and-isolation).

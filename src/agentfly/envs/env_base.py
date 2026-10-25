@@ -1,17 +1,11 @@
 """Environment base classes.
 
 :class:`BaseEnv` is the contract every environment implements (``start``, ``reset``, ``step``,
-``aclose`` / ``close``);
-:class:`SupportsDocker` adds a Docker container lifecycle for environments that run in one.
+``aclose`` / ``close``).
 """
 
 import abc
-import asyncio
-import time
-import warnings
 from typing import Any
-
-from enroot import from_env
 
 
 class BaseEnv(abc.ABC):
@@ -61,62 +55,3 @@ class BaseEnv(abc.ABC):
     async def acquire():
         """Create a new environment."""
         raise NotImplementedError
-
-
-class SupportsDocker:
-    """Adds Docker lifecycle; mix into envs that want it."""
-
-    _container = None  # set by subclass
-
-    async def _docker_start(self, image: str, runtime: str = "runc", **run_kw):
-        """
-        Launch the container without blocking the asyncio event-loop.
-
-        Args:
-            image (str): The Docker image to use.
-            runtime (str): The Docker runtime to use.
-            **run_kw: Additional keyword arguments to pass to the container run.
-
-        Raises:
-            RuntimeError: If the container fails to start.
-        """
-        client = from_env()
-
-        # run docker-py call in default ThreadPoolExecutor
-        retry_times = 3
-        for _ in range(retry_times):
-            self._container = await asyncio.to_thread(
-                client.containers.run,
-                image,
-                detach=True,
-                auto_remove=True,
-                runtime=runtime,
-                **run_kw,
-            )
-
-            # wait until the container is actually running (non-blocking poll)
-            deadline = time.time() + 60
-            while self._container.status != "running":
-                await asyncio.sleep(0.1)
-                await asyncio.to_thread(self._container.reload)
-                if time.time() > deadline:
-                    warnings.warn("container failed to start, retrying...")
-                    continue
-            break
-
-    async def _docker_stop(self):
-        """
-        Stop the Docker container.
-        """
-        if self._container:
-            await asyncio.to_thread(self._container.kill)
-            self._container = None
-
-    def get_container_logs(self) -> str:
-        """Get logs from the container if it exists."""
-        if self._container:
-            try:
-                return self._container.logs().decode("utf-8")
-            except Exception as e:
-                return f"Could not get container logs: {str(e)}"
-        return "Container not found"

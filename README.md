@@ -51,7 +51,7 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 ---
 
-**08/2025 Chat Template System**: A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. [Learn more →](docs/chat_template/)
+**08/2025 Chat Template System**: A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. It now lives in its own library, [chat-bricks](https://github.com/Agent-One-Lab/chat-bricks). [Learn more →](https://github.com/Agent-One-Lab/chat-bricks)
 
 
 ## Installation
@@ -96,7 +96,8 @@ async def main():
         model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
         tools=[calculator],
         template="qwen2.5",
-        backend_config={"backend": "async_vllm"},
+        # gpu_memory_utilization: share of GPU memory vLLM reserves (default 0.92)
+        backend_config={"backend": "async_vllm", "gpu_memory_utilization": 0.5},
     )
     result = await agent.run(
         messages=messages,
@@ -107,9 +108,14 @@ async def main():
     print(result.trajectories)
     print(result.rewards)
 
-if __name__ == "__main__":  # vLLM may start worker processes with spawn
+if __name__ == "__main__":  # required: vLLM starts worker processes that re-import this file
     asyncio.run(main())
 ```
+
+`template` names a chat template from [chat-bricks](https://github.com/Agent-One-Lab/chat-bricks)
+(e.g. `qwen2.5`, `qwen3`, `llama-3.2`; AgentFly adds a few more); list them all with
+`python -c "import agentfly.agents; from chat_bricks.registry import TEMPLATES; print(sorted(TEMPLATES))"`.
+See [Build an Agent](docs/start/first_agent.md) for reading, batching and saving results.
 
 ## Features
 ### 1. Multi-Chain Agent Rollout and Multi-Turn Training
@@ -190,24 +196,22 @@ def customized_reward(final_response, trajectory, optional_field1, optional_fiel
     ...
 ```
 
-For stateful tools and rewards that hold environment instances, please refer to [documentation](https://agentfly.readthedocs.io/).
+For tools and rewards that share an environment (a game, a sandbox, a browser), see [Build a Custom Environment](docs/start/custom_environment.md).
 
 #### 3. Agents
-You can use existing agents, or customize an agent. To customize an agent, the agent class must inherit `BaseAgent`, which handles tool calling, chain rollout. You can custom the `generate` and `parse` function. Refer to [documentation](https://agentfly.readthedocs.io/) for more details.
+You can use existing agents, or customize an agent. A custom agent inherits `BaseAgent`, which handles tool calling and rollouts, and overrides `parse`, which turns raw model outputs into assistant messages with their tool calls. Refer to the [Agents API reference](docs/api_references/agents/index.md#custom-agent) for more details.
 
 ```python
+from agentfly.agents import BaseAgent
+
+
 class CustomizedAgent(BaseAgent):
-    def __init__(self,
-        **kwargs
-    )
-        super().__init__(**kwargs)
-
-    async def generate_async(self, messages_list: List[List[Dict]], **args):
-        return await self.llm_engine.generate_async(messages_list, **args)
-
-    def parse(self, responses: List(str), tools):
-        # parse responses into tool calls
-        ...
+    def parse(self, responses, context=None, **kwargs):
+        # One assistant message per response; put requested tool calls in "tool_calls".
+        return [
+            {"role": "assistant", "content": [{"type": "text", "text": r}], "tool_calls": []}
+            for r in responses
+        ]
 ```
 
 ## Demo

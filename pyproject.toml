@@ -46,6 +46,7 @@ known-first-party = ["agentfly"]
 "src/agentfly/cli.py" = ["T201"]
 "src/agentfly/utils/download.py" = ["T201"]
 "src/agentfly/utils/deploy.py" = ["T201"]
+"src/agentfly/utils/pull_images.py" = ["T201"]
 "src/agentfly/utils/vision.py" = ["T201"]
 "src/agentfly/tools/src/search/retriever_server.py" = ["T201"]
 "src/agentfly/tools/src/file/file_manager.py" = ["T201"]
@@ -64,21 +65,6 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 # already-installed torch; they must skip build isolation. Only relevant when
 # `--extra verl` is requested.
 no-build-isolation-package = ["liger-kernel", "flash-attn"]
-# vllm only bounds xgrammar (<1.0); xgrammar 0.2.4+ dropped the cp312
-# linux-x86_64 wheel (and ships no sdist), so uv's "install the highest" pick
-# fails on Python 3.12. Hold the known-good version the reference env runs.
-#
-# The pip CUDA compiler wheels (pulled unpinned via cuda-tile -> nvidia-cuda-tileiras)
-# otherwise resolve to mixed releases (nvcc 13.2 / crt 13.4 / cccl 13.3). TileLang
-# compiles Qwen3.5's Gated DeltaNet kernels with them, so hold all four at the
-# 13.0.x set the Qwen3.5 training env ran (matching torch's CUDA 13.0 runtime).
-constraint-dependencies = [
-    "xgrammar==0.2.2",
-    "nvidia-cuda-nvcc==13.0.88",
-    "nvidia-nvvm==13.0.88",
-    "nvidia-cuda-crt==13.0.88",
-    "nvidia-cuda-cccl==13.0.85",
-]
 
 
 [project]
@@ -113,6 +99,9 @@ dependencies = [
     # Both pinned to the versions the Qwen3.5 training env ran.
     "vllm==0.25.1",
     "transformers==5.6.2",
+    # vllm only bounds xgrammar (<1.0). Held at the version tested with vllm 0.25.1; pinned here
+    # (not in [tool.uv]) so pip installs of the published package get it too.
+    "xgrammar==0.2.2",
     "termcolor",
     "tenacity",
     "bs4",
@@ -151,6 +140,13 @@ verl = [
     # fla when available). Was installed manually before. On Hopper with torch
     # 2.11's Triton 3.6, fla's backward is only correct via TileLang.
     "flash-linear-attention[tilelang]==0.5.2",
+    # CUDA compiler wheels (pulled in by vllm) otherwise resolve to mixed releases (nvcc 13.2 /
+    # crt 13.4 / cccl 13.3). TileLang compiles Qwen3.5's Gated DeltaNet kernels with them, so
+    # hold all four at the 13.0.x set the Qwen3.5 training env ran (torch's CUDA 13.0 runtime).
+    "nvidia-cuda-nvcc==13.0.88",
+    "nvidia-nvvm==13.0.88",
+    "nvidia-cuda-crt==13.0.88",
+    "nvidia-cuda-cccl==13.0.85",
     "hydra-core",
     "liger-kernel",
     "numpy",

@@ -13,7 +13,7 @@ All per-user state lives under `AF_HOME` (default `~/.agentfly`), following the
 | Variable | Default | Purpose |
 |---|---|---|
 | `AF_HOME` | `~/.agentfly` | Root for all per-user state. Set this to relocate everything at once. |
-| `AF_CACHE_DIR` | `$AF_HOME/cache` | Downloaded artifacts (search corpus + FAISS index, enroot images, jinja templates). |
+| `AF_CACHE_DIR` | `$AF_HOME/cache` | Downloaded artifacts (search corpus + FAISS index, jinja templates). Enroot images are not stored here: they go to `ENROOT_IMAGES_PATH` (default `~/.cache/enroot/images`). |
 | `AF_DATA_DIR` | `$AF_HOME/data` | Runtime data (e.g. Redis data dir). |
 | `AF_CONFIG_DIR` | `$AF_HOME/config` | User-editable config files. Packaged defaults (`search.yaml`, `redis/redis.conf`) are seeded here on first run if missing — edit `~/.agentfly/config/search.yaml` to set your search API keys. |
 
@@ -29,6 +29,7 @@ All per-user state lives under `AF_HOME` (default `~/.agentfly`), following the
 |---|---|---|
 | `AF_ASSUME_YES` | unset | Accept data-download approval prompts non-interactively (CI/batch). Set to `1`. |
 | `AF_CONTAINER_ENGINE` | `enroot` | Container backend when a spec doesn't pin one: `enroot`, `docker`, or `daytona`. |
+| `AF_ENROOT_SWEEP` | `1` | Set `0` to keep containers whose owner process has ended, instead of removing them when the next AgentFly process starts a container (see [Resources](../features/resources.md#container-lifetime-and-cleanup)). |
 | `AF_NO_STREAM` | unset | Disable streaming in LLM backends (set `1` to force non-streaming requests). |
 | `AF_CONN_RETRIES` | `4` | Connection retry attempts for LLM backend requests. |
 | `AF_RAY_GET_DEFAULT_TIMEOUT_SEC` | `7200` | Default timeout for blocking `ray.get` calls in Ray-backed container resources. |

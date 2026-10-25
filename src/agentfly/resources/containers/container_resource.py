@@ -14,6 +14,7 @@ import shlex
 from typing import Any, Optional, Tuple
 
 from ..types import BaseResource, ContainerResourceSpec, ResourceStatus
+from .enroot_containers import forget_container
 
 # Treat the engine's own timeout type as a timeout when present, but don't
 # hard-depend on enroot — the docker backend raises asyncio.TimeoutError.
@@ -89,10 +90,7 @@ class ContainerResource(BaseResource):
 
     async def close(self) -> None:
         """Alias for ending the resource by killing the underlying container."""
-        if hasattr(self._container, "kill_async"):
-            await self._container.kill_async()
-        else:
-            await asyncio.to_thread(self._container.kill)
+        await self.end()
 
     async def reset(self) -> None:
         """Reset is not supported for this resource type."""
@@ -104,6 +102,7 @@ class ContainerResource(BaseResource):
             await self._container.kill_async()
         else:
             await asyncio.to_thread(self._container.kill)
+        forget_container(self.resource_id)  # ended properly: no longer an orphan candidate
 
     async def run_cmd(
         self,

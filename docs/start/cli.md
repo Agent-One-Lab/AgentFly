@@ -1,6 +1,6 @@
 # CLI Reference
 
-The `agentfly` command-line interface is a small dispatcher (`src/agentfly/cli.py`) that hands argv off to one of four subcommands. Invoke it as either:
+The `agentfly` command-line interface is a small dispatcher (`src/agentfly/cli.py`) that hands argv off to one of five subcommands. Invoke it as either:
 
 ```bash
 python -m agentfly.cli <command> [args...]
@@ -8,14 +8,15 @@ python -m agentfly.cli <command> [args...]
 agentfly <command> [args...]
 ```
 
-`agentfly --help` lists the available commands. The four subcommands are:
+`agentfly --help` lists the available commands. The five subcommands are:
 
 | Command | Purpose | Style |
 |---|---|---|
 | [`train`](#agentfly-train) | RL training (verl PPO) | Hydra |
-| [`deploy`](#agentfly-deploy) | Print/run a `vllm serve` command for local inference | click flags |
+| [`deploy`](#agentfly-deploy) | Start a vLLM OpenAI-compatible server for a model | click flags |
 | [`swebench`](#agentfly-swebench) | SWE-Bench-style evaluation over a JSON dataset | click flags |
 | [`search`](#agentfly-search) | Standalone dense-retriever HTTP server | env vars |
+| [`pull-images`](#agentfly-pull-images) | Pre-pull the enroot images a dataset needs | flags |
 
 ---
 
@@ -32,33 +33,35 @@ agentfly train \
     ...
 ```
 
-The full set of override keys you'll typically use is documented in [Hydra Config](hydra_config.md). For an end-to-end walkthrough, see [First Training](first_training.md). The upstream Hydra schema lives in `verl/verl/trainer/config/ppo_trainer.yaml`.
+The full set of override keys you'll typically use is documented in [Hydra Config](hydra_config.md). For an end-to-end walkthrough, see [First Training](first_training.md). To print the full config with its defaults, run `agentfly train --cfg job` (or `--cfg job --package agent` for one section).
 
 ---
 
 ## `agentfly deploy`
 
-Prints and executes a `vllm serve` command for serving the model with an OpenAI-compatible API plus chat-template injection (so tool-calling models like Qwen2.5 work out of the box). Useful for setting up a local LLM endpoint that agents can hit via the `client` backend.
+Starts a vLLM OpenAI-compatible server for a model: it prints the `vllm serve` command, then runs it, and exits with vLLM's exit code. Useful for a local endpoint that agents use through the `client` backend. Pass `--tool-call-parser` for agents that call tools: without it, tool calling is off.
 
 ```bash
 agentfly deploy \
     --model-name-or-path Qwen/Qwen2.5-VL-3B-Instruct \
     --template qwen2.5-vl-system-tool \
+    --tool-call-parser hermes \
     --tp 2 --dp 2 \
     --port 8000
 ```
 
 | Flag | Type | Default | Purpose |
 |---|---|---|---|
-| `--model-name-or-path` | str | — | HuggingFace model id or local path. |
-| `--template` | str | `None` | `chat-bricks` template name. If set, the template's Jinja is written under `$AF_DATA_DIR/cache/jinja_template.jinja` and passed to `vllm serve` via `--chat-template`. |
+| `--model-name-or-path` | str | required | HuggingFace model id or local path. |
+| `--template` | str | `None` | `chat-bricks` template name. If set, the template's Jinja is written to `$AF_CACHE_DIR/templates/<template>.jinja` and passed to `vllm serve` via `--chat-template`; otherwise the model's own chat template is used. |
 | `--tp` | int | `1` | Tensor-parallel size. |
 | `--pp` | int | `1` | Pipeline-parallel size. |
 | `--dp` | int | `1` | Data-parallel size. |
 | `--gpu-memory-utilization` | float | `0.8` | Forwarded to `vllm serve --gpu-memory-utilization`. |
-| `--tool-call-parser` | str | `hermes` | Forwarded to `vllm serve --tool-call-parser`. |
+| `--tool-call-parser` | str | `None` (no tool calling) | vLLM tool-call parser for the model, e.g. `hermes` (Qwen2.5) or `qwen3_coder` (Qwen3-Coder); adds `--enable-auto-tool-choice --tool-call-parser <parser>`. |
 | `--port` | int | `8000` | Forwarded to `vllm serve --port`. |
 | `--allowed-local-media-path` | str | `None` | Forwarded to `vllm serve --allowed-local-media-path` (for vision models that load local images). |
+| `--override-generation-config` | str | `None` | JSON of default sampling settings, forwarded to `vllm serve --override-generation-config`. |
 
 The command emits and runs:
 
@@ -67,8 +70,8 @@ vllm serve <model> [--chat-template ...] --trust-remote-code \
     --tensor-parallel-size <tp> --pipeline-parallel-size <pp> \
     --data-parallel-size <dp> --port <port> \
     --gpu-memory-utilization <util> \
-    --enable-auto-tool-choice --tool-call-parser <parser> \
-    [--allowed-local-media-path ...]
+    [--enable-auto-tool-choice --tool-call-parser <parser>] \
+    [--allowed-local-media-path ...] [--override-generation-config ...]
 ```
 
 ---
@@ -89,6 +92,15 @@ agentfly swebench \
     --vllm-base-url http://localhost:8000/v1
 ```
 
+!!! note "Stopping a run"
+    With `--backend async_vllm` the vLLM engine runs in a separate process, and killing only the
+    main process leaves the engine holding the GPU. Stop the run with Ctrl+C, or stop the engine
+    (a child of the main process) along with it:
+
+    ```bash
+    pkill -P <pid>; kill <pid>     # <pid>: the agentfly swebench process
+    ```
+
 ### Required
 
 | Flag | Purpose |
@@ -106,6 +118,8 @@ agentfly swebench \
 | `--max-turns` | `30` | Per-sample turn cap. |
 | `--num-chains` | `1` | Parallel chains per sample. |
 | `--max-concurrent-chains` | unlimited | Cap concurrent chains across the batch. |
+| `--limit` | all | Run at most this many samples (after shuffling). `--limit 1` runs a single task, a quick setup check. |
+| `--seed` | `None` | Shuffle the dataset with this seed before `--limit`. |
 
 ### Agent / tools / reward
 
@@ -173,6 +187,30 @@ python -m agentfly.cli search
 ```
 
 It needs FAISS from the `search` extra (`uv pip install "agentfly-rl[search]"`, or `uv sync --extra search` from source). The corpus and FAISS index are downloaded into `$AF_CACHE_DIR/data/search/` by `agentfly.utils.download.ensure_tool_data("async_dense_retrieve")` if they're not already present, after an approval prompt that shows their size (set `AF_ASSUME_YES=1` to accept non-interactively).
+
+---
+
+## `agentfly pull-images`
+
+Pre-pulls the enroot images named by a dataset's `image_id` field (SWE-bench, R2E-Gym, SWE-smith), so training doesn't pull them mid-rollout. See [SWE Task Setup](../examples/swe.md#3-pre-pull-the-container-images).
+
+```bash
+export ENROOT_IMAGES_PATH=/big/disk/enroot/images/r2e-gym-lite
+agentfly pull-images data/rlhf/os/r2e-gym-lite.json --dry-run   # how many are missing
+agentfly pull-images data/rlhf/os/r2e-gym-lite.json -j 4
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `datasets` (positional) | — | One or more dataset files (`.json` list or `.jsonl`). |
+| `--to` | `$ENROOT_IMAGES_PATH`, else `~/.cache/enroot/images` | Directory to save images in. Training must use the same directory via `ENROOT_IMAGES_PATH`. |
+| `--field` | `image_id` | Record field holding the image reference. |
+| `--registry` | Docker Hub | Registry to pull from, e.g. `ghcr.io` for SWE-bench Verified. File names don't include it, so training finds the images either way. |
+| `-j`, `--jobs` | `4` | Parallel pulls. |
+| `--retries` | `3` | Attempts per image, with backoff. |
+| `--dry-run` | off | Only report how many images are missing. |
+
+Images already in the directory are skipped, so rerunning the same command resumes an interrupted run or retries failures (listed in `failed_pulls.txt`). Each pull writes to a `.partial/` subfolder first, so an interrupted pull never leaves a truncated image behind. The exit code is 1 if any image failed.
 
 ---
 

@@ -2,7 +2,7 @@
 Python HTTP sandbox environment.
 
 Subclasses ContainerResource to add HTTP /exec and /health behavior
-for the reasonwang/python-http-env image. The runner starts the container
+for the reasonwang/python-env image. The runner starts the container
 with port mapping; this class connects an httpx client and uses /exec for run_code.
 """
 
@@ -18,7 +18,7 @@ from ..resources import ContainerResource, ContainerResourceSpec
 
 PythonSandboxSpec = ContainerResourceSpec(
     category="python_env",
-    image="reasonwang/python-http-env:latest",
+    image="reasonwang/python-env:latest",
     ports={"8000/tcp": None},
     container_port=8000,
     start_timeout=60,

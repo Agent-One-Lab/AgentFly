@@ -17,7 +17,6 @@ from ...decorator import tool
 @tool(
     name="webshop_browser",
     description="Browse the webshop by searching or clicking. The action is either 'search' or 'click' and the value is the search query or the element to click. Clickables: 'Buy Now', 'Next >', '< Prev', 'Back to Search', 'Description', 'Features', 'Reviews', 'Attributes', product ASIN or ID like 'B079HGJ5MH' and their attributes or variants like 'Yellow', 'Blue', 'Small', 'Large', 'XL', '40x60', etc.",
-    stateful=True,
 )
 async def webshop_browser(action: str, value: str, context: Context):
     """
@@ -119,8 +118,6 @@ def _is_rejected(result: Any) -> bool:
 @tool(
     name="webshop_browser_action",
     description="Browse the webshop by searching or clicking. The action is either 'search[<query>]' or 'click[<element>]' and must be one of the admissible actions shown with the current page.",
-    stateful=True,
-    pool_size=16,
 )
 async def webshop_browser_action(action: str, context: Context):
     """

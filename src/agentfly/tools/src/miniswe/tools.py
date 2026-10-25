@@ -37,6 +37,7 @@ from ....core import Context
 from ....resources import ContainerResourceSpec
 from ...decorator import tool
 from ...types import ToolResult
+from ...utils.task_repo import checkout_task_commit
 
 WORKSPACE_DIR = "/workspace"
 # Per-command timeout. 30s matches the trajectory-collection environment
@@ -158,6 +159,13 @@ async def miniswe_bash(command: str, context: Context):
         backend=context.resource_backend,
         timeout=1200,
     )
+
+    # SWE-smith: put the repo on the task's bug branch before the first command.
+    error = await checkout_task_commit(container, context)
+    if error:
+        return ToolResult(
+            name="bash", arguments={"command": command}, observation=format_observation(1, error), status="error"
+        )
 
     workdir = context.metadata.get("workdir") or WORKSPACE_DIR
     timeout = context.metadata.get("exec_timeout") or EXEC_TIMEOUT_DEFAULT

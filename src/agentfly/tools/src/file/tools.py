@@ -13,6 +13,7 @@ from .... import AF_CONTAINER_TOOLS_DIR
 from ....core import Context
 from ....resources import ContainerResourceSpec
 from ...decorator import tool
+from ...utils.task_repo import checkout_task_commit
 
 # Path inside the container where the file module is mounted. Lives under the
 # single agentfly container home (AF_CONTAINER_TOOLS_DIR = $AF_CONTAINER_HOME/
@@ -45,6 +46,10 @@ async def _run_file_tool(context: Context, tool_name: str, params: dict) -> str:
         docker_host=context.metadata.get("docker_host"),
     )
     container = await context.acquire_resource(id=rollout_id, spec=spec)
+    # SWE-smith: put the repo on the task's bug branch before the first file operation.
+    error = await checkout_task_commit(container, context)
+    if error:
+        return error
     # Copy-on-demand: stage the file module into the container the first time a
     # file tool runs this rollout (no bind mount — works for skills from any
     # host root too, and avoids the "mounts fixed at first acquire" constraint).

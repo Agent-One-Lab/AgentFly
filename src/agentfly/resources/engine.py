@@ -21,6 +21,11 @@ if TYPE_CHECKING:
     from .runner import BaseRunner
 
 
+def _kind(pool_key: str) -> str:
+    """The resource kind of a pool key: category plus image / model / env class, without placement."""
+    return pool_key.split("|", 1)[0]
+
+
 def _pool_key(spec: BaseResourceSpec, backend: str) -> str:
     """Stable key for (spec, backend). Use '|' so backend can be parsed."""
     image = getattr(spec, "image", None)
@@ -189,7 +194,12 @@ class ResourceEngine:
             while True:
                 # If already acquired (or being acquired) for this id, return or wait.
                 if id in cls._acquired:
-                    resource, _ = cls._acquired[id]
+                    resource, held_key = cls._acquired[id]
+                    if _kind(held_key) != _kind(key):
+                        raise ValueError(
+                            f"Resource id {id!r} is already acquired for {_kind(held_key)!r}, not "
+                            f"{_kind(key)!r}. Give each resource a different id."
+                        )
                     if resource is not None:
                         return resource
                     # placeholder present; wait for the first caller to finish starting it

@@ -1,4 +1,4 @@
-"""Code tools: run Python in an isolated sandbox container.
+"""Code tools: run Python in a sandbox container.
 
 ``code_interpreter`` (decorator-based) and :class:`CodeInterpreterTool` (class-based) execute code
 in a Python sandbox acquired through the context (``scope="global"``) and return stdout/stderr.
@@ -15,15 +15,19 @@ from ...tool_base import BaseTool
 # --8<-- [start:code_interpreter_example]
 @tool(
     name="code_interpreter",
-    description="Run the code in docker container and return the output from stdout or stderr",
+    description=(
+        "Run Python code in a sandbox and return its stdout or stderr. Each call runs in a fresh "
+        "Python process, so define everything the code needs (imports, variables, functions) in the same call."
+    ),
 )
 async def code_interpreter(code: str, context: Context):
     """
-    Run the code in docker container and return the output from stdout or stderr.
+    Run Python code in a sandbox and return its stdout or stderr.
 
-    Uses one Python sandbox per rollout (acquired via Context); the sandbox is
-    released when the rollout ends. Warm the pool at training start with
-    ResourceEngine.start(python_sandbox_spec(), size=32, backend="local") if needed.
+    The sandbox container comes from a pool shared by all rollouts (``scope="global"``) and
+    goes back to it when the rollout ends; every call runs in a fresh Python process, so no
+    state leaks between calls or rollouts. Warm the pool at training start with
+    ``ResourceEngine.start(PythonSandboxSpec, size=32, backend="local")`` if needed.
 
     Args:
         code: The code to run.
@@ -47,7 +51,10 @@ async def code_interpreter(code: str, context: Context):
 
 class CodeInterpreterTool(BaseTool):
     name = "code_interpreter_tool"
-    description = "Run the code in docker container and return the output from stdout or stderr"
+    description = (
+        "Run Python code in a sandbox and return its stdout or stderr. Each call runs in a fresh "
+        "Python process, so define everything the code needs (imports, variables, functions) in the same call."
+    )
 
     def __init__(self):
         super().__init__()

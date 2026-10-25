@@ -95,6 +95,12 @@ from agentfly.tools import tool
 --8<-- "src/agentfly/tools/src/code/tools.py:code_interpreter_example"
 ```
 
+!!! note "Passing tools to an agent"
+    Constructing an agent directly takes tool objects: `HFAgent(tools=[calculator, my_tool])`.
+    Tool names (`"calculator"`) and import paths (`"my_pkg.tools:my_tool"`,
+    `"/path/tools.py:my_tool"`) are for `AutoAgent.from_config` and the training config
+    (`agent.init_config.tools`).
+
 ## Tool Calling
 
 ### Asynchronous
