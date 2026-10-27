@@ -11,19 +11,20 @@ Run:
 
 import logging
 import os
+import sys
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .... import AGENT_CACHE_DIR
+from .... import AF_CACHE_DIR
 from .async_dense_retriever import DenseRetriever
 
 logger = logging.getLogger(__name__)
 
 # Config from env (same defaults as async_dense_retrieve tool)
-DEFAULT_CORPUS = os.path.join(AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl")
-DEFAULT_INDEX = os.path.join(AGENT_CACHE_DIR, "data", "search", "e5_Flat.index")
+DEFAULT_CORPUS = os.path.join(AF_CACHE_DIR, "data", "search", "wiki-18.jsonl")
+DEFAULT_INDEX = os.path.join(AF_CACHE_DIR, "data", "search", "e5_Flat.index")
 
 app = FastAPI(title="Dense Retriever API", version="1.0")
 retriever: DenseRetriever | None = None
@@ -48,9 +49,7 @@ async def startup():
     corpus_file = os.environ.get("RETRIEVER_CORPUS_FILE", DEFAULT_CORPUS)
     index_file = os.environ.get("RETRIEVER_INDEX_FILE", DEFAULT_INDEX)
     logger.info("Loading retriever: corpus=%s index=%s", corpus_file, index_file)
-    retriever = DenseRetriever(
-        corpus_file=corpus_file, index_file=index_file, max_concurrent=8
-    )
+    retriever = DenseRetriever(corpus_file=corpus_file, index_file=index_file, max_concurrent=8)
     logger.info("Retriever ready.")
 
 
@@ -66,19 +65,50 @@ async def search(req: SearchRequest):
     try:
         results = await retriever.search([req.query], top_k=req.top_k)
         docs = results[0]
-        return SearchResponse(
-            results=[DocResult(contents=d.get("contents", "")) for d in docs]
-        )
+        return SearchResponse(results=[DocResult(contents=d.get("contents", "")) for d in docs])
     except Exception as e:
         logger.exception("Search failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
+HELP = f"""Usage: agentfly search
+
+Start the dense-retriever HTTP server (E5 embeddings + FAISS index over a Wikipedia corpus).
+
+Endpoints:
+  POST /search   {{"query": "...", "top_k": 3}} -> {{"results": [{{"contents": "..."}}]}}
+  GET  /health
+
+Environment variables:
+  RETRIEVER_HOST         host to bind (default: 0.0.0.0)
+  RETRIEVER_PORT         port (default: 8765)
+  RETRIEVER_CORPUS_FILE  corpus JSONL (default: {DEFAULT_CORPUS})
+  RETRIEVER_INDEX_FILE   FAISS index (default: {DEFAULT_INDEX})
+
+With the default paths, a missing corpus or index is downloaded first (about 65 GB) after an
+approval prompt; set AF_ASSUME_YES=1 to accept non-interactively. Needs the `search` extra (faiss).
+"""
+
+
 def main():
-    """
-    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH}"
-    python -m agentfly.tools.src.search.retriever_server
-    """
+    """Start the retriever server: ``agentfly search`` (configured by the ``RETRIEVER_*`` env vars)."""
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        print(HELP)
+        return
+    corpus_file = os.environ.get("RETRIEVER_CORPUS_FILE", DEFAULT_CORPUS)
+    index_file = os.environ.get("RETRIEVER_INDEX_FILE", DEFAULT_INDEX)
+    if (corpus_file, index_file) == (DEFAULT_CORPUS, DEFAULT_INDEX):
+        # Before the server starts, so the approval prompt reaches the terminal.
+        from ....utils.download import ensure_tool_data
+
+        ensure_tool_data("async_dense_retrieve")
+    else:
+        missing = [p for p in (corpus_file, index_file) if not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError(
+                f"Retriever data not found: {missing}. Only the default location "
+                f"({os.path.dirname(DEFAULT_CORPUS)}) is downloaded automatically."
+            )
     host = os.environ.get("RETRIEVER_HOST", "0.0.0.0")
     port = int(os.environ.get("RETRIEVER_PORT", "8765"))
     uvicorn.run(app, host=host, port=port, log_level="info")

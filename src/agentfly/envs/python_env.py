@@ -2,7 +2,7 @@
 Python HTTP sandbox environment.
 
 Subclasses ContainerResource to add HTTP /exec and /health behavior
-for the reasonwang/python-http-env image. The runner starts the container
+for the reasonwang/python-env image. The runner starts the container
 with port mapping; this class connects an httpx client and uses /exec for run_code.
 """
 
@@ -11,12 +11,14 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any
+
 import httpx
+
 from ..resources import ContainerResource, ContainerResourceSpec
 
 PythonSandboxSpec = ContainerResourceSpec(
     category="python_env",
-    image="reasonwang/python-http-env:latest",
+    image="reasonwang/python-env:latest",
     ports={"8000/tcp": None},
     container_port=8000,
     start_timeout=60,
@@ -79,9 +81,7 @@ class PythonSandboxEnv(ContainerResource):
             logs = logs.decode() if hasattr(logs, "decode") else str(logs)
         except Exception:
             logs = "Could not get logs"
-        raise RuntimeError(
-            f"Sandbox did not become ready within {self._start_timeout}s.\n{logs}"
-        )
+        raise RuntimeError(f"Sandbox did not become ready within {self._start_timeout}s.\n{logs}")
 
     async def start(self) -> None:
         await super().start()
@@ -90,9 +90,7 @@ class PythonSandboxEnv(ContainerResource):
 
     async def reset(self, *args: Any, **kwargs: Any) -> Any:
         try:
-            await asyncio.wait_for(
-                self.step("globals().clear()"), timeout=20.0
-            )
+            await asyncio.wait_for(self.step("globals().clear()"), timeout=20.0)
         except (asyncio.TimeoutError, httpx.TransportError):
             await self.end()
             await super().start()

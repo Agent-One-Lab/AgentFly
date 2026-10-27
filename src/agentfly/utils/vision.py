@@ -1,5 +1,8 @@
+"""Image helpers: open images from paths, URLs or base64, convert between formats (PIL, data URIs), and display images and messages in terminals or Jupyter."""
+
 import base64
 import io
+import math
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 from urllib.parse import urlparse
@@ -38,10 +41,6 @@ def open_image_from_any(src: str | Image.Image, *, timeout: int = 10) -> Image.I
         resp.raise_for_status()
         return Image.open(io.BytesIO(resp.content))
 
-        # --- urllib version (uncomment if you can’t pip-install requests)
-        # with urllib_request.urlopen(src, timeout=timeout) as fp:
-        #     return Image.open(fp)
-
     # 2) Detect a base-64 string ------------------------------------------------------
     #    • data-URI style:  "data:image/png;base64,……"
     #    • bare base-64    :  "iVBORw0KGgoAAAANSUhEUgAABVYA…"
@@ -65,6 +64,48 @@ def open_image_from_any(src: str | Image.Image, *, timeout: int = 10) -> Image.I
     if not path.is_file():
         raise FileNotFoundError(f"Image file not found: {path}")
     return Image.open(path)
+
+
+def any_to_pil(img: Union[Image.Image, str, dict, bytes]) -> Image.Image:
+    """Convert a PIL image, file path, base64 string / data URI, ``{"bytes": ...}`` dict or raw
+    bytes to a PIL image."""
+    if isinstance(img, Image.Image):
+        return img
+    elif isinstance(img, dict):
+        if "bytes" in img:
+            img = img["bytes"]
+        else:
+            raise ValueError("Dictionary must contain 'bytes' key")
+
+    if isinstance(img, str):
+        if img.startswith("data:image/"):
+            header, encoded = img.split(",", 1)
+            return Image.open(io.BytesIO(base64.b64decode(encoded)))
+        elif len(img) > 100 and all(
+            c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=" for c in img
+        ):
+            # Likely a bare base64 string; fall back to a file path if it doesn't decode.
+            try:
+                return Image.open(io.BytesIO(base64.b64decode(img)))
+            except Exception:
+                pass
+        return Image.open(img)
+    elif isinstance(img, bytes):
+        return Image.open(io.BytesIO(img))
+    else:
+        raise ValueError(f"Unsupported image type: {type(img)}")
+
+
+def auto_resize_image(img: Image.Image, max_pixels: int = 1536 * 1536, prevent_upscale: bool = True) -> Image.Image:
+    """Downscale ``img`` to at most ``max_pixels`` pixels, keeping its aspect ratio."""
+    w, h = img.size
+    area = w * h
+    if area <= max_pixels and prevent_upscale:
+        return img  # already within budget
+    scale = math.sqrt(max_pixels / area) if area > 0 else 1.0
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    return img.resize((new_w, new_h), Image.LANCZOS)
 
 
 def image_to_data_uri(img: Union[Image.Image, str, dict], fmt=None) -> str:
@@ -161,12 +202,6 @@ def _is_jupyter() -> bool:
 
 
 def _unicode_half_block(image: Image.Image, width: int):
-    # if columns is None:
-    #     try:
-    #         columns = shutil.get_terminal_size((80, 24)).columns
-    #     except Exception:
-    #         columns = 80
-
     img = image.convert("RGB")
     target_w = min(width, img.width)
     aspect = img.height / img.width if img.width else 1.0

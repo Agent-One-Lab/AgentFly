@@ -2,7 +2,7 @@
 
 AgentFly trains via verl's PPO trainer (`python3 -m agentfly.cli train ...`), which is Hydra-driven. Every key in your training script of the form `namespace.path=value` overrides a node in the underlying Hydra config tree.
 
-The full schema lives upstream in verl: `verl/verl/trainer/config/ppo_trainer.yaml`. This page lists the **keys you actually need to set** in practice, organized by namespace, with notes on what each one controls. For the canonical end-to-end example, see [First Training](first_training.md).
+The full schema is `ppo_trainer.yaml`, AgentFly's copy of verl's trainer config with the `agent.*` keys added (see *Where to Look When You Need More*). This page lists the **keys you actually need to set** in practice, organized by namespace, with notes on what each one controls. For the canonical end-to-end example, see [First Training](first_training.md).
 
 ## Namespaces at a Glance
 
@@ -36,24 +36,54 @@ These are the keys defined by AgentFly itself (the rest are inherited from verl)
 | `agent.init_config.template` | Chat template name (e.g. `qwen2.5`, `qwen2.5-vl`, `qwen2.5-no-system-tool`). |
 | `agent.init_config.tools` | List of tool names available to the agent, e.g. `[calculator]` or `[code_interpreter]`. |
 | `agent.init_config.reward_name` | Name of the reward function registered via `@reward(name=...)`. |
-| `agent.init_config.backend` | Generation backend during training (typically `async_verl`). |
+| `agent.init_config.backend_config.backend` | Generation backend during training (`async_verl`). |
 | `agent.init_config.tool_parser_name` | Optional tool-call parser identifier (e.g. `hermes`). |
 | `agent.init_config.max_model_len` | Max sequence length the model engine should support. |
-| `agent.max_turns` | Max number of generation/tool turns per chain. |
-| `agent.num_chains` | Number of parallel chains (trajectories) per prompt. Higher → more samples for GRPO/RLOO. |
 | `agent.train_on_last_turn` | If `True`, only compute loss on the last assistant turn. Useful for stability on long rollouts. |
-| `agent.generation_config.max_tokens` | Max tokens generated per turn. |
+| `agent.run_config.max_turns` | Max number of generation/tool turns per chain. |
+| `agent.run_config.num_chains` | Number of parallel chains (trajectories) per prompt. Higher → more samples for GRPO/RLOO. |
+| `agent.run_config.generation_config.max_tokens` | Max tokens generated per turn (also `temperature`, etc.). |
+| `agent.run_config.rollout` | Rollout strategy: `chain` (one growing conversation per trajectory) or `step` (one training row per step, with a bounded history). |
+| `agent.run_config.rollout_config` | Keyword options for the rollout, e.g. for `step`: `{prompt_builder: alfworld_flat, history_length: 2, max_prompt_length: 2048}`, and the loop-control policy (`on_no_tool_call`, `on_invalid_tool_call`, `on_tool_error`). |
+| `agent.run_config.use_token_ids` | `true` (default): train on the token ids the model sampled. `false`: re-encode every turn from text. |
 | `agent.run_config.context_config.resource_backend` | Where containers are allocated: `local` or a cluster backend. |
 | `agent.run_config.max_concurrent_chains` | Cap on chains running concurrently (memory protection). `null` for no extra cap. |
 
-Some scripts use `agent.run_config.max_turns` and `agent.run_config.num_chains` — these are equivalent to `agent.max_turns` / `agent.num_chains` and reach the same Hydra node.
+Rollout settings live under `agent.run_config.*` and agent construction under `agent.init_config.*`; top-level keys such as `agent.max_turns` or `agent.generation_config.*` do not exist and are rejected by Hydra.
 
 ## `algorithm.*` — RL Algorithm
 
 | Key | Description |
 |---|---|
-| `algorithm.adv_estimator` | Advantage estimator: `grpo`, `rloo`, `reinforce_plus_plus`, `remax`, or `gae`. `grpo` is the most common for tool-using agents. |
+| `algorithm.adv_estimator` | Advantage estimator: `grpo`, `rloo`, `reinforce_plus_plus`, `remax`, or `gae` (from verl); `gigpo`, `opd`, and the context-folding estimators (from `agentfly.algorithms`); or the import reference of your own estimator (see below). `grpo` is the most common for tool-using agents. |
 | `algorithm.kl_ctrl.kl_coef` | KL penalty coefficient against the reference model. Common values: `0.0` to `0.001`. |
+| `algorithm.gamma` / `algorithm.lam` | Discount and GAE lambda (default `1.0` / `1.0`). For `gae` and `reinforce_plus_plus` the discount is per generated token; GiGPO applies `gamma` per turn for its step-level returns. |
+| `algorithm.norm_adv_by_std_in_grpo` | Divide group-relative advantages by the group's standard deviation (default `true`). |
+| `algorithm.step_advantage_w` | GiGPO: weight of the step-level advantage added to the episode-level one (default `1.0`). `0` gives outcome-level GRPO through the same estimator. |
+| `algorithm.gigpo_mode` | GiGPO normalization: `mean_std_norm` (default) or `mean_norm`. |
+| `algorithm.invalid_action_penalty_coef` | GiGPO: penalty subtracted from the step return of turns marked invalid (default `0.1`). The check expects the `<think>`/`<action>` output format, so set it to `0` for agents that call tools another way. |
+| `algorithm.estimator_kwargs` | Free-form options for the estimator named by `adv_estimator`; your estimator reads them from the algorithm config it receives. |
+| `algorithm.metrics` | Extra per-step metric functions, as import references (`["my_project.metrics:fn"]`); each is called as `fn(batch, algorithm_config) -> dict` after the advantage step. |
+
+### Custom estimators
+
+An estimator defined outside AgentFly is registered with `@register_estimator`, one function per batch layout it supports (`per_segment` for chain rollout, `per_step` for step rollout), and selected by its import reference, the same `module:attribute` or `/path/file.py:attribute` form that tools, rewards, and agents accept:
+
+```python
+# my_project/algorithms.py
+from agentfly.algorithms import register_estimator
+
+@register_estimator("my_grpo", layout="per_segment")
+def my_grpo(data, config):
+    ...
+    return advantages, returns  # [B, L] tensors
+```
+
+```bash
+algorithm.adv_estimator="my_project.algorithms:my_grpo"
+```
+
+The trainer imports the module once at startup, which registers every layout defined under `my_grpo`, and then uses the registered name.
 
 ## `actor_rollout_ref.*` — Actor / Rollout / Reference
 
@@ -129,15 +159,23 @@ Only relevant when `algorithm.adv_estimator=gae` (GRPO and similar are critic-fr
 
 ## Canonical Example
 
-The WebShop training script wires the above together as a single `agentfly.cli train` invocation. This is a clean Hydra-only example (Ray cluster setup is handled separately by your launcher):
+The WebShop chain-rollout script wires the above together: it starts a local Ray cluster, then runs a single `agentfly.cli train` invocation with the Hydra overrides (pick the estimator and model size as arguments, e.g. `bash train_webshop_chain.sh grpo 3B`):
 
 ```bash
---8<-- "examples/train_scripts/webshop/train_webshop.sh"
+--8<-- "examples/train_scripts/webshop/train_webshop_chain.sh"
 ```
 
 ## Where to Look When You Need More
 
-- **Full Hydra schema** — `verl/verl/trainer/config/ppo_trainer.yaml`. Everything not listed above is in there with defaults.
-- **Generated schemas** — `verl/verl/trainer/config/_generated_ppo_trainer.yaml` (the materialized config tree, useful for grepping).
-- **Per-run config dump** — Run with `agent.use_agent=True ... +hydra.job.chdir=False trainer.print_config=True` (when supported) to see the exact resolved config for a run.
+- **Full config with defaults** — print it, or one section of it, with Hydra's `--cfg job` (add your overrides to see their effect):
+
+    ```bash
+    agentfly train --cfg job                     # everything
+    agentfly train --cfg job --package agent     # only agent.*
+    ```
+
+- **Schema files** — `agentfly/verl/trainer/config/ppo_trainer.yaml` inside the installed package
+  (find it with `python -c "import agentfly.verl.trainer.config as c; print(c.__path__[0])"`); in a source
+  checkout this is `verl/verl/trainer/config/`. `_generated_ppo_trainer.yaml` next to it is the fully
+  expanded tree, useful for grepping.
 - **Other shipped scripts** — `examples/train_scripts/{webshop,alfworld,scienceworld,search,swe,vqa,...}/` show domain-specific overrides (different reward names, tools, batch sizes, sequence-parallel settings).

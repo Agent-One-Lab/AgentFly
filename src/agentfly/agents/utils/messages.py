@@ -1,3 +1,9 @@
+"""Validation of agent input messages.
+
+:class:`Messages` checks one task item (a dict with ``messages`` and optional dataset fields);
+:class:`MessagesList` checks a batch of them before a run.
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -5,15 +11,41 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence,
 
 import numpy as np
 
-Part = Dict[
-    str, Any
-]  # e.g., {"type": "text", "text": "..."} or {"type": "image", "image": "..."}
+Part = Dict[str, Any]  # e.g., {"type": "text", "text": "..."} or {"type": "image", "image": "..."}
 Turn = Dict[str, Any]  # {"role": "...", "content": [Part, ...], ...}
 MessageDict = Dict[str, Any]  # {"messages": [Turn, ...], <other meta keys>...}
 
 
 class MessagesValidationError(ValueError):
     pass
+
+
+# Dataset fields that hold the task prompt, in priority order (the first one present wins).
+QUESTION_KEYS = ("prompt", "question", "instruction", "problem")
+
+
+def row_to_messages(row: Mapping[str, Any]) -> MessageDict:
+    """Turn a dataset row into an agent input item: the rule both training and ``agent.run`` use.
+
+    The prompt (the first of :data:`QUESTION_KEYS` present) becomes a user turn, with the row's
+    ``image`` (if any) attached as a data URI. Every other field is carried over for tools and
+    rewards; a row's own ``messages`` field, if present, replaces the generated turn.
+    """
+    question = next((row[k] for k in QUESTION_KEYS if k in row), None)
+    if question is None:
+        raise MessagesValidationError(
+            f"Row has no prompt field: expected 'messages' or one of {', '.join(QUESTION_KEYS)}; "
+            f"got keys {sorted(row)}."
+        )
+    content: List[Part] = [{"type": "text", "text": question}]
+    if "image" in row:
+        from ...utils.vision import any_to_pil, auto_resize_image, image_to_data_uri
+
+        uri = image_to_data_uri(auto_resize_image(any_to_pil(row["image"])))
+        content.append({"type": "image_url", "image_url": {"url": uri}})
+    item: MessageDict = {"messages": [{"role": "user", "content": content}], "question": question}
+    item.update({k: v for k, v in row.items() if k != "question"})
+    return item
 
 
 class Messages:
@@ -37,9 +69,7 @@ class Messages:
         allow_legacy_content: bool = True,
     ) -> None:
         if not isinstance(data, Mapping):
-            raise MessagesValidationError(
-                f"Message must be a dict, got {type(data).__name__}"
-            )
+            raise MessagesValidationError(f"Message must be a dict, got {type(data).__name__}")
         if "messages" not in data:
             raise MessagesValidationError("Message dict must contain a 'messages' key.")
 
@@ -71,9 +101,7 @@ class Messages:
         if ptype == "image":
             # accept either 'image' (e.g., base64) or 'image_url'
             if "image" not in p and "image_url" not in p:
-                raise MessagesValidationError(
-                    "Image part must include 'image' or 'image_url'."
-                )
+                raise MessagesValidationError("Image part must include 'image' or 'image_url'.")
             return dict(p)
 
         # Unknown part type: require at least 'type'; pass through
@@ -101,9 +129,7 @@ class Messages:
                 f"Turn{'' if idx is None else f' at index {idx}'} must be a dict, got {type(t).__name__}"
             )
         if "role" not in t:
-            raise MessagesValidationError(
-                f"Turn{'' if idx is None else f' at index {idx}'} missing 'role'."
-            )
+            raise MessagesValidationError(f"Turn{'' if idx is None else f' at index {idx}'} missing 'role'.")
         role = t["role"]
         if not isinstance(role, str):
             raise MessagesValidationError("Turn 'role' must be a string.")
@@ -113,9 +139,7 @@ class Messages:
         else:
             content = t["content"]
             if isinstance(content, list):
-                content_parts = [
-                    self._validate_part(p, i) for i, p in enumerate(content)
-                ]
+                content_parts = [self._validate_part(p, i) for i, p in enumerate(content)]
                 if len(content_parts) == 0:
                     raise MessagesValidationError(
                         f"Turn {'' if idx is None else f' at index {idx}'} 'content' must contain at least one part."
@@ -182,21 +206,57 @@ class Messages:
         out["messages"] = list(self._data["messages"])
         return out
 
+    def set_first_user_content(self, text: str) -> None:
+        """Replace the content of the first user turn with ``text``.
+
+        Used when the instruction should come from the environment (its single source
+        of truth) rather than a baked dataset field — e.g. WebShop, where the agent must
+        read the instruction from the server's ``goals[task_id]`` so it always matches
+        the goal it is graded on.
+        """
+        assert isinstance(text, str), "First user content must be a string."
+        for turn in self._data["messages"]:
+            if turn.get("role") == "user":
+                turn["content"] = [{"type": "text", "text": text}]
+                return
+        raise MessagesValidationError("No user turn to set content on.")
+
+    def append_first_user_content(self, text: str) -> None:
+        """Append ``text`` to the first user turn (blank-line separated).
+
+        Used when the environment contributes an initial observation that should
+        follow the dataset instruction rather than replace it — e.g. ALFWorld,
+        where the goal comes from the dataset question but the initial room
+        observation and admissible actions come from ``env.reset()``.
+        """
+        assert isinstance(text, str), "Appended user content must be a string."
+        for turn in self._data["messages"]:
+            if turn.get("role") == "user":
+                content = turn.get("content")
+                if isinstance(content, list):
+                    existing = "\n".join(
+                        c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"
+                    ).strip()
+                elif isinstance(content, str):
+                    existing = content.strip()
+                else:
+                    existing = ""
+                combined = f"{existing}\n\n{text}" if existing else text
+                turn["content"] = [{"type": "text", "text": combined}]
+                return
+        raise MessagesValidationError("No user turn to append content on.")
+
     def set_system_prompt(self, system_prompt: str, enforce: bool = True) -> None:
         assert isinstance(system_prompt, str), "System prompt must be a string."
 
         if "messages" in self._data:
             if self._data["messages"][0]["role"] == "system":
                 if enforce:
-                    self._data["messages"][0]["content"] = [
-                        {"type": "text", "text": system_prompt}
-                    ]
+                    self._data["messages"][0]["content"] = [{"type": "text", "text": system_prompt}]
                 else:
                     raise MessagesValidationError("System prompt already exists.")
             else:
-                self._data["messages"].insert(
-                    0, {"role": "system", "content": system_prompt}
-                )
+                self._data["messages"].insert(0, {"role": "system", "content": system_prompt})
 
     def __len__(self) -> int:
         return len(self._data["messages"])
@@ -282,21 +342,15 @@ class MessagesList:
         default_meta = dict(default_meta or {})
         ms = cls(strict=strict, allow_legacy_content=allow_legacy_content)
 
-        # 3) Dict with 'messages'
+        # 3) Dict with 'messages' (or a dataset row with a prompt field)
         if isinstance(data, Mapping):
             if "messages" not in data:
-                raise MessagesValidationError(
-                    "Dict input must contain a 'messages' key."
-                )
-            ms.append(
-                Messages(data, strict=strict, allow_legacy_content=allow_legacy_content)
-            )
+                data = row_to_messages(data)
+            ms.append(Messages(data, strict=strict, allow_legacy_content=allow_legacy_content))
             return ms
 
         if not isinstance(data, Sequence):
-            raise MessagesValidationError(
-                f"Unsupported input type: {type(data).__name__}"
-            )
+            raise MessagesValidationError(f"Unsupported input type: {type(data).__name__}")
 
         seq = list(data)
         if not seq:
@@ -304,24 +358,21 @@ class MessagesList:
 
         first = seq[0]
 
-        # 1) List[Dict] each with 'messages'
-        if isinstance(first, Mapping) and "messages" in first:
+        # 1) List[Dict], each with 'messages' or a prompt field (dataset rows, as in training)
+        if isinstance(first, Mapping) and ("messages" in first or any(k in first for k in QUESTION_KEYS)):
             for i, item in enumerate(seq):
-                if not isinstance(item, Mapping) or "messages" not in item:
-                    raise MessagesValidationError(
-                        f"List appears to be message items but index {i} is not a dict with 'messages'."
-                    )
-                ms.append(
-                    Messages(
-                        item, strict=strict, allow_legacy_content=allow_legacy_content
-                    )
-                )
+                if not isinstance(item, Mapping):
+                    raise MessagesValidationError(f"Item {i} is a {type(item).__name__}, expected a dict.")
+                if "messages" not in item:
+                    try:
+                        item = row_to_messages(item)
+                    except MessagesValidationError as e:
+                        raise MessagesValidationError(f"Item {i}: {e}") from None
+                ms.append(Messages(item, strict=strict, allow_legacy_content=allow_legacy_content))
             return ms
 
         # 2) List[List[Turn]]  (each inner list is a list of turns)
-        if cls._is_sequence(first) and (
-            len(first) == 0 or (isinstance(first[0], Mapping) and "role" in first[0])
-        ):
+        if cls._is_sequence(first) and (len(first) == 0 or (isinstance(first[0], Mapping) and "role" in first[0])):
             for inner in seq:
                 ms.append(
                     Messages.from_turns(
@@ -347,8 +398,8 @@ class MessagesList:
 
         raise MessagesValidationError(
             "Input does not match any accepted format. "
-            "Supported: list of dicts with 'messages', list of turn-lists, "
-            "single dict with 'messages', or a single list of turn dicts."
+            "Supported: list of dicts with 'messages' or a prompt field (dataset rows: "
+            f"{', '.join(QUESTION_KEYS)}), list of turn-lists, single dict, or a single list of turn dicts."
         )
 
     # ---- collection API ----

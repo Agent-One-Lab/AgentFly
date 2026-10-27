@@ -144,41 +144,6 @@ async def test_generate_async_with_tools(shared_async_vllm_backend):
 
 
 @pytest.mark.gpu
-@pytest.mark.asyncio(scope="session")
-async def test_generate_streaming(shared_async_vllm_backend):
-    """Test streaming generation"""
-    backend = shared_async_vllm_backend
-
-    messages_list = [[{"role": "user", "content": "Count from 1 to 5."}]]
-    responses = []
-    async for response in backend.generate_streaming(messages_list):
-        responses.append(response)
-
-    assert len(responses) > 0
-    # All responses should be strings
-    assert all(isinstance(r, str) for r in responses)
-    # Concatenated response should have content
-    full_response = "".join(responses)
-    assert len(full_response) > 0
-
-@pytest.mark.gpu
-@pytest.mark.asyncio(scope="session")
-async def test_generate_streaming_multiple_messages(shared_async_vllm_backend):
-    """Test streaming generation with multiple messages"""
-    backend = shared_async_vllm_backend
-
-    messages_list = [
-        [{"role": "user", "content": "Say hello."}],
-        [{"role": "user", "content": "Say goodbye."}],
-    ]
-    responses = []
-    async for response in backend.generate_streaming(messages_list):
-        responses.append(response)
-
-    assert len(responses) > 0
-    assert all(isinstance(r, str) for r in responses)
-
-@pytest.mark.gpu
 def test_process_inputs_without_vision(shared_async_vllm_backend):
     """Test _process_inputs without vision inputs"""
     backend = shared_async_vllm_backend
@@ -282,20 +247,3 @@ async def test_generate_async_with_multi_turn_conversation(shared_async_vllm_bac
     # The response should mention Alice since it's in the conversation history
     assert "Alice" in response[0] or "alice" in response[0].lower()
 
-@pytest.mark.gpu
-@pytest.mark.asyncio(scope="session")
-async def test_generate_streaming_with_custom_params(shared_async_vllm_backend):
-    """Test streaming generation with custom parameters"""
-    backend = shared_async_vllm_backend
-
-    messages_list = [[{"role": "user", "content": "List three colors."}]]
-    responses = []
-    async for response in backend.generate_streaming(
-        messages_list, temperature=0.5, max_tokens=100
-    ):
-        responses.append(response)
-
-    assert len(responses) > 0
-    assert all(isinstance(r, str) for r in responses)
-    full_response = "".join(responses)
-    assert len(full_response) > 0

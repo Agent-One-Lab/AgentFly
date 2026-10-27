@@ -9,7 +9,7 @@ Other Ray workers use the container by holding an :class:`ActorHandle` and calli
 
 Driver-side ``ray.get`` calls use finite ``timeout`` values (see module constants below).
 Override default cap for ``run_cmd`` when enroot ``timeout`` is omitted with environment
-variable ``AGENTFLY_RAY_GET_DEFAULT_TIMEOUT_SEC`` (default ``7200``).
+variable ``AF_RAY_GET_DEFAULT_TIMEOUT_SEC`` (default ``7200``).
 """
 
 from __future__ import annotations
@@ -19,11 +19,13 @@ import base64
 import os
 import shlex
 import time
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 import ray
-from enroot.errors import APIError, EnrootError, TimeoutError as EnrootTimeoutError
-from ray.exceptions import ActorDiedError, GetTimeoutError as RayGetTimeoutError
+from enroot.errors import APIError, EnrootError
+from enroot.errors import TimeoutError as EnrootTimeoutError
+from ray.exceptions import ActorDiedError
+from ray.exceptions import GetTimeoutError as RayGetTimeoutError
 
 from ..types import BaseResource, ContainerResourceSpec, ResourceStatus
 
@@ -44,7 +46,7 @@ _RAY_GET_ACTOR_DIED_BACKOFF_BASE_SEC = 8.0
 
 def _default_ray_get_unbounded_cmd_sec() -> float:
     try:
-        return float(os.environ.get("AGENTFLY_RAY_GET_DEFAULT_TIMEOUT_SEC", "7200"))
+        return float(os.environ.get("AF_RAY_GET_DEFAULT_TIMEOUT_SEC", "7200"))
     except ValueError:
         return 7200.0
 
@@ -63,9 +65,7 @@ def _ray_get_blocking(ref: Any, timeout_sec: Optional[float]) -> Any:
                 return ray.get(ref)
             return ray.get(ref, timeout=timeout_sec)
         except RayGetTimeoutError as e:
-            raise asyncio.TimeoutError(
-                f"ray.get timed out after {timeout_sec} seconds"
-            ) from e
+            raise asyncio.TimeoutError(f"ray.get timed out after {timeout_sec} seconds") from e
         except ActorDiedError:
             if attempt + 1 >= _RAY_GET_ACTOR_DIED_MAX_ATTEMPTS:
                 raise
@@ -109,9 +109,7 @@ def _sync_run_cmd(
         result = container.exec_run(exec_args, **kwargs)
     except EnrootTimeoutError as e:
         if timeout is not None:
-            raise asyncio.TimeoutError(
-                f"Command timed out after {timeout} seconds: {cmd}"
-            ) from e
+            raise asyncio.TimeoutError(f"Command timed out after {timeout} seconds: {cmd}") from e
         raise asyncio.TimeoutError(str(e)) from e
 
     output = result.output if hasattr(result, "output") else str(result)
@@ -133,13 +131,13 @@ class _RayEnrootContainerActorBase:
         spec: ContainerResourceSpec,
         start_timeout: Optional[float] = 1800.0,
     ):
-        from enroot import from_env, random_name
+        from enroot import from_env
+
+        from .enroot_containers import enroot_container_name, record_container, require_enroot, start_background_sweep
 
         if spec.category != "container":
-            raise ValueError(
-                f"RayEnrootContainerActor supports only category 'container', got {spec.category!r}"
-            )
-        name = resource_id or random_name(prefix="res")
+            raise ValueError(f"RayEnrootContainerActor supports only category 'container', got {spec.category!r}")
+        name = enroot_container_name(resource_id)
         image = spec.image or "ubuntu:22.04"
         timeout = start_timeout
         create_kwargs: dict[str, Any] = {
@@ -154,6 +152,9 @@ class _RayEnrootContainerActorBase:
             "environment": spec.environment or {},
             "mount": spec.mount or {},
         }
+        require_enroot()  # checked on the node the actor runs on
+        start_background_sweep()  # once per actor process, on this node
+        record_container(name)
         client = from_env()
         try:
             self._container = client.containers.create(image, **create_kwargs)
@@ -163,13 +164,9 @@ class _RayEnrootContainerActorBase:
                 f"Container create/start timed out for image={image!r}, name={name!r}, timeout={timeout!r}."
             ) from e
         except APIError as e:
-            raise RuntimeError(
-                f"Container create/start failed for image={image!r}, name={name!r}: {e}"
-            ) from e
+            raise RuntimeError(f"Container create/start failed for image={image!r}, name={name!r}: {e}") from e
         except EnrootError as e:
-            raise RuntimeError(
-                f"Container create/start failed for image={image!r}, name={name!r}: {e}"
-            ) from e
+            raise RuntimeError(f"Container create/start failed for image={image!r}, name={name!r}: {e}") from e
 
         self._resource_id = self._container.name
 
@@ -193,11 +190,34 @@ class _RayEnrootContainerActorBase:
 
     async def kill_container(self) -> None:
         if getattr(self, "_container", None) is not None:
+            from .enroot_containers import forget_container
+
             if hasattr(self._container, "kill_async"):
                 await self._container.kill_async()
             else:
                 self._container.kill()
+            forget_container(self._container.name)
             self._container = None
+
+    async def copy_to(self, local_path: str, container_path: str, timeout: float = 300) -> None:
+        """Copy a local file/dir (on this actor's node) into the enroot container.
+
+        Runs on the actor's node, where ``self._container`` lives; delegates to the
+        enroot handle's ``copy_to`` (async variant preferred), mirroring
+        :meth:`ContainerResource.copy_in`. ``local_path`` must be readable on this
+        node (true for shared-weka paths like the installed ``agentfly`` package).
+        """
+        if getattr(self, "_container", None) is None:
+            raise RuntimeError("Container already stopped")
+        handle = self._container
+        # enroot's put_archive (unlike docker's) does NOT create the destination
+        # dir before untarring, so tar fails with "Cannot open: No such file or
+        # directory". Mirror DockerContainer.put_archive and mkdir -p it first.
+        await self.run_cmd(f"mkdir -p {shlex.quote(container_path)}", timeout=60)
+        if hasattr(handle, "copy_to_async"):
+            await handle.copy_to_async(local_path, container_path, timeout)
+        else:
+            await asyncio.to_thread(handle.copy_to, local_path, container_path)
 
     async def raw_exec_run(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -241,9 +261,7 @@ class _RayEnrootContainerActorBase:
             if hasattr(self._container, "exec_run_async"):
                 return await self._container.exec_run_async(*args, **kwargs)
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, self._container.exec_run, *args, **kwargs
-            )
+            return await loop.run_in_executor(None, self._container.exec_run, *args, **kwargs)
         except EnrootTimeoutError as e:
             raise asyncio.TimeoutError(str(e)) from e
 
@@ -276,14 +294,10 @@ class _RayEnrootContainerActorBase:
             else:
                 # Fallback: shouldn't happen if enroot-py provides exec_run_async.
                 loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None, self._container.exec_run, exec_args, **kwargs
-                )
+                result = await loop.run_in_executor(None, self._container.exec_run, exec_args, **kwargs)
         except EnrootTimeoutError as e:
             if timeout is not None:
-                raise asyncio.TimeoutError(
-                    f"Command timed out after {timeout} seconds: {cmd}"
-                ) from e
+                raise asyncio.TimeoutError(f"Command timed out after {timeout} seconds: {cmd}") from e
             raise asyncio.TimeoutError(str(e)) from e
 
         output = result.output if hasattr(result, "output") else str(result)
@@ -293,6 +307,8 @@ class _RayEnrootContainerActorBase:
 
 
 RayEnrootContainerActor = ray.remote(num_cpus=1)(_RayEnrootContainerActorBase)
+"""Ray actor (1 CPU) that owns one enroot container on a Ray worker; the ``RayRunner`` starts
+one per container resource. See :class:`_RayEnrootContainerActorBase` for its methods."""
 
 
 class RaySyncExecRunProxy:
@@ -413,6 +429,20 @@ class RayContainerResource(BaseResource):
             except Exception:
                 pass
 
+    async def copy_in(self, local_path: str, container_path: str, timeout: Optional[float] = 300) -> None:
+        """Copy a local file/dir into the container on the actor's node.
+
+        Matches :meth:`ContainerResource.copy_in` so tool/reward code works across
+        local and Ray backends. Proxies to the actor's ``copy_to``; ``local_path`` is
+        resolved on the actor's node (shared-weka paths are visible there).
+        """
+        ref = self._actor.copy_to.remote(local_path, container_path, timeout)
+        if timeout is not None:
+            get_timeout = float(timeout) + _RAY_GET_RUN_CMD_SLACK_SEC
+        else:
+            get_timeout = _default_ray_get_unbounded_cmd_sec()
+        await self._ray_get(ref, timeout_sec=get_timeout)
+
     async def run_cmd(
         self,
         cmd: str,
@@ -462,9 +492,7 @@ async def create_ray_container_resource(
     """
     _require_ray_initialized()
     if spec.category != "container":
-        raise ValueError(
-            f"create_ray_container_resource supports only category 'container', got {spec.category!r}"
-        )
+        raise ValueError(f"create_ray_container_resource supports only category 'container', got {spec.category!r}")
     opts = dict(ray_actor_options or {})
     st = start_timeout if start_timeout is not None else 1800.0
     actor = RayEnrootContainerActor.options(**opts).remote(

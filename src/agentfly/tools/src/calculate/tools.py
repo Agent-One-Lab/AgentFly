@@ -1,11 +1,11 @@
+"""Calculator tool: ``calculator`` evaluates a mathematical expression with SymPy."""
+
 from sympy import Rational, simplify, sympify
 
 from ...decorator import tool
 
 
-@tool(
-    name="calculator", description="Calculate the result of a mathematical expression."
-)
+@tool(name="calculator", description="Calculate the result of a mathematical expression.")
 def calculator(expression: str):
     """
     Calculate the result of a mathematical expression.

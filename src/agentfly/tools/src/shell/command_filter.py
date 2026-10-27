@@ -15,13 +15,13 @@ Usage:
 
 import re
 import sys
-import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class BlockRule:
     """A single rule that matches and blocks a command pattern."""
+
     name: str
     pattern: re.Pattern
     reason: str
@@ -56,9 +56,7 @@ class CommandFilter:
         self.allow_patterns: list[re.Pattern] = []
         if allow_list:
             for pattern in allow_list:
-                self.allow_patterns.append(
-                    re.compile(pattern, re.IGNORECASE)
-                )
+                self.allow_patterns.append(re.compile(pattern, re.IGNORECASE))
 
     def check(self, command: str) -> tuple[bool, str]:
         """
@@ -101,11 +99,13 @@ class CommandFilter:
 
     def add_rule(self, name: str, pattern: str, reason: str):
         """Add a custom block rule."""
-        self.rules.append(BlockRule(
-            name=name,
-            pattern=re.compile(pattern, re.IGNORECASE),
-            reason=reason,
-        ))
+        self.rules.append(
+            BlockRule(
+                name=name,
+                pattern=re.compile(pattern, re.IGNORECASE),
+                reason=reason,
+            )
+        )
 
     def remove_rule(self, name: str):
         """Remove a rule by name."""
@@ -119,97 +119,69 @@ class CommandFilter:
             # ── Package installation ────────────────────────────────
             BlockRule(
                 name="pip_install",
-                pattern=re.compile(
-                    r"\bpip[23]?\s+install\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bpip[23]?\s+install\b", re.IGNORECASE),
                 reason="Package installation (pip install) is not allowed",
             ),
             BlockRule(
                 name="pip_download",
-                pattern=re.compile(
-                    r"\bpip[23]?\s+download\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bpip[23]?\s+download\b", re.IGNORECASE),
                 reason="Package download (pip download) is not allowed",
             ),
             BlockRule(
                 name="conda_install",
-                pattern=re.compile(
-                    r"\bconda\s+install\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bconda\s+install\b", re.IGNORECASE),
                 reason="Package installation (conda install) is not allowed",
             ),
             BlockRule(
                 name="apt_install",
-                pattern=re.compile(
-                    r"\bapt(?:-get)?\s+install\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bapt(?:-get)?\s+install\b", re.IGNORECASE),
                 reason="Package installation (apt install) is not allowed",
             ),
             BlockRule(
                 name="apt_update",
-                pattern=re.compile(
-                    r"\bapt(?:-get)?\s+update\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bapt(?:-get)?\s+update\b", re.IGNORECASE),
                 reason="Package update (apt update) is not allowed",
             ),
             BlockRule(
                 name="apt_upgrade",
-                pattern=re.compile(
-                    r"\bapt(?:-get)?\s+upgrade\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bapt(?:-get)?\s+upgrade\b", re.IGNORECASE),
                 reason="Package upgrade (apt upgrade) is not allowed",
             ),
             BlockRule(
                 name="yum_install",
-                pattern=re.compile(
-                    r"\byum\s+install\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\byum\s+install\b", re.IGNORECASE),
                 reason="Package installation (yum install) is not allowed",
             ),
             BlockRule(
                 name="dnf_install",
-                pattern=re.compile(
-                    r"\bdnf\s+install\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bdnf\s+install\b", re.IGNORECASE),
                 reason="Package installation (dnf install) is not allowed",
             ),
             BlockRule(
                 name="npm_install",
-                pattern=re.compile(
-                    r"\bnpm\s+install\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bnpm\s+install\b", re.IGNORECASE),
                 reason="Package installation (npm install) is not allowed",
             ),
             BlockRule(
                 name="yarn_add",
-                pattern=re.compile(
-                    r"\byarn\s+add\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\byarn\s+add\b", re.IGNORECASE),
                 reason="Package installation (yarn add) is not allowed",
             ),
-
             # ── Git operations (large downloads) ────────────────────
             BlockRule(
                 name="git_clone",
-                pattern=re.compile(
-                    r"\bgit\s+clone\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bgit\s+clone\b", re.IGNORECASE),
                 reason="Git clone is not allowed (may download large repos)",
             ),
             BlockRule(
                 name="git_lfs_pull",
-                pattern=re.compile(
-                    r"\bgit\s+lfs\s+pull\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bgit\s+lfs\s+pull\b", re.IGNORECASE),
                 reason="Git LFS pull is not allowed (may download large files)",
             ),
-
             # ── Large downloads ─────────────────────────────────────
             BlockRule(
                 name="wget",
-                pattern=re.compile(
-                    r"\bwget\s+", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bwget\s+", re.IGNORECASE),
                 reason="Downloading files (wget) is not allowed",
             ),
             BlockRule(
@@ -220,7 +192,6 @@ class CommandFilter:
                 ),
                 reason="Downloading files (curl -o) is not allowed",
             ),
-
             # ── Dangerous system commands ───────────────────────────
             BlockRule(
                 name="rm_rf_root",
@@ -241,25 +212,18 @@ class CommandFilter:
             ),
             BlockRule(
                 name="dd_device",
-                pattern=re.compile(
-                    r"\bdd\s+.*of=/dev/", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bdd\s+.*of=/dev/", re.IGNORECASE),
                 reason="Writing to device files (dd of=/dev/) is not allowed",
             ),
             BlockRule(
                 name="mkfs",
-                pattern=re.compile(
-                    r"\bmkfs\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bmkfs\b", re.IGNORECASE),
                 reason="Filesystem creation (mkfs) is not allowed",
             ),
-
             # ── Resource-intensive operations ───────────────────────
             BlockRule(
                 name="stress_test",
-                pattern=re.compile(
-                    r"\b(stress|stress-ng|memtester)\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\b(stress|stress-ng|memtester)\b", re.IGNORECASE),
                 reason="Stress testing tools are not allowed",
             ),
             BlockRule(
@@ -270,7 +234,6 @@ class CommandFilter:
                 ),
                 reason="Crypto mining tools are not allowed",
             ),
-
             # ── Python memory-heavy patterns ────────────────────────
             BlockRule(
                 name="python_huggingface_download",
@@ -280,26 +243,22 @@ class CommandFilter:
                 ),
                 reason="Downloading models (from_pretrained/snapshot_download) is not allowed",
             ),
-
             # ── Docker/container escape ─────────────────────────────
             BlockRule(
                 name="docker_run",
-                pattern=re.compile(
-                    r"\bdocker\s+(run|pull)\b", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bdocker\s+(run|pull)\b", re.IGNORECASE),
                 reason="Running nested containers (docker) is not allowed",
             ),
             BlockRule(
                 name="nohup_background",
-                pattern=re.compile(
-                    r"\bnohup\s+.*&\s*$", re.IGNORECASE
-                ),
+                pattern=re.compile(r"\bnohup\s+.*&\s*$", re.IGNORECASE),
                 reason="Background persistent processes (nohup) are not allowed",
             ),
         ]
 
 
 # ─── CLI usage ──────────────────────────────────────────────────────────────
+
 
 def main():
     """

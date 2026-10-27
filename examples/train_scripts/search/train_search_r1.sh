@@ -57,9 +57,9 @@ python3 -m agentfly.cli train \
     agent.init_config.tool_parser_name=$tool_parser_name \
     agent.init_config.tools=${tools} \
     agent.init_config.reward_name=${reward_name} \
-    agent.generation_config.max_tokens=$max_new_tokens_per_turn \
-    agent.max_turns=${max_turns} \
-    agent.num_chains=$num_chains \
+    agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=$num_chains \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

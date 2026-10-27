@@ -9,16 +9,18 @@ For most tasks, you only create two files (the dataset and the training script) 
 ```
 data/rlhf/<task>/<task>_train.json             ← your dataset
 data/rlhf/<task>/<task>_val.json               ← (optional) validation split
-src/agentfly/tools/...                          ← only if you need a new tool
-src/agentfly/rewards/<task>_reward.py           ← only if you need a new reward
-examples/train_scripts/<task>/train_<task>.sh  ← your training script
+my_task/tools.py                                ← only if you need a new tool
+my_task/rewards.py                              ← only if you need a new reward
+train_<task>.sh                                 ← your training script
 ```
+
+Your tools and rewards live in your own files; you don't edit AgentFly's source. Training (and `AutoAgent.from_config`) loads them by import path: `"my_task.tools:my_tool"` (an importable module) or `"/abs/path/my_task/tools.py:my_tool"` (a file). When you construct an agent directly in Python, pass the objects themselves: `HFAgent(tools=[my_tool], reward_fn=my_reward)`.
 
 The dataset JSON and the training script are the *minimum*. Tools, rewards, and agents are reusable across tasks — you only write new ones when nothing existing fits.
 
 ## Step 1: Prepare Your Data
 
-Convert your source data into a JSON list of dicts. The minimum is `{"question": "..."}`; any additional fields you add (e.g. `answer`, `task_id`, `fen`) become available to your tools and rewards by **name match** — a reward parameter named `answer` automatically receives the dataset's `answer` value.
+Convert your source data into a JSON list of dicts. The minimum is `{"question": "..."}`; any additional fields you add (e.g. `answer`, `task_id`, `fen`) are kept as the task's metadata. A reward parameter with the same name receives the value (a parameter named `answer` gets the dataset's `answer`); tools read it from `context.metadata`.
 
 See **[Data Preparation](data_preparation.md)** for the full convention, the predefined fields, and example shapes for math, QA, ALFWorld, ScienceWorld, WebShop, Chess, SWE-Bench, and multi-modal data.
 
@@ -38,16 +40,11 @@ Most new tasks reuse an existing agent class:
 
 See **[Build an Agent](first_agent.md)** for usage and **[Agents API Reference](../api_references/agents/index.md)** for the full surface.
 
-If none fit, subclass `BaseAgent`. The two methods you'll typically override are:
-
-- `parse(responses, tools)` — extract tool calls from raw model output.
-- `generate_async(messages_list, **args)` — usually just delegates to `self.llm_engine.generate_async(...)`.
-
-The README's "Customized Training" section has a minimal skeleton.
+If none fit, subclass `BaseAgent` and override `parse(responses, context=None, **kwargs)`, which turns raw model outputs into assistant messages with their `tool_calls`. See the [custom agent example](../api_references/agents/index.md#custom-agent).
 
 ## Step 3: Define Tools (or Reuse Existing Ones)
 
-If an existing tool fits — `calculator`, `code_interpreter`, `asyncdense_retrieve`, `webshop_browser_action`, the alfworld/scienceworld tools — just import it from `agentfly.tools`. No new code needed.
+If an existing tool fits — `calculator`, `code_interpreter`, `async_dense_retrieve`, `webshop_browser_action`, the alfworld/scienceworld tools — just import it from `agentfly.tools`. No new code needed.
 
 For a new tool, decorate a function with `@tool`:
 
@@ -72,13 +69,13 @@ A few things to note:
 - The **tool name** in `@tool(name=...)` is the registered name (used in `agent.init_config.tools=[...]` in your training script). It's distinct from the Python identifier; pick something readable for the model.
 - Return either a `str` or a `dict` containing `observation` (and optionally `image`, etc.).
 - Async vs sync — both work. Async is preferred for I/O-bound tools.
-- For tools that need a stateful environment (Python sandbox, ALFWorld, WebShop, custom container), see **[Tool System – Stateful Tools](../features/tool_system.md)** and **[Resources](../features/resources.md)**.
+- For tools that share state across calls (a game, a sandbox, a browser), see **[Build a Custom Environment](custom_environment.md)**.
 
 ## Step 4: Define a Reward
 
 The reward function is what RL optimizes against. Decorate it with `@reward`. The framework auto-injects:
 
-- `final_response`: the agent's final assistant turn (string).
+- `final_response` (string): the agent's final answer: the output of an answer tool (one declared with `status="finish"`, like `answer_math`) if the episode ended with one, otherwise the model's last message. Ordinary tool results (calculator, search, code) are never the final response, so leave `max_turns` room for the model to answer after its last tool call.
 - `trajectory`: the full message list.
 - `context`: the rollout `Context`, used for stateful rewards that acquire resources.
 - **Any parameter name that matches a key in your dataset row** — this is how `answer`, `task_id`, etc. flow in.
@@ -126,13 +123,13 @@ async def test_my_task_smoke():
         "answer": "4",
     }
     result = await agent.run(messages=sample, max_turns=3, num_chains=1)
-    print(result.trajectories)
-    print(result.rewards)
+    for traj in result.trajectories:
+        print(agent.extract_final_response(traj.segments[-1].messages), traj.reward)
 ```
 
 Things to verify here:
 
-- The agent **actually calls your tool** — `result.trajectories[0].segments[-1]` should contain at least one message with `role: "tool"`.
+- The agent **actually calls your tool** — for a chain rollout, `result.trajectories[0].segments[-1].messages` should contain at least one message with `role: "tool"`.
 - The reward gets called and returns a **non-degenerate value** — not stuck at 0.0 or 1.0 for every sample.
 - All your dataset's task-specific fields (`answer`, `task_id`, …) reach the reward — easy to confirm by adding a `print` inside the reward.
 
@@ -140,18 +137,23 @@ If the reward never sees a tool call or always returns the same value, fix that 
 
 ## Step 6: Wire Up a Training Script
 
-Copy an existing training script (e.g. [`examples/train_scripts/webshop/train_webshop.sh`](https://github.com/Agent-One-Lab/AgentFly/blob/main/examples/train_scripts/webshop/train_webshop.sh)) and change the parts specific to your task:
+Copy [`examples/custom_env/train.sh`](https://github.com/Agent-One-Lab/AgentFly/blob/main/examples/custom_env/train.sh), which trains a task whose tool, reward and environment live in your own module (see [Build a Custom Environment](custom_environment.md)), and change the parts specific to your task. The example scripts are in the repository (`git clone https://github.com/Agent-One-Lab/AgentFly`), not in the pip package.
 
 | Override | What to set it to |
 |---|---|
 | `data.train_files` | Path to your training JSON. |
 | `data.val_files` | Path to your validation JSON. |
 | `agent.init_config.agent_type` | `hf`, `react`, `code`, `action`, etc. |
-| `agent.init_config.tools` | List literal, e.g. `"[my_tool]"` or `"[calculator,my_tool]"`. |
-| `agent.init_config.reward_name` | The string you passed to `@reward(name=...)`. |
-| `agent.init_config.template` | Chat template matching your model. |
+| `agent.init_config.tools` | List literal of tool names or import paths, e.g. `"[calculator,my_task.tools:my_tool]"`. |
+| `agent.init_config.reward_name` | A reward name or import path, e.g. `my_task.rewards:my_reward`. |
+| `agent.init_config.template` | Optional: a chat template name. Leave it unset to use the model's own chat template. |
 | `agent.init_config.model_name_or_path` | Base model. |
 | `trainer.experiment_name` | Unique name for WandB logging. |
+
+Run `agentfly train` from the folder that contains your module: references like
+`my_task.tools:my_tool` are imported in the trainer's Ray workers, which start in that folder, so
+no `PYTHONPATH` is needed. File paths (`/path/to/tools.py:my_tool`) work from any folder. On a
+multi-node cluster, the folder must be at the same path on every node (e.g. a shared filesystem).
 
 The rest of the script (advantage estimator, KL coefficient, batch sizes, FSDP/vLLM flags, learning rate, etc.) typically stays the same as the template you copy from. The full key reference is in **[Hydra Config](hydra_config.md)**; the end-to-end flow is in **[First Training](first_training.md)**.
 
@@ -178,6 +180,6 @@ Each piece is independent: you can change one without touching the others. That'
 
 ## Where to Go From Here
 
-- **[Predefined Training Examples](../examples/predefined_training_examples.md)** — table of all shipped tasks (math, search, webshop, scienceworld, alfworld, GUI, VLM QA) with their tools, rewards, and dataset paths. Copy from the closest one.
+- **[Predefined Training Examples](../examples/predefined_training_examples.md)** — tasks AgentFly has been trained on, with training reports. Their scripts are under `examples/train_scripts/`; copy the closest one. **[Predefined Rewards](../api_references/rewards/predefined_rewards.md)** lists every built-in reward.
 - **[Image Agent Example](../examples/image_agent.md)** — multi-modal walkthrough.
 - **[Tool System](../features/tool_system.md)**, **[Reward System](../features/reward_system.md)**, **[Resources](../features/resources.md)** — for stateful tools and rewards, container management, and the full Tool/Reward contract.

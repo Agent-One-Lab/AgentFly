@@ -1,6 +1,9 @@
+""":class:`FunctionCallSWEAgent`: a SWE-bench-style agent that parses XML-style ``<function=...><parameter=...>`` tool calls."""
+
 import json
 import re
 from typing import Dict, List, Optional
+
 from ....core.context import Context
 from ...agent_base import BaseAgent
 

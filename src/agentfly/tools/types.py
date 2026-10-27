@@ -10,6 +10,15 @@ to help authors and type checkers — it has no runtime effect.
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, TypedDict, Union
 
+# The loop-control vocabulary a tool result / rollout policy resolves to.
+# ``continue`` run another turn; ``end`` end the episode gracefully (trajectory is
+# kept and trained on); ``raise`` fail-fast (throw, discard the rollout). These name
+# what the LOOP does — deliberately distinct from a tool ``status`` (a diagnosis).
+CONTROL_CONTINUE = "continue"
+CONTROL_END = "end"
+CONTROL_RAISE = "raise"
+CONTROL = frozenset({CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE})
+
 
 @dataclass
 class ToolResult:
@@ -17,17 +26,36 @@ class ToolResult:
 
     The framework constructs these via :meth:`from_raw` from whatever the
     user's ``@tool`` function returned. ``observation`` is the string the
-    LLM sees as the tool's output; ``info`` carries any additional fields
-    the tool returned in a dict (everything except ``observation`` and
-    ``image``).
+    LLM sees as the tool's output; ``metrics`` carries any additional logged
+    metrics the tool returned (either an explicit ``metrics`` sub-dict or extra
+    top-level keys) — mirroring :class:`~agentfly.rewards.types.RewardResult`.
+    ``step_reward`` is the optional per-step environment reward (an RL signal,
+    distinct from logged metrics) — env tools that step an environment can
+    return it; it feeds step-level advantage estimators (e.g. GiGPO).
+    ``anchor`` is the optional raw state key used for step-level grouping (the
+    grouping key GiGPO clusters turns by). It is the *undecorated* state (e.g.
+    the raw observation, without an appended admissible-action menu), so identical
+    states hash equal. Falls back to ``observation`` when not set.
+
+    ``control`` is the tool's optional, explicit loop-control signal
+    (``"continue"`` / ``"end"`` / ``"raise"``; see :data:`CONTROL`). ``None``
+    (the default) means the tool does NOT steer the loop — the rollout's
+    run-configured policy decides based on ``status``. When a tool sets it (e.g.
+    an env tool that reached a terminal state writes ``control="end"``), the
+    rollout honors it verbatim (the tool wins over the policy). ``status`` stays a
+    pure *diagnosis* (``"success"`` / ``"error"`` / ``"invalid"``); the continue
+    / end / raise *decision* lives in the rollout, never in the tool.
     """
 
     name: str
     arguments: Dict[str, Any]
     observation: str
     status: str = "success"
-    info: Dict[str, Any] = field(default_factory=dict)
+    metrics: Dict[str, Any] = field(default_factory=dict)
     image: Optional[str] = None
+    step_reward: Optional[float] = None
+    anchor: Optional[Any] = None
+    control: Optional[str] = None
 
     @classmethod
     def from_raw(
@@ -42,9 +70,11 @@ class ToolResult:
         """Normalize a tool function's raw return into a ``ToolResult``.
 
         Accepts:
-        - ``str``: treated as ``observation``; ``info`` is empty.
-        - ``dict``: must have an ``observation`` key. ``image`` is extracted
-          to its own field; everything else goes into ``info``.
+        - ``str``: treated as ``observation``; ``metrics`` is empty.
+        - ``dict``: must have an ``observation`` key. ``image`` and
+          ``step_reward`` are extracted to their own fields; metrics may be
+          given as an explicit ``metrics`` sub-dict and/or as extra top-level
+          keys, which are merged into ``metrics`` (explicit wins on collision).
         - ``ToolResult``: returned as-is.
         """
         if isinstance(raw, cls):
@@ -56,31 +86,42 @@ class ToolResult:
                 arguments=arguments,
                 observation=obs,
                 status=status,
-                info={},
+                metrics={},
             )
         if isinstance(raw, dict):
             if "observation" not in raw:
                 raise ValueError(
-                    f"observation key required when tool {name!r} returns a dict; "
-                    f"got keys: {list(raw.keys())}"
+                    f"observation key required when tool {name!r} returns a dict; got keys: {list(raw.keys())}"
                 )
             raw = dict(raw)  # don't mutate caller's dict
             obs = raw.pop("observation")
             if max_length is not None and len(obs) > max_length:
                 obs = obs[:max_length] + "...(truncated)"
+            # A ``status`` key in the returned dict is the tool's own diagnosis and wins
+            # over the caller-supplied default (otherwise it would fall into ``metrics``).
+            status = raw.pop("status", status)
             image = raw.pop("image", None)
+            step_reward = raw.pop("step_reward", None)
+            anchor = raw.pop("anchor", None)
+            control = raw.pop("control", None)
+            if control is not None and control not in CONTROL:
+                raise ValueError(
+                    f"Tool {name!r} returned control={control!r}; expected one of {sorted(CONTROL)} or None."
+                )
+            explicit = raw.pop("metrics", None) or {}
+            metrics = {**raw, **explicit}
             return cls(
                 name=name,
                 arguments=arguments,
                 observation=obs,
                 status=status,
-                info=raw,
+                metrics=metrics,
                 image=image,
+                step_reward=None if step_reward is None else float(step_reward),
+                anchor=anchor,
+                control=control,
             )
-        raise ValueError(
-            f"Tool {name!r} returned {type(raw).__name__}; "
-            "expected str, dict, or ToolResult."
-        )
+        raise ValueError(f"Tool {name!r} returned {type(raw).__name__}; expected str, dict, or ToolResult.")
 
     def to_dict(self) -> Dict[str, Any]:
         """Produce the legacy dict shape consumed by chain code today.
@@ -93,10 +134,16 @@ class ToolResult:
             "arguments": self.arguments,
             "observation": self.observation,
             "status": self.status,
-            "info": self.info,
+            "metrics": self.metrics,
         }
         if self.image is not None:
             d["image"] = self.image
+        if self.step_reward is not None:
+            d["step_reward"] = self.step_reward
+        if self.anchor is not None:
+            d["anchor"] = self.anchor
+        if self.control is not None:
+            d["control"] = self.control
         return d
 
 
@@ -105,9 +152,13 @@ class ToolReturn(TypedDict, total=False):
 
     Tools may return a bare ``str`` (treated as ``observation``) **or** a
     dict with these keys. ``observation`` is required if a dict is returned;
-    any keys beyond ``observation`` and ``image`` flow through to
-    :attr:`ToolResult.info`.
+    metrics may be given as an explicit ``metrics`` sub-dict and/or as extra
+    top-level keys, which flow through to :attr:`ToolResult.metrics`.
+    ``step_reward`` is the optional per-step environment reward.
     """
 
     observation: str
     image: str
+    metrics: Dict[str, Any]
+    step_reward: float
+    anchor: Any

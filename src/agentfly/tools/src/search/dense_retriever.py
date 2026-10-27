@@ -1,17 +1,26 @@
-import os
+"""Dense Wikipedia retrieval, simple variant: a synchronous-model E5 + FAISS retriever and the ``dense_retrieve`` tool.
 
-import datasets
-from torch import Tensor
-from transformers import AutoModel, AutoTokenizer
+Same data as :mod:`.async_dense_retriever` (wiki-18 corpus, E5 embeddings, FAISS index) without
+its background loading and caching.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING
 
 from ...decorator import tool
 from .faiss_indexer import Indexer
 
+# torch / transformers / datasets are imported where a retriever is built (see async_dense_retriever).
+if TYPE_CHECKING:
+    from torch import Tensor
+
 
 def load_corpus(corpus_path: str):
-    corpus = datasets.load_dataset(
-        "json", data_files=corpus_path, split="train", num_proc=4
-    )
+    import datasets
+
+    corpus = datasets.load_dataset("json", data_files=corpus_path, split="train", num_proc=4)
     return corpus
 
 
@@ -25,19 +34,15 @@ class DenseRetriever:
         self.corpus = load_corpus(corpus_file)
         ids = [int(id) for id in self.corpus["id"]]
         self.indexer = Indexer(index_file=index_file, ids=ids)
+        from transformers import AutoModel, AutoTokenizer
+
         self.tokenizer = AutoTokenizer.from_pretrained("intfloat/e5-base-v2")
         self.model = AutoModel.from_pretrained("intfloat/e5-base-v2")
 
     async def search(self, queries: list[str], top_k: int):
-        batch_dict = self.tokenizer(
-            queries, padding=True, truncation=True, max_length=512, return_tensors="pt"
-        )
+        batch_dict = self.tokenizer(queries, padding=True, truncation=True, max_length=512, return_tensors="pt")
         outputs = self.model(**batch_dict)
-        embeddings = (
-            average_pool(outputs.last_hidden_state, batch_dict["attention_mask"])
-            .detach()
-            .numpy()
-        )
+        embeddings = average_pool(outputs.last_hidden_state, batch_dict["attention_mask"]).detach().numpy()
 
         score_ids_list = self.indexer.search(embeddings, top_k)
         ids_list = []
@@ -60,16 +65,17 @@ GLOBAL_RETRIEVER = None
     max_length=4096,
 )
 async def dense_retrieve(query: str):
-    global AGENT_CACHE_DIR
+    global AF_CACHE_DIR
     if not query.startswith("query:"):
         query = "query: " + query
     global GLOBAL_RETRIEVER
     if GLOBAL_RETRIEVER is None:
+        from ....utils.download import ensure_tool_data
+
+        ensure_tool_data("async_dense_retrieve")  # same corpus + index, if missing (approval-gated)
         GLOBAL_RETRIEVER = DenseRetriever(
-            corpus_file=os.path.join(
-                AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl"
-            ),
-            index_file=os.path.join(AGENT_CACHE_DIR, "data", "search", "e5_Flat.index"),
+            corpus_file=os.path.join(AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"),
+            index_file=os.path.join(AF_CACHE_DIR, "data", "search", "e5_Flat.index"),
         )
     doc_list = await GLOBAL_RETRIEVER.search(query, 3)
     doc_list = doc_list[0]

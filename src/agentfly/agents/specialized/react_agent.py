@@ -1,3 +1,9 @@
+""":class:`ReactAgent`: an agent that follows the ReAct format.
+
+Responses are ``Thought:`` / ``Action:`` / ``Input:`` steps; :func:`parse_react_step` turns each
+step into a tool call.
+"""
+
 import json
 import logging
 import re
@@ -9,7 +15,6 @@ from ..agent_base import BaseAgent
 from ..parsers import extract_tool_calls
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def parse_react_step(text: str) -> Dict[str, Optional[str]]:
@@ -26,25 +31,19 @@ def parse_react_step(text: str) -> Dict[str, Optional[str]]:
     result = {"thought": None, "action": None, "input": None}
 
     # Pattern for Thought:
-    thought_pattern = re.compile(
-        r"Thought:\s*(.*?)(?=\s*(?:Action:|Input:|$))", re.IGNORECASE | re.DOTALL
-    )
+    thought_pattern = re.compile(r"Thought:\s*(.*?)(?=\s*(?:Action:|Input:|$))", re.IGNORECASE | re.DOTALL)
     thought_match = thought_pattern.search(text)
     if thought_match:
         result["thought"] = thought_match.group(1).strip()
 
     # Pattern for Action:
-    action_pattern = re.compile(
-        r"Action:\s*(.*?)(?=\s*(?:Thought:|Input:|$))", re.IGNORECASE | re.DOTALL
-    )
+    action_pattern = re.compile(r"Action:\s*(.*?)(?=\s*(?:Thought:|Input:|$))", re.IGNORECASE | re.DOTALL)
     action_match = action_pattern.search(text)
     if action_match:
         result["action"] = action_match.group(1).strip()
 
     # Pattern for Input:
-    input_pattern = re.compile(
-        r"Input:\s*(.*?)(?=\s*(?:Thought:|Action:|$))", re.IGNORECASE | re.DOTALL
-    )
+    input_pattern = re.compile(r"Input:\s*(.*?)(?=\s*(?:Thought:|Action:|$))", re.IGNORECASE | re.DOTALL)
     input_match = input_pattern.search(text)
     if input_match:
         result["input"] = input_match.group(1).strip()
@@ -96,14 +95,13 @@ class ReactAgent(BaseAgent):
             task_info = TaskInfoTemplate.format(task_info=task_info)
 
         tool_schemas = ToolSchemasTemplate.format(
-            tool_schemas="\n".join(
-                json.dumps(schema, indent=4) for schema in schema_list
-            )
+            tool_schemas="\n".join(json.dumps(schema, indent=4) for schema in schema_list)
         )
-        system_prompt = ReactSystemPromptTemplate.format(
-            task_info=task_info, tools=tool_schemas
-        )
+        system_prompt = ReactSystemPromptTemplate.format(task_info=task_info, tools=tool_schemas)
 
+        # The schemas are already in the system prompt text above; don't ALSO
+        # render the chat template's tools block (that would show them twice).
+        kwargs.setdefault("render_tools_in_prompt", False)
         super().__init__(
             model_name_or_path=model_name_or_path,
             tools=tools,
@@ -132,12 +130,10 @@ class ReactAgent(BaseAgent):
                         }
                     }
         """
-        # print(f"responses: {responses}")
         thought_actions = [parse_react_step(response) for response in responses]
 
         new_messages_list = []
         for response, thought_action in zip(responses, thought_actions):
-            # thought = thought_action["thought"]
             action = thought_action["action"]
             action_input = thought_action["input"]
             if action is None:
@@ -183,7 +179,3 @@ class ReactAgent(BaseAgent):
             new_messages_list.append(message)
 
         return new_messages_list
-
-
-if __name__ == "__main__":
-    pass

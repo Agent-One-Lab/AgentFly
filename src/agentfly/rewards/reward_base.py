@@ -1,3 +1,11 @@
+"""Reward base class, the ``@reward`` decorator, and the reward registry.
+
+A reward is a function (``@reward(name=...)``) or a :class:`BaseReward` subclass that returns a
+float or a dict with a ``reward`` key. :func:`calculate_reward` runs it and normalizes the result
+into a :class:`~agentfly.rewards.types.RewardResult`; :func:`get_reward_from_name` resolves
+registered names and import references, importing the built-ins only when needed.
+"""
+
 import inspect
 from typing import Callable, List, Optional
 
@@ -5,6 +13,28 @@ from .types import RewardResult
 
 # Global reward registry
 REWARD_REGISTRY = {}
+
+builtins_loaded = False
+
+
+def ensure_builtins_loaded() -> None:
+    """Import the built-in reward impls once so name lookups resolve.
+
+    The built-ins live in :mod:`agentfly.rewards.impls` and register themselves
+    on import (heavy deps), so we defer that until a name is actually looked up.
+    User rewards registered earlier via ``@reward`` are preserved: importing the
+    built-ins only ADDS to ``REWARD_REGISTRY``, and if a built-in shares a name
+    with a user reward, the user's entry is re-applied on top so the user still
+    wins (matching the old import-order behavior).
+    """
+    global builtins_loaded
+    if builtins_loaded:
+        return
+    user_entries = dict(REWARD_REGISTRY)  # snapshot user regs (collision: user wins)
+    builtins_loaded = True  # set before import so re-entrant lookups are a no-op
+    from . import impls  # noqa: F401  (imports every built-in impl -> registers)
+
+    REWARD_REGISTRY.update(user_entries)
 
 
 async def calculate_reward(reward_fn: Callable | None, **kwargs) -> Optional[RewardResult]:
@@ -38,11 +68,11 @@ class BaseReward:
 
     ```python
     @reward(name="my_reward")
-    def my_reward_function(prediction: str, answer: str) -> float:
-        return 1.0 if prediction == answer else 0.0
+    def my_reward_function(final_response: str, answer: str) -> float:
+        return 1.0 if final_response == answer else 0.0
 
     # Call with keyword arguments
-    result = await my_reward(prediction="hello", answer="hello")
+    result = await my_reward(final_response="hello", answer="hello")
     ```
 
     2. Inheritance-based (new pattern):
@@ -56,22 +86,22 @@ class BaseReward:
             super().__init__()  # Class attributes are set at class definition time
             self.threshold = threshold  # Instance data
 
-        def call(self, prediction: str, answer: str) -> float:
+        def call(self, final_response: str, answer: str) -> float:
             \"\"\"
-            Calculate reward based on prediction and answer.
+            Calculate reward based on the final response and answer.
 
             Args:
-                prediction (str): The predicted answer
+                final_response (str): The agent's final response
                 answer (str): The correct answer
 
             Returns:
                 float: The reward value
             \"\"\"
-            return 1.0 if prediction == answer else 0.0
+            return 1.0 if final_response == answer else 0.0
 
     # Create instance and call with keyword arguments
     my_reward = MyReward()
-    result = await my_reward(prediction="hello", answer="hello")
+    result = await my_reward(final_response="hello", answer="hello")
     ```
 
     Note: Metadata (name, etc.) is stored as class attributes.
@@ -129,10 +159,7 @@ class BaseReward:
 
         # Determine if this reward is async
         if "_is_async_call" not in cls.__dict__:
-            user_func_is_async = (
-                self.user_func is not None
-                and inspect.iscoroutinefunction(self.user_func)
-            )
+            user_func_is_async = self.user_func is not None and inspect.iscoroutinefunction(self.user_func)
             cls._is_async_call = user_func_is_async
 
         # Instance-level attributes
@@ -165,10 +192,13 @@ class BaseReward:
             self._func_sig = None
 
     def _filter_kwargs(self, kwargs: dict) -> dict:
-        """Filter kwargs to only include parameters that the function accepts."""
+        """Keep only the arguments the function accepts; all of them if it takes ``**kwargs``."""
         if self._func_sig is None:
             return kwargs
-        return {k: v for k, v in kwargs.items() if k in self._func_sig.parameters}
+        params = self._func_sig.parameters
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return kwargs
+        return {k: v for k, v in kwargs.items() if k in params}
 
     # ========== Execution ==========
     def _check_function_set(self):
@@ -196,7 +226,7 @@ class BaseReward:
         Allow rewards to be called directly as functions.
 
         Args:
-            **kwargs: All arguments as keyword arguments (e.g. context, prediction, env).
+            **kwargs: All arguments as keyword arguments (e.g. context, final_response, env).
 
         Returns:
             reward_value_or_dict or coroutine: Coroutine if async, else direct result.
@@ -342,9 +372,7 @@ def reward(
     return decorator
 
 
-def register_reward(
-    reward_name: str, reward_function: BaseReward | type[BaseReward]
-) -> None:
+def register_reward(reward_name: str, reward_function: BaseReward | type[BaseReward]) -> None:
     """
     Register a reward in the registry.
 
@@ -369,13 +397,14 @@ def get_reward_from_name(reward_name: str) -> BaseReward | type[BaseReward]:
     Raises:
         KeyError: If the reward name is not found in the registry
     """
-    global REWARD_REGISTRY
-    reward_name = reward_name.lower()
-    if reward_name not in REWARD_REGISTRY:
-        raise KeyError(
-            f"Unknown reward: '{reward_name}'. Available rewards: {list(REWARD_REGISTRY.keys())}"
-        )
-    return REWARD_REGISTRY[reward_name]
+    from ..utils.references import is_reference, resolve_reference
+
+    # The built-ins are loaded only if the name is neither registered nor an import reference.
+    if reward_name.lower() not in REWARD_REGISTRY and not is_reference(reward_name):
+        ensure_builtins_loaded()
+    # Accepts a registered name OR an import reference ("module:attr",
+    # "/path.py:attr") so a custom reward loads without a pre-import.
+    return resolve_reference(reward_name, REWARD_REGISTRY, "reward")
 
 
 def get_rewards_from_names(
@@ -402,9 +431,5 @@ def list_available_rewards() -> List[str]:
         List of reward names
     """
     global REWARD_REGISTRY
+    ensure_builtins_loaded()
     return list(REWARD_REGISTRY.keys())
-
-
-@reward(name="fake_reward")
-def fake_reward(prediction: str, **kwargs) -> float:
-    return 0.0

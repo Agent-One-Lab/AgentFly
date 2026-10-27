@@ -24,12 +24,14 @@ model=Qwen/Qwen2.5-3B-Instruct
 template=qwen2.5
 lr=5e-7
 max_model_len=8192
-mini_batch_size=64
+train_batch_size=64        # prompts per training step
 max_new_tokens_per_turn=512
-num_chains=8
-# Fully on-policy training
+num_chains=8               # rollouts per prompt
 num_gpus=1
-ppo_mini_batch_size=${mini_batch_size}*${num_chains}
+# PPO batch sizes count trajectory rows (prompts x chains), not prompts. One mini-batch of all
+# rows = one optimizer step per training step (fully on-policy). Each GPU's share of the
+# mini-batch (ppo_mini_batch_size / num_gpus) must be a multiple of the micro-batch.
+ppo_mini_batch_size=$((train_batch_size * num_chains))
 ppo_micro_batch_size_per_gpu=8
 
 kl_coef=0.001
@@ -44,10 +46,12 @@ adv_estimator=grpo
 agent_type=hf
 tools="[calculator]"
 reward_name="math_equal_reward_tool"
-# reward_name="llm_as_judge_math_reward"
 entropy_coeff=0.001
 kl_loss_type=mse
-max_turns=1
+# Turns per episode: the model calls the calculator, sees the result, then answers. Leave room
+# for that final answer: the reward grades the model's last message, not the tool output.
+max_turns=3
+system_prompt="You are a math assistant. Use the calculator tool for arithmetic. When you know the result, give the final answer as \\boxed{ANSWER}."
 agent_backend="async_verl"
 project_name="AgentRL"
 total_training_steps=100
@@ -58,21 +62,22 @@ python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
     data.train_files=$train_dataset \
     data.val_files=$val_dataset \
-    data.train_batch_size=${mini_batch_size} \
+    data.train_batch_size=${train_batch_size} \
     agent.init_config.agent_type=$agent_type \
     agent.init_config.tools=$tools \
     agent.init_config.model_name_or_path=$model \
-    agent.init_config.backend=${agent_backend} \
+    agent.init_config.backend_config.backend=${agent_backend} \
     agent.init_config.reward_name=$reward_name \
+    "agent.init_config.system_prompt='${system_prompt}'" \
     agent.init_config.max_model_len=$max_model_len \
-    agent.generation_config.max_tokens=$max_new_tokens_per_turn \
-    agent.max_turns=${max_turns} \
-    agent.num_chains=$num_chains \
+    agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=$num_chains \
     agent.use_agent=True \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.model.path=${model} \
-    actor_rollout_ref.actor.ppo_mini_batch_size=${mini_batch_size} \
+    actor_rollout_ref.actor.ppo_mini_batch_size=${ppo_mini_batch_size} \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=${ppo_micro_batch_size_per_gpu} \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=$kl_coef \
@@ -88,7 +93,7 @@ python3 -m agentfly.cli train \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     critic.model.path=$model \
-    critic.ppo_mini_batch_size=${mini_batch_size} \
+    critic.ppo_mini_batch_size=${ppo_mini_batch_size} \
     critic.ppo_micro_batch_size_per_gpu=2 \
     algorithm.kl_ctrl.kl_coef=$kl_coef \
     trainer.critic_warmup=0 \

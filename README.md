@@ -51,17 +51,25 @@ AgentFly is an extensible framework for building LLM agents with reinforcement l
 
 ---
 
-**08/2025 Chat Template System**: A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. [Learn more →](docs/chat_template/)
+**08/2025 Chat Template System**: A flexible framework for creating conversation templates with multi-model support, vision capabilities, and tool integration. It now lives in its own library, [chat-bricks](https://github.com/Agent-One-Lab/chat-bricks). [Learn more →](https://github.com/Agent-One-Lab/chat-bricks)
 
 
 ## Installation
-**Option 1**: One-line Installation:
-```
-bash install.sh # Assume conda with python3.12.x
-```
-**Option 2**: Customized Installation
+AgentFly uses [uv](https://docs.astral.sh/uv/) and requires Python 3.12 on Linux.
 
-Please refer to [installation.md](docs/start/installation.md) for custmoized installation.
+**Option 1**: Install from PyPI. The package is named `agentfly-rl` (the `agentfly` package on PyPI is an unrelated project); it is imported as `agentfly`.
+```bash
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install agentfly-rl            # agents, tools, rewards, and rollouts
+```
+
+**Option 2**: One-line installation from source, recommended for RL training. It installs uv if missing and builds a project `.venv` from the committed `uv.lock`, so the training stack matches the versions we test with.
+```bash
+bash install.sh
+```
+**Option 3**: Customized installation
+
+Please refer to [installation.md](docs/start/installation.md) for customized installation, including the `[verl]` training extra.
 
 ## Tasks
 
@@ -72,7 +80,8 @@ Please refer to [installation.md](docs/start/installation.md) for custmoized ins
 | ScienceWorld | Qwen3-4B-Instruct | [report](https://api.wandb.ai/links/AgentRL/f99omj98) | ✅ |
 | SWE | Qwen3-32B | [report](https://wandb.ai/AgentRL/Resource/reports/SWE-OS---VmlldzoxNjUzNjk0Mw?accessToken=x4co1e22ddhkm1qjo791a9blmvt4uqz9jmgytybkq4xtgfwt0u8jjx28wpqcsqex) | ✅ (on going) |
 | SimuScene | SFT DeepSeek-R1-Distill-Qwen |[report](https://wandb.ai/AgentRL/SimuScene/reports/SimuScene--VmlldzoxNjYzNzYzMg?accessToken=qe00f9dy59hiu2uyndyn22xl141s37sybnxlp5e5ybryqqahao5mvyra0sbmlf9v) | ✅ |
- 
+| ALFWorld | Qwen2.5-3B-Instruct | _report link — to add_ | ✅ |
+
 ## Quick Start
 ```python
 # Really small example to build an agent and run
@@ -87,7 +96,8 @@ async def main():
         model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
         tools=[calculator],
         template="qwen2.5",
-        backend_config={"backend": "async_vllm"},
+        # gpu_memory_utilization: share of GPU memory vLLM reserves (default 0.92)
+        backend_config={"backend": "async_vllm", "gpu_memory_utilization": 0.5},
     )
     result = await agent.run(
         messages=messages,
@@ -95,11 +105,17 @@ async def main():
         num_chains=1,
     )
 
-    print(result.trajectories)
-    print(result.rewards)
+    for traj in result.trajectories:
+        print(agent.extract_final_response(traj.segments[-1].messages), traj.reward)
 
-asyncio.run(main())
+if __name__ == "__main__":  # required: vLLM starts worker processes that re-import this file
+    asyncio.run(main())
 ```
+
+`template` names a chat template from [chat-bricks](https://github.com/Agent-One-Lab/chat-bricks)
+(e.g. `qwen2.5`, `qwen3`, `llama-3.2`; AgentFly adds a few more); list them all with
+`python -c "import agentfly.agents; from chat_bricks.registry import TEMPLATES; print(sorted(TEMPLATES))"`.
+See [Build an Agent](docs/start/first_agent.md) for reading, batching and saving results.
 
 ## Features
 ### 1. Multi-Chain Agent Rollout and Multi-Turn Training
@@ -120,7 +136,7 @@ def customized_reward(...):
 agent = HFAgent(
     model_name_or_path=model_name,
     tools=[customized_tool],
-    reward=customized_reward,
+    reward_fn=customized_reward,
     backend_config={"backend": "async_vllm"},
 )
 ```
@@ -171,33 +187,31 @@ def customized_tool(arg1, arg2):
     # tool logic here
 ```
 
-Define your reward function or use an existing one. The reward function can accept `prediction` and `trajectory` as the argument, which is the agent's final response and the whole trajectory. Other fields will also be given if you defined them in dataset. To use them, simply put these fields as arguments in reward function.
+Define your reward function or use an existing one. The reward function can accept `final_response` and `trajectory` as arguments, which are the agent's final response and the whole trajectory. Other fields will also be given if you defined them in the dataset. To use them, simply add these fields as arguments of the reward function.
 
 ```python
 @reward(name="customized_reward")
-def customized_reward(prediction, trajectory, optional_field1, optional_field2):
+def customized_reward(final_response, trajectory, optional_field1, optional_field2):
     # calculate reward
     ...
 ```
 
-For stateful tools and rewards that hold environment instances, please refer to [documentation](https://agentfly.readthedocs.io/).
+For tools and rewards that share an environment (a game, a sandbox, a browser), see [Build a Custom Environment](docs/start/custom_environment.md).
 
 #### 3. Agents
-You can use existing agents, or customize an agent. To customize an agent, the agent class must inherit `BaseAgent`, which handles tool calling, chain rollout. You can custom the `generate` and `parse` function. Refer to [documentation](https://agentfly.readthedocs.io/) for more details.
+You can use existing agents, or customize an agent. A custom agent inherits `BaseAgent`, which handles tool calling and rollouts, and overrides `parse`, which turns raw model outputs into assistant messages with their tool calls. Refer to the [Agents API reference](docs/api_references/agents/index.md#custom-agent) for more details.
 
 ```python
+from agentfly.agents import BaseAgent
+
+
 class CustomizedAgent(BaseAgent):
-    def __init__(self,
-        **kwargs
-    )
-        super().__init__(**kwargs)
-
-    async def generate_async(self, messages_list: List[List[Dict]], **args):
-        return await self.llm_engine.generate_async(messages_list, **args)
-
-    def parse(self, responses: List(str), tools):
-        # parse responses into tool calls
-        ...
+    def parse(self, responses, context=None, **kwargs):
+        # One assistant message per response; put requested tool calls in "tool_calls".
+        return [
+            {"role": "assistant", "content": [{"type": "text", "text": r}], "tool_calls": []}
+            for r in responses
+        ]
 ```
 
 ## Demo

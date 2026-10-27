@@ -3,6 +3,7 @@ import pytest
 import openai
 
 @pytest.mark.gpu
+@pytest.mark.local_server
 @pytest.mark.asyncio
 async def test_client_with_tool_calls():
     tools = [

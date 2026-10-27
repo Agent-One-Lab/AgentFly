@@ -14,7 +14,6 @@ import chess.engine
 from ..resources import LocalEnvResourceSpec
 from .env_base import BaseEnv
 
-
 ChessPuzzleSpec = LocalEnvResourceSpec(
     env_cls_path="agentfly.envs.chess_env.ChessPuzzleEnv",
     max_global_num=8,
@@ -124,9 +123,7 @@ class ChessPuzzleEnv(BaseEnv):
             chess.engine.EngineTerminatedError: If the engine fails to start
         """
         loop = asyncio.get_running_loop()
-        self._engine = await loop.run_in_executor(
-            None, chess.engine.SimpleEngine.popen_uci, self.stockfish_path
-        )
+        self._engine = await loop.run_in_executor(None, chess.engine.SimpleEngine.popen_uci, self.stockfish_path)
         self._board = chess.Board()
 
     async def reset(self, env_args: Optional[Dict[str, Any]] = None) -> str:
@@ -252,9 +249,7 @@ class ChessPuzzleEnv(BaseEnv):
             # Check if puzzle is solved
             if self._current_solution_idx >= len(self._solution_moves):
                 self._is_solved = True
-                return (
-                    f"Correct! {san_move} - Puzzle solved!\n\n{self._get_observation()}"
-                )
+                return f"Correct! {san_move} - Puzzle solved!\n\n{self._get_observation()}"
 
             # Play the opponent's response (next move in solution)
             if self._current_solution_idx < len(self._solution_moves):
@@ -322,9 +317,7 @@ class ChessPuzzleEnv(BaseEnv):
         elif self._board.is_insufficient_material():
             parts.append("Status: Draw by insufficient material.")
 
-        parts.append(
-            f"\nMoves played: {', '.join(self._moves_made) if self._moves_made else 'None'}"
-        )
+        parts.append(f"\nMoves played: {', '.join(self._moves_made) if self._moves_made else 'None'}")
 
         return "\n".join(parts)
 
@@ -347,9 +340,7 @@ class ChessPuzzleEnv(BaseEnv):
                 None,
                 lambda: self._engine.analyse(
                     self._board,
-                    chess.engine.Limit(
-                        time=self.analysis_time, depth=self.analysis_depth
-                    ),
+                    chess.engine.Limit(time=self.analysis_time, depth=self.analysis_depth),
                 ),
             )
 
@@ -372,9 +363,7 @@ class ChessPuzzleEnv(BaseEnv):
                     if mate is not None:
                         reward = 1.0 if mate > 0 else 0.0
                         return {
-                            "observation": f"Mate in {abs(mate)}"
-                            if mate > 0
-                            else f"Getting mated in {abs(mate)}",
+                            "observation": f"Mate in {abs(mate)}" if mate > 0 else f"Getting mated in {abs(mate)}",
                             "reward": reward,
                             "mate_in": mate,
                             "is_solved": self._is_solved,
@@ -400,9 +389,7 @@ class ChessPuzzleEnv(BaseEnv):
                 None,
                 lambda: self._engine.analyse(
                     self._board,
-                    chess.engine.Limit(
-                        time=self.analysis_time, depth=self.analysis_depth
-                    ),
+                    chess.engine.Limit(time=self.analysis_time, depth=self.analysis_depth),
                 ),
             )
 
@@ -453,9 +440,7 @@ class ChessPuzzleEnv(BaseEnv):
                 None,
                 lambda: self._engine.analyse(
                     self._board,
-                    chess.engine.Limit(
-                        time=self.analysis_time, depth=self.analysis_depth
-                    ),
+                    chess.engine.Limit(time=self.analysis_time, depth=self.analysis_depth),
                 ),
             )
 
@@ -465,9 +450,7 @@ class ChessPuzzleEnv(BaseEnv):
             after_score = after_info.get("score")
             if after_score:
                 # Get score from the perspective of the player who just moved
-                pov_score = (
-                    after_score.black() if self._board.turn else after_score.white()
-                )
+                pov_score = after_score.black() if self._board.turn else after_score.white()
                 after_cp = pov_score.score(mate_score=10000) or 0
             else:
                 after_cp = 0

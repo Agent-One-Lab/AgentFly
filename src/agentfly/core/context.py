@@ -7,8 +7,10 @@ for tools and rewards that need to run in containers or access shared resources.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List, Literal, Optional, Set
-from ..resources.types import BaseResource, ContainerResourceSpec, BaseResourceSpec
+
+from ..resources.types import BaseResource, BaseResourceSpec, ContainerResourceSpec
 from .context_config import ContextConfig, resolve_resource_backend
 
 
@@ -65,6 +67,7 @@ class Context:
         self.rollout_resource_ids: List[str] = []
         self.global_resource_ids: Set[str] = set()
         self._resource_acquired: Set[str] = set()
+        self._default_ids: Dict[str, str] = {}  # spec key -> default resource id in this rollout
         self.last_acquire_was_first: bool = False
 
     @property
@@ -101,16 +104,49 @@ class Context:
         if spec is None:
             image_id = self.metadata.get("image_id")
             if image_id is None:
-                raise ValueError(
-                    "Either id+spec or image_id in metadata must be provided"
-                )
+                raise ValueError("Either id+spec or image_id in metadata must be provided")
+            # Engine-specific placement/build fields ride along in metadata so
+            # a caller can select and configure the backend per rollout without
+            # constructing a spec itself. ``docker_host`` pins the docker
+            # daemon; ``dockerfile``/``build_context``/``snapshot`` carry the
+            # image DEFINITION that cloud engines (daytona) build server-side,
+            # having no local daemon or registry to receive a pre-built tag.
             spec = ContainerResourceSpec(
                 category="container",
                 image=image_id,
+                docker_host=self.metadata.get("docker_host"),
+                container_engine=self.metadata.get("container_engine"),
+                dockerfile=self.metadata.get("dockerfile"),
+                build_context=self.metadata.get("build_context"),
+                snapshot=self.metadata.get("snapshot"),
+                mount=self.metadata.get("mount"),
+                environment=self.metadata.get("environment"),
             )
 
-        resource_id = id or self.rollout_id
+        else:
+            # Tools build their OWN container spec (shell/file/skills all do),
+            # so they never take the branch above. Enrich any container spec
+            # with the rollout-level fields from metadata, because HOW the
+            # container is materialized is a property of the rollout, not of
+            # whichever tool happens to touch it first:
+            #   * engine + image definition — a cloud engine has no local
+            #     daemon, so without these the tool's bare `image` is treated
+            #     as a registry ref and the pull fails;
+            #   * mounts — the FIRST acquire creates the container, so seeding
+            #     declared by the caller must be merged in or it is simply lost
+            #     (the tool's own mounts still win on key collision).
+            if getattr(spec, "category", None) == "container":
+                for field in ("container_engine", "dockerfile", "build_context", "snapshot"):
+                    if getattr(spec, field, None) is None:
+                        value = self.metadata.get(field)
+                        if value is not None:
+                            setattr(spec, field, value)
+                meta_mount = self.metadata.get("mount")
+                if meta_mount:
+                    spec.mount = {**meta_mount, **(spec.mount or {})}
+
         spec_key = _spec_key(spec)
+        resource_id = id or self._default_id(spec_key)
         self.last_acquire_was_first = spec_key not in self._resource_acquired
         if scope == "rollout":
             if resource_id not in self.rollout_resource_ids:
@@ -127,6 +163,21 @@ class Context:
         self._resource_acquired.add(spec_key)
 
         return resource
+
+    def _default_id(self, spec_key: str) -> str:
+        """The resource id used when the caller passes none.
+
+        The first kind of resource a rollout acquires gets the rollout id; each other kind gets
+        ``<rollout id>-<hash of its spec key>``, so different resources in one rollout never share
+        an id, while every acquire of the same kind (a tool and its reward) gets the same one.
+        """
+        if spec_key not in self._default_ids:
+            if not self._default_ids:
+                self._default_ids[spec_key] = self.rollout_id
+            else:
+                digest = hashlib.sha1(spec_key.encode()).hexdigest()[:8]
+                self._default_ids[spec_key] = f"{self.rollout_id}-{digest}"
+        return self._default_ids[spec_key]
 
     async def reset_resource(
         self,
@@ -182,8 +233,4 @@ class Context:
             raise ValueError(f"Unsupported scope: {scope!r}")
 
     def __repr__(self) -> str:
-        return (
-            f"Context(rollout_id={self.rollout_id!r}, "
-            f"group_id={self.group_id!r}, "
-            f"metadata={self.metadata!r})"
-        )
+        return f"Context(rollout_id={self.rollout_id!r}, group_id={self.group_id!r}, metadata={self.metadata!r})"

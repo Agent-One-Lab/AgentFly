@@ -1,3 +1,5 @@
+"""The tool registry: look up tools by name or import reference (see :mod:`.registry`)."""
+
 from .registry import (
     TOOL_REGISTRY,
     get_tool_from_name,

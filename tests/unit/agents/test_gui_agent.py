@@ -2,11 +2,13 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+
 import pytest
 
 
 from agentfly.agents.specialized.gui_agent import GUIAgent
-from agentfly.rewards.gui_reward import gui_reward
+from agentfly.rewards.gui_rewards import gui_reward
 from agentfly.utils.ui_action_parser import (
     parse_action_to_structure_output,
     IMAGE_FACTOR,
@@ -51,7 +53,9 @@ class TestGUIAgent:
         assert messages[0]["role"] == "assistant"
         assert messages[0]["content"][0]["text"] == responses[0]
         assert len(messages[0]["tool_calls"]) == 1
-        assert messages[0]["status"] == "continue"
+        # Single-step grounding: every turn ends the episode (GUIAgent has no "finished" action
+        # in its action set, so it terminates after one action).
+        assert messages[0]["status"] == "terminal"
 
     def test_gui_agent_parse_terminal_action(self):
         """Test GUI agent recognizes terminal actions."""
@@ -87,8 +91,10 @@ class TestGUIAgent:
         messages = agent.parse(responses, tools=[])
 
         assert len(messages) == 1
-        assert "wait" in messages[0]["content"][0]["text"].lower()
-        assert messages[0]["status"] == "continue"
+        # An empty response falls back to a click at the screen center.
+        action = json.loads(messages[0]["tool_calls"][0]["function"]["arguments"])["action"]
+        assert action["action_type"] == "click"
+        assert messages[0]["status"] == "terminal"
 
 
 class TestGUIReward:
@@ -100,9 +106,11 @@ class TestGUIReward:
         prediction = "Thought: I need to click on the button.\nAction: click(start_box='<|box_start|>(100,200)<|box_end|>')"
 
         result = await gui_reward(
-            prediction=prediction,
+            final_response=prediction,
             gt_action="click",
-            gt_bbox=[100, 200],
+            # gt_bbox is normalized 0-1 (same contract the scorer applies to the
+            # predicted coord): the click at (100,200) → (100/1920, 200/1080).
+            gt_bbox=[100 / 1920, 200 / 1080],
             gt_input_text="",
         )
 
@@ -119,7 +127,7 @@ class TestGUIReward:
         """Test GUI reward without ground truth data."""
         prediction = "Thought: I need to click.\nAction: click(start_box='<|box_start|>(100,200)<|box_end|>')"
 
-        result = await gui_reward(prediction=prediction)
+        result = await gui_reward(final_response=prediction)
 
         assert isinstance(result, dict)
         assert result["reward"] == 0.0  # No ground truth
@@ -128,7 +136,7 @@ class TestGUIReward:
     async def test_gui_reward_empty_prediction(self):
         """Test GUI reward with empty prediction."""
         result = await gui_reward(
-            prediction="", gt_action="click", gt_bbox=[100, 200], gt_input_text=""
+            final_response="", gt_action="click", gt_bbox=[100, 200], gt_input_text=""
         )
 
         assert isinstance(result, dict)
@@ -142,7 +150,7 @@ class TestGUIReward:
         )
 
         result = await gui_reward(
-            prediction=prediction,
+            final_response=prediction,
             gt_action="type",
             gt_bbox=[],
             gt_input_text="hello world",

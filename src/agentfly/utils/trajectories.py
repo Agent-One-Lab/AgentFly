@@ -5,7 +5,6 @@ This module is used to collect trajectories from the agent.
 import asyncio
 import json
 import os
-from typing import Dict, List
 
 import click
 
@@ -20,8 +19,8 @@ def gather_responses(trajectories):
     """
     responses = []
     for trajectory in trajectories:
-        last_segment = trajectory.segments[-1] if trajectory.segments else []
-        last_msg = last_segment[-1] if last_segment else {}
+        messages = trajectory.segments[-1].messages if trajectory.segments else []
+        last_msg = messages[-1] if messages else {}
         content = last_msg.get("content")
         if isinstance(content, list):
             text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
@@ -89,9 +88,7 @@ def main(
 
         os.makedirs(output_dir, exist_ok=True)
         with open(
-            os.path.join(
-                output_dir, os.path.basename(model_name_or_path) + "_responses.json"
-            ),
+            os.path.join(output_dir, os.path.basename(model_name_or_path) + "_responses.json"),
             "w",
         ) as f:
             json.dump(responses, f, indent=2)

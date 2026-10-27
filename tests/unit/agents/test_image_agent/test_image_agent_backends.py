@@ -1,9 +1,11 @@
 import os
 from agentfly.agents import ImageEditingAgent
+from agentfly.agents.utils.inspection import print_trajectory
 import pytest
 
 
 @pytest.mark.gpu
+@pytest.mark.local_server
 @pytest.mark.asyncio
 async def test_image_agent_client():
     # --8<-- [start:client_backend]
@@ -13,7 +15,6 @@ async def test_image_agent_client():
             "backend": "client",
             "base_url": "http://localhost:8000/v1",
         },
-        streaming="console",
     )
     # --8<-- [end:client_backend]
     messages_list = [
@@ -35,12 +36,13 @@ async def test_image_agent_client():
             ]
         }
     ]
-    await agent.run(
-        messages=messages_list, max_turns=4, num_chains=1, enable_streaming=True
+    result = await agent.run(
+        messages=messages_list, max_turns=4, num_chains=1
     )
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
 
 
+@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="requires OPENAI_API_KEY (calls the OpenAI API)")
 @pytest.mark.asyncio
 async def test_image_agent_openai():
     # --8<-- [start:openai_backend]
@@ -51,7 +53,6 @@ async def test_image_agent_openai():
             "base_url": "https://api.openai.com/v1",
             "api_key": os.getenv("OPENAI_API_KEY"),
         },
-        streaming="console",
     )
     # --8<-- [end:openai_backend]
     messages_list = [
@@ -73,15 +74,15 @@ async def test_image_agent_openai():
             ]
         }
     ]
-    await agent.run(
-        messages=messages_list, max_turns=5, num_chains=1, enable_streaming=True
+    result = await agent.run(
+        messages=messages_list, max_turns=5, num_chains=1
     )
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
 
 
 @pytest.mark.gpu
 @pytest.mark.asyncio
-async def test_image_agent_async_vllm():
+async def test_image_agent_async_vllm(release_image_agent):
     # --8<-- [start:async_vllm_backend]
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
@@ -91,7 +92,6 @@ async def test_image_agent_async_vllm():
             "pipeline_parallel_size": 4,
             "gpu_memory_utilization": 0.5,
         },
-        streaming="console",
     )
     # --8<-- [end:async_vllm_backend]
     messages_list = [
@@ -116,7 +116,10 @@ async def test_image_agent_async_vllm():
             ]
         }
     ]
-    await agent.run(
-        messages=messages_list, max_turns=4, num_chains=1, enable_streaming=True
-    )
-    agent.print_messages(index=0)
+    try:
+        result = await agent.run(
+            messages=messages_list, max_turns=4, num_chains=1
+        )
+        print_trajectory(result[0])
+    finally:
+        release_image_agent(agent)

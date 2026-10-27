@@ -1,3 +1,5 @@
+"""ScienceWorld tool: ``scienceworld_explorer`` takes one action in a containerized ScienceWorld task and returns the observation."""
+
 import traceback
 
 from ....core import Context
@@ -8,7 +10,6 @@ from ...decorator import tool
 @tool(
     name="scienceworld_explorer",
     description="Take an action in scienceworld environment and return the observation. Valid actions are 'look around', 'inventory', 'task', 'open <OBJ>', 'close <OBJ>', 'deactivate <OBJ>', 'activate <OBJ>', 'connect <OBJ> to <OBJ2>', 'disconnect <OBJ>', 'use <OBJ>', 'use <OBJ> [on <OBJ2>]' (OBJ2 is optional), 'look at <OBJ>', 'look in <OBJ>', 'read <OBJ>', 'move <OBJ> to <OBJ2>', 'pick up <OBJ>', 'put down <OBJ>', 'pour <OBJ> into <OBJ2>', 'dunk <OBJ> into <OBJ2>', 'mix <OBJ>', 'go to <LOC>', 'eat <OBJ>', 'flush <OBJ>', 'focus on <OBJ>', 'wait [<DURATION>]' (DURATION is optional)",
-    stateful=True,
 )
 async def scienceworld_explorer(action: str, context: Context):
     """
@@ -35,7 +36,3 @@ async def scienceworld_explorer(action: str, context: Context):
         return observation
     except Exception as e:
         return f"Error: {str(e)}\n{traceback.format_exc()}"
-
-
-if __name__ == "__main__":
-    print(scienceworld_explorer.schema)

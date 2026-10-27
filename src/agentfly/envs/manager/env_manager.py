@@ -1,3 +1,5 @@
+""":class:`EnvironmentManager`: process-wide warm pools of environments, acquired and released by id."""
+
 import asyncio
 from typing import TYPE_CHECKING
 
@@ -8,15 +10,22 @@ if TYPE_CHECKING:
 
 
 class EnvironmentManager:
+    """Process-wide warm pools of environments, one pool per environment class.
+
+    :meth:`start` creates (or grows) the pool for an environment class, :meth:`acquire`
+    hands out an environment by id (the same id gets the same environment back),
+    :meth:`release` returns it to its pool, :meth:`reset` resets one, and :meth:`aclose`
+    shuts the pools down. All methods are class methods; the pools are shared by
+    everything in the process.
+    """
+
     _pools: dict[type["BaseEnv"], WarmPool["BaseEnv"]] = {}
 
     # We will keep track of the acquired envs to allow request for same environment
     _acquired_envs: dict[str, "BaseEnv"] = {}
 
     @classmethod
-    async def start(
-        cls, env_cls: type["BaseEnv"], size: int = 1, env_kwargs: dict | None = None
-    ):
+    async def start(cls, env_cls: type["BaseEnv"], size: int = 1, env_kwargs: dict | None = None):
         """
         Start a new pool for the environment class if it doesn't exist,
         or add more envs to the existing pool if the size is larger.
@@ -46,9 +55,7 @@ class EnvironmentManager:
         else:
             key = env_cls
             if key not in cls._pools:
-                raise ValueError(
-                    f"Environment class {env_cls} not found. Start the environment before acquiring."
-                )
+                raise ValueError(f"Environment class {env_cls} not found. Start the environment before acquiring.")
 
             env = await cls._pools[key].acquire()
             cls._acquired_envs[id] = env
@@ -62,7 +69,6 @@ class EnvironmentManager:
             await cls._pools[key].release(env, finished=finished)
         else:
             # This should be generally safe to skip
-            # warnings.warn(f"Environment {id} not found during release. Skipped it.")
             pass
 
     @classmethod

@@ -1,3 +1,10 @@
+"""Agents that use the model's own tool-calling format.
+
+:class:`HFAgent` parses tool calls with a vLLM tool parser (``hermes`` by default), matching the
+format of the model's Hugging Face chat template. :class:`SearchR1Agent` parses the Search-R1
+format (``<think>``, ``<search> query </search>``, ``<answer>``).
+"""
+
 import json
 import logging
 import re
@@ -9,9 +16,7 @@ from ..agent_base import BaseAgent
 logger = logging.getLogger(__file__)
 
 # Output format from system prompt: <think>...</think>, <search> query </search>, <information>...</information>, <answer>...</answer>
-_SEARCH_TAG_PATTERN = re.compile(
-    r"<search>\s*(.*?)\s*</search>", re.DOTALL | re.IGNORECASE
-)
+_SEARCH_TAG_PATTERN = re.compile(r"<search>\s*(.*?)\s*</search>", re.DOTALL | re.IGNORECASE)
 
 
 class HFAgent(BaseAgent):
@@ -21,9 +26,7 @@ class HFAgent(BaseAgent):
         tool_parser_name: Optional[str] = "hermes",
         **kwargs,
     ):
-        super().__init__(
-            model_name_or_path, tool_parser_name=tool_parser_name, **kwargs
-        )
+        super().__init__(model_name_or_path, tool_parser_name=tool_parser_name, **kwargs)
 
 
 class SearchR1Agent(BaseAgent):
@@ -36,9 +39,7 @@ class SearchR1Agent(BaseAgent):
         search_tool_name: str = "search",
         **kwargs,
     ):
-        super().__init__(
-            model_name_or_path, tool_parser_name=tool_parser_name, **kwargs
-        )
+        super().__init__(model_name_or_path, tool_parser_name=tool_parser_name, **kwargs)
         self.search_tool_name = search_tool_name
 
     @staticmethod
@@ -60,7 +61,7 @@ class SearchR1Agent(BaseAgent):
         """
         Parse a single model response using the search-R1 format:
         - <think>...</think> (reasoning)
-        - <search> query </search> (tool call to asyncdense_retrieve)
+        - <search> query </search> (tool call to async_dense_retrieve)
         - <answer>...</answer> (final answer)
 
         Extracts all <search>...</search> blocks as tool calls; returns one assistant

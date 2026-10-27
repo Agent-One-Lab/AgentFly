@@ -4,7 +4,7 @@ QA reward functions evaluate agent performance on question answering tasks using
 
 ## qa_f1_reward
 
-::: agentfly.rewards.qa_reward.qa_f1_reward
+::: agentfly.rewards.qa_rewards.qa_f1_reward
     options:
       show_source: true
 
@@ -12,11 +12,11 @@ QA reward functions evaluate agent performance on question answering tasks using
 
 ## qa_f1_reward_tool
 
-::: agentfly.rewards.qa_reward.qa_f1_reward_tool
+::: agentfly.rewards.qa_rewards.qa_f1_reward_tool
     options:
       show_source: true
 
-Same metrics as `qa_f1_reward` but the reward is gated on the agent having made at least one tool call (otherwise `reward` is 0.0).
+Same metrics as `qa_f1_reward`, but only when the trajectory has at least two tool results (the last tool call is usually the answer); otherwise every metric is 0.0.
 
 ## Technical Details
 
@@ -38,7 +38,7 @@ Same metrics as `qa_f1_reward` but the reward is gated on the agent having made 
 
 **Tool Usage Detection:**
 - Counts messages with "tool" role in trajectory
-- `qa_f1_reward_tool` requires at least one tool call
+- `qa_f1_reward_tool` requires at least two tool results
 
 **Example Usage:**
 

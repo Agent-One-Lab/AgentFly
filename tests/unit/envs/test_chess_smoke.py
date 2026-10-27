@@ -102,7 +102,6 @@ async def test_chess_smoke_e2e():
         messages=messages,
         max_turns=2,
         num_chains=1,
-        enable_streaming=False,
     )
 
     # Trajectories should be populated

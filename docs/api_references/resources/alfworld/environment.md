@@ -60,21 +60,6 @@ obs, info = await env.reset(
 
 # Cleanup (kill rollout-scoped resource)
 await context.end_resource(scope="rollout")
-
-# --- Legacy snippet below (deprecated) ---
-env = ALFWorldEnv(
-    image="custom/alfworld-env:latest",
-    cpu=4,
-    mem="4g",
-    train_eval="valid_seen",
-    max_episodes=100
-)
-await env.start()
-
-# Reset to a specific task
-obs, info = await env.reset(
-    env_args={"task_id": "trial_T20190907_212755_456877"}
-)
 ```
 
 ## Configuration parameters (via `ALFWorldSpec`)

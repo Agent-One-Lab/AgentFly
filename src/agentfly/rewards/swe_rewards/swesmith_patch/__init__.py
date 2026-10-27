@@ -21,24 +21,21 @@ def _install():
     # and container.stop(timeout=); enroot-py provides these, so no docker_utils patch needed.
 
     from . import profile_patch
+
     profile_patch._patch_repo_profile()
 
     from .utils_patch import _patch_run_patch_in_container
+
     _patch_run_patch_in_container()
 
     from .eval_patch import _patch_run_evaluation
+
     _patch_run_evaluation()
 
 
+# _install() must run BEFORE importing eval_api, so swebench/swesmith see the patched docker.
+# It is not called for now: it replaces docker with enroot process-wide, and swesmith is unused.
 
-# Apply patch BEFORE importing eval_api, so swebench/swesmith see patched docker when they import it.
-# Do not run for now as it will replace docker with enroot, and we are not using swesmith now.
-# try:
-#     _install()
-# except ImportError as e:
-#     raise e
-
-from .eval_api import evaluate_swesmith
-
+from .eval_api import evaluate_swesmith  # noqa: E402  (must follow the patch helpers above)
 
 __all__ = ["evaluate_swesmith"]

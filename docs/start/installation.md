@@ -8,14 +8,28 @@
 | **Python** | 3.12.x — `pyproject.toml` enforces `>=3.12,<3.13`. Newer or older versions will fail to install. |
 | **GPU** | NVIDIA GPU(s) with CUDA. Required by vLLM and the verl trainer. The shipped `train_*.sh` scripts target 1 to 8 GPUs (`trainer.n_gpus_per_node=1` for `train_example.sh`, up to `=8` for the bigger tasks); per-GPU VRAM scales with model size (Qwen 3B fits comfortably on a single 80 GB card; 32B benefits from multi-GPU). |
 | **Sudo** | Needed once, to install **enroot** (used by `code_interpreter`, `alfworld`, `webshop`, `scienceworld`, and any container-backed tool). Skip if you only need the lighter tools (`calculator`, retrieval API, etc.). |
-| **Disk** | A few hundred GB headroom recommended: HuggingFace model weights, enroot images under `$XDG_CACHE_HOME/AgentFly/enroot/`, and (for retrieval tasks) the Wikipedia corpus + FAISS index downloaded into `$XDG_CACHE_HOME/AgentFly/data/search/` (~30 GB). |
-| **Conda** | The reference setup uses conda (`bash install.sh` assumes it). Other environment managers work but are not the documented path. |
+| **Disk** | A few hundred GB headroom recommended: HuggingFace model weights, enroot images under `$ENROOT_IMAGES_PATH` (default `~/.cache/enroot/images/`; SWE tasks need several TB, see [SWE Task Setup](../examples/swe.md)), and (for retrieval tasks) the Wikipedia corpus + FAISS index downloaded into `$AF_CACHE_DIR/data/search/` (~30 GB). Defaults live under `~/.agentfly/cache/`. |
+| **uv** | The reference setup uses [uv](https://docs.astral.sh/uv/) (`bash install.sh` installs it if missing). uv provisions Python 3.12, manages a project-local `.venv`, and installs from the committed `uv.lock`. |
 
-If you only want to **run** agents — no RL training, no container-backed tools — `pip install -e .` alone is enough. The `[verl]` extras and the enroot install are training- and environment-specific.
+If you only want to **run** agents — no RL training, no container-backed tools — `uv sync` alone is enough. The `[verl]` extra and the enroot install are training- and environment-specific.
+
+**Install From PyPI**
+
+AgentFly is published on PyPI as **`agentfly-rl`** and imported as `agentfly` (the `agentfly` package on PyPI is an unrelated project, so install `agentfly-rl`, not `agentfly`). We use uv:
+
+```bash
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install agentfly-rl
+```
+
+Or add it to your own uv project with `uv add agentfly-rl`. The dense-retrieval tools (`async_dense_retrieve`, `dense_retrieve`) and `agentfly search` need FAISS, which comes with the `search` extra: `uv pip install "agentfly-rl[search]"` (or `uv sync --extra search` from source). This installs the agent runtime: agents, tools, rewards, rollouts, and the `agentfly` command. Container-backed tools additionally need enroot (see step 2 below).
+
+For RL training, we recommend the source installation below (`bash install.sh` or `uv sync --extra verl`). It installs from the committed `uv.lock`, so the training stack (vLLM, PyTorch, flash-attn, flash-linear-attention, and the CUDA compiler packages) matches the versions we test with. The training extra can also be installed from PyPI with `uv pip install "agentfly-rl[verl]"`; flash-attn and liger-kernel then build against the installed PyTorch (pass `--no-build-isolation-package flash-attn --no-build-isolation-package liger-kernel`), and flash-attn compiles from source, which takes a while.
 
 **Install With Script**
 
-To install dependencies, run the following script in conda environment. We default to use python3.12.
+To install everything, run the script below. It installs [uv](https://docs.astral.sh/uv/) if it is not already present, provisions Python 3.12, and creates a project-local `.venv`.
 ```
 bash install.sh
 ```
@@ -25,23 +39,25 @@ bash install.sh
 
 Alternatively, you can customize the installation by following these steps:
 
-1. Clone the repository and initialize submodules:
+1. Clone the repository with its submodules:
 
     ```bash
-    git clone https://github.com/Agent-One-Lab/AgentFly
+    git clone --recurse-submodules https://github.com/Agent-One-Lab/AgentFly
     cd AgentFly
-    git submodule init
-    git submodule update
     ```
 
-2. Initialize and install dependencies
+    In an existing clone, fetch the submodules with `git submodule update --init`.
 
-    Basic python packages installation:
+2. Install dependencies with uv
+
+    uv creates a project-local `.venv`, pins Python 3.12, and installs from the committed `uv.lock`. Install the base package, or add the `verl` extra for RL training:
 
     ```bash
-    pip install -e .
-    pip install -e '.[verl]' --no-build-isolation
+    uv sync                 # base: run agents
+    uv sync --extra verl    # base + RL training (verl)
     ```
+
+    Then activate the environment (`source .venv/bin/activate`) or prefix commands with `uv run`.
 
     Some of our tools & environments are managed by *enroot* backend. To use them, please install [enroot](https://github.com/NVIDIA/enroot/blob/master/doc/installation.md) (sudo required). Such tools include code_interpreter, retrieval, webshop, alfworld, sciencworld.
 
@@ -58,12 +74,4 @@ Alternatively, you can customize the installation by following these steps:
     sudo dnf install -y epel-release # required on some distributions
     sudo dnf install -y https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot-3.5.0-1.el8.${arch}.rpm
     sudo dnf install -y https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot+caps-3.5.0-1.el8.${arch}.rpm # optional
-    ```
-
-3. Optional
-
-    Search requires redis to cache results, an optional way to install with conda:
-
-    ```bash
-    conda install conda-forge::redis-server==7.4.0
     ```

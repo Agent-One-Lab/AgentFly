@@ -64,9 +64,7 @@ class VideoGenerator:
                     modified_code = code.replace("sys.argv[1]", f'"{output_path_abs}"')
                     rewrite_mode = "replace_sys_argv_1"
                 elif "sys.argv" in code and "len(sys.argv)" in code:
-                    modified_code = (
-                        f"import sys\nsys.argv = ['script.py', '{output_path_abs}']\n" + code
-                    )
+                    modified_code = f"import sys\nsys.argv = ['script.py', '{output_path_abs}']\n" + code
                     rewrite_mode = "inject_sys_argv"
                 else:
                     if "output_file" in code:
@@ -211,6 +209,7 @@ def can_open_video(video_path: str) -> bool:
 
     try:
         import imageio.v3 as iio  # type: ignore
+
         for _ in iio.imiter(video_path):
             return True
         return False

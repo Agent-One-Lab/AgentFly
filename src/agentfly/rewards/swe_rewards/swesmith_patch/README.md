@@ -15,6 +15,7 @@ Import **before** any swesmith or harness code:
 ```python
 import swesmith_enroot  # MUST be first
 from swesmith.harness.eval import main
+
 main(run_id="test", workers=1, dataset_path="SWE-bench/SWE-smith-py", instance_ids=["..."])
 ```
 

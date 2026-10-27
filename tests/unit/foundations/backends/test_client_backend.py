@@ -4,6 +4,13 @@ from unittest.mock import Mock, patch
 from agentfly.utils.llm_backends.llm_backends import ClientBackend
 
 
+@pytest.fixture(autouse=True)
+def _force_no_stream(monkeypatch):
+    """ClientBackend streams by default; these tests mock a single
+    non-streaming response, so pin the non-streaming path they expect."""
+    monkeypatch.setenv("AF_NO_STREAM", "1")
+
+
 def test_client_backend_initialization_defaults():
     """Test ClientBackend initialization with default parameters"""
     backend = ClientBackend(model_name_or_path="test-model")
@@ -156,28 +163,6 @@ async def test_generate_async_with_num_return_sequences():
     assert response[2] == "Response 3"
 
 
-@pytest.mark.asyncio
-async def test_generate_streaming():
-    """Test streaming generation"""
-    backend = ClientBackend(model_name_or_path="test-model")
-
-    mock_response = Mock()
-    mock_response.dict.return_value = {
-        "choices": [{"message": {"content": "Streaming response", "tool_calls": None}}]
-    }
-
-    backend.client = Mock()
-    backend.client.chat.completions.create.return_value = mock_response
-
-    messages = [{"role": "user", "content": "Hello"}]
-    responses = []
-    async for response in backend.generate_streaming(messages):
-        responses.append(response)
-
-    assert len(responses) == 1
-    assert responses[0] == "Streaming response"
-
-
 def test_generate_sync_single_message():
     """Test synchronous generation with a single message"""
     backend = ClientBackend(model_name_or_path="test-model")
@@ -293,6 +278,14 @@ def test_preprocess_messages_and_args_openai():
     )
 
     assert processed_kwargs.get("tool_choice") == "auto"
+
+
+def test_preprocess_drops_empty_tools():
+    """An empty tools list (e.g. ReactAgent, which renders tools in the prompt) is not sent:
+    OpenAI-compatible servers reject ``tools: []``."""
+    backend = ClientBackend(model_name_or_path="test-model")
+    _, kwargs = backend._preprocess_messages_and_args([[{"role": "user", "content": "Hello"}]], tools=[])
+    assert "tools" not in kwargs and "tool_choice" not in kwargs
 
 
 @pytest.mark.asyncio

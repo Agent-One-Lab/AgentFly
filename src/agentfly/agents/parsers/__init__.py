@@ -1,3 +1,5 @@
+"""Tool-call parsing for model output: :func:`extract_tool_calls`."""
+
 from .utils import extract_tool_calls
 
 __all__ = [

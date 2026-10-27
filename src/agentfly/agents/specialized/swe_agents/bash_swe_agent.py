@@ -1,18 +1,16 @@
-from .prompts import (
-    COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT,
-    INSTRUCTION_DESCRIPTION_PLACEHOLDER,
-    InstructionPrompt,
-    InstructionSystemPrompt,
-    SystemPrompt,
-)
+""":class:`BashSWEAgent`: a SWE-bench-style agent that acts only through bash commands in fenced ``bash`` blocks."""
 
 import json
 import re
 from typing import Dict, List, Optional
 
 from ....core.context import Context
-from ...agent_base import BaseAgent
 from ....tools.src.shell.tools import run_shell_command
+from ...agent_base import BaseAgent
+from .prompts import (
+    COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT,
+    InstructionSystemPrompt,
+)
 
 # Match ```mswea_bash_command ... ``` or ```bash ... ``` (non-greedy, DOTALL for multiline command)
 BASH_BLOCK_PATTERN = re.compile(
@@ -97,10 +95,7 @@ class BashSWEAgent(BaseAgent):
             )
 
         # Per InstructionSystemPrompt: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT ends the task
-        is_complete = (
-            command is not None
-            and COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT in command
-        )
+        is_complete = command is not None and COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT in command
 
         status = "terminal" if is_complete else ("continue" if formatted_tool_calls else "terminal")
 

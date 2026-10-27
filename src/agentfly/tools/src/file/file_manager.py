@@ -11,46 +11,93 @@ Undo: per-file snapshot stack under ``.agentfly_undo/`` inside the workspace
 so each container invocation (copied ``file_manager.py``) can still undo edits.
 """
 
-import hashlib
-import os
-import sys
-import json
-import re
 import fnmatch
+import hashlib
+import json
+import os
+import re
 import shutil
 import subprocess
-from typing import Optional, List, Tuple
-
+import sys
+from typing import List, Optional, Tuple
 
 # ═════════════════════════════════════════════════════════════════════
 #  FileManager — one instance per task
 # ═════════════════════════════════════════════════════════════════════
 
-class FileManager:
 
+class FileManager:
     # Undo snapshots live under workspace root (hidden; skipped by list/grep walks).
     _UNDO_DIRNAME = ".agentfly_undo"
 
     # Directories to skip during traversal
-    _SKIP_DIRS = frozenset({
-        "__pycache__", "node_modules", ".tox", ".eggs",
-        "build", "dist", ".mypy_cache", ".pytest_cache",
-    })
+    _SKIP_DIRS = frozenset(
+        {
+            "__pycache__",
+            "node_modules",
+            ".tox",
+            ".eggs",
+            "build",
+            "dist",
+            ".mypy_cache",
+            ".pytest_cache",
+        }
+    )
 
     # Binary file extensions to skip
-    _BINARY_EXTS = frozenset({
-        ".pyc", ".pyo", ".so", ".o", ".a", ".dylib", ".dll", ".exe",
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
-        ".woff", ".woff2", ".ttf", ".eot",
-        ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z",
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx",
-        ".pickle", ".pkl", ".npy", ".npz", ".h5", ".hdf5",
-        ".db", ".sqlite", ".sqlite3", ".mo",
-    })
+    _BINARY_EXTS = frozenset(
+        {
+            ".pyc",
+            ".pyo",
+            ".so",
+            ".o",
+            ".a",
+            ".dylib",
+            ".dll",
+            ".exe",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".ico",
+            ".svg",
+            ".woff",
+            ".woff2",
+            ".ttf",
+            ".eot",
+            ".zip",
+            ".tar",
+            ".gz",
+            ".bz2",
+            ".xz",
+            ".7z",
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".pickle",
+            ".pkl",
+            ".npy",
+            ".npz",
+            ".h5",
+            ".hdf5",
+            ".db",
+            ".sqlite",
+            ".sqlite3",
+            ".mo",
+        }
+    )
 
-    def __init__(self, task_id: str, workspace_root: Optional[str] = None):
+    def __init__(self, task_id: str, workdir: Optional[str] = None):
         self.task_id = task_id
-        root = workspace_root or os.environ.get("WORKSPACE_ROOT", "/testbed")
+        # Unified on the container WORKDIR (named ``workdir`` everywhere — same
+        # key the shell tool and rollout metadata use): an explicit workdir
+        # wins; otherwise root at the process cwd, which the runtime sets to the
+        # image's WORKDIR. (Previously read a WORKSPACE_ROOT env var that callers
+        # had to inject; WORKDIR is the single source of truth now.)
+        root = workdir or os.getcwd()
         self.root = os.path.realpath(os.path.abspath(root))
         self._file_index_cache: Optional[List[str]] = None
 
@@ -160,8 +207,7 @@ class FileManager:
 
     # ── Tools: read ──────────────────────────────────────────────────
 
-    def read_file(self, path: str, start_line: Optional[int] = None,
-                  end_line: Optional[int] = None) -> str:
+    def read_file(self, path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
         """Read a file with numbered lines. Optionally show a line range."""
         full = self._safe_path(path)
         with open(full, "r") as f:
@@ -171,7 +217,7 @@ class FileManager:
         s = max(1, start_line or 1)
         e = min(total, end_line or total)
 
-        numbered = [f"{i+1:6d} | {lines[i]}" for i in range(s - 1, e)]
+        numbered = [f"{i + 1:6d} | {lines[i]}" for i in range(s - 1, e)]
         rel = os.path.relpath(full, self.root)
         header = f"[File: {rel} ({total} lines)]"
         if start_line or end_line:
@@ -196,9 +242,7 @@ class FileManager:
                     result.append(os.path.relpath(fp, self.root))
         return "\n".join(result) if result else "(empty)"
 
-    def grep_search(self, pattern: str, path: str = ".",
-                    include: Optional[str] = None,
-                    max_results: int = 1000) -> str:
+    def grep_search(self, pattern: str, path: str = ".", include: Optional[str] = None, max_results: int = 1000) -> str:
         """
         Search for a regex pattern across files.
         Uses system grep when available, falls back to Python.
@@ -221,8 +265,7 @@ class FileManager:
         # Python fallback (always works)
         return self._grep_python(pattern, full, include, max_results)
 
-    def _grep_system(self, pattern: str, search_path: str,
-                     include: Optional[str], max_results: int) -> Optional[str]:
+    def _grep_system(self, pattern: str, search_path: str, include: Optional[str], max_results: int) -> Optional[str]:
         """System grep. Returns None if unavailable."""
         cmd = ["grep", "-rn", "--color=never", "-E"]
         if include:
@@ -258,8 +301,7 @@ class FileManager:
             out += f"\n... (truncated at {max_results} results)"
         return out
 
-    def _grep_python(self, pattern: str, search_path: str,
-                     include: Optional[str], max_results: int) -> str:
+    def _grep_python(self, pattern: str, search_path: str, include: Optional[str], max_results: int) -> str:
         """Pure Python fallback. Uses cached file index when possible."""
         try:
             regex = re.compile(pattern)
@@ -400,8 +442,11 @@ class FileManager:
         """Show cumulative diff from the initial commit."""
         try:
             r = subprocess.run(
-                ["git", "diff"], cwd=self.root,
-                capture_output=True, text=True, timeout=10,
+                ["git", "diff"],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             return r.stdout.strip() or "(no changes)"
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -414,8 +459,11 @@ class FileManager:
         try:
             subprocess.run(
                 ["git", "checkout", "HEAD", "--", rel],
-                cwd=self.root, capture_output=True, text=True,
-                timeout=10, check=True,
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
             )
             self._clear_undo_for_file(full)
             return f"{rel} reset to initial commit."
@@ -438,15 +486,14 @@ class FileManager:
         files_with, total = self._undo_stats()
         return {
             "task_id": self.task_id,
-            "workspace": self.root,
+            "workdir": self.root,
             "files_with_history": files_with,
             "total_snapshots": total,
         }
 
     # ── Private helpers ──────────────────────────────────────────────
 
-    def _edit_confirmation(self, full_path: str, new_content: str,
-                           replace_block: str) -> str:
+    def _edit_confirmation(self, full_path: str, new_content: str, replace_block: str) -> str:
         """Show a few lines of context around the edit."""
         rel = os.path.relpath(full_path, self.root)
         lines = new_content.splitlines(keepends=True)
@@ -459,21 +506,23 @@ class FileManager:
         ctx = 3
         s = max(0, line_start - ctx)
         e = min(len(lines), line_start + replace_lines + ctx)
-        snippet = "".join(f"{i+1:6d} | {lines[i]}" for i in range(s, e))
-        return f"File updated: {rel}\n[Lines {s+1}-{e}]\n{snippet}"
+        snippet = "".join(f"{i + 1:6d} | {lines[i]}" for i in range(s, e))
+        return f"File updated: {rel}\n[Lines {s + 1}-{e}]\n{snippet}"
 
 
-ALLOWED_TOOLS = frozenset({
-    "read_file",
-    "list_files",
-    "grep_search",
-    "edit_file",
-    "create_file",
-    "python",
-    "undo_edit",
-    "git_diff",
-    "git_reset_file",
-})
+ALLOWED_TOOLS = frozenset(
+    {
+        "read_file",
+        "list_files",
+        "grep_search",
+        "edit_file",
+        "create_file",
+        "python",
+        "undo_edit",
+        "git_diff",
+        "git_reset_file",
+    }
+)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -490,7 +539,7 @@ if __name__ == "__main__":
         if tool_name not in ALLOWED_TOOLS:
             print(f"Error: Unknown tool '{tool_name}'", end="")
         else:
-            fm = FileManager(task_id=task_id, workspace_root=data.get("workspace"))
+            fm = FileManager(task_id=task_id, workdir=data.get("workdir"))
             method = getattr(fm, tool_name, None)
             if method is None:
                 print(f"Error: Tool '{tool_name}' not implemented", end="")
@@ -506,8 +555,7 @@ if __name__ == "__main__":
                 print(result, end="")
     except (IndexError, json.JSONDecodeError):
         print(
-            'Usage: python3 file_manager.py '
-            '\'{"task_id":"x","tool":"read_file","params":{"path":"main.py"}}\'',
+            'Usage: python3 file_manager.py \'{"task_id":"x","tool":"read_file","params":{"path":"main.py"}}\'',
             file=sys.stderr,
         )
         sys.exit(1)

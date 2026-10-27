@@ -208,4 +208,3 @@ python -m agentfly.cli train \
     trainer.test_freq=${total_training_steps} \
     trainer.total_training_steps=$total_training_steps \
     trainer.val_before_train=False
-

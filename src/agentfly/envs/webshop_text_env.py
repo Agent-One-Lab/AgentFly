@@ -1,4 +1,14 @@
+"""WebShop text environment backed by a containerized WebShop simulator.
+
+:class:`WebShopEnv` talks to the simulator server over HTTP: it starts sessions (optionally with
+a caller-provided goal and prices), performs ``search[...]`` / ``click[...]`` actions, and reads
+the purchase score. :data:`WebShopSpec` is the resource spec tools and rewards acquire, and
+:func:`server_mount` bind-mounts the repository's simulator server into the container.
+"""
+
 import asyncio
+import json
+import os
 import random
 import re
 import string
@@ -24,14 +34,37 @@ ACTION_TO_TEMPLATE = {
     "Attributes": "attributes_page.html",
 }
 
+
+# WebShop simulator image. Default is the full 1.18M-catalog + human-goals benchmark
+# with a correctly-sized Lucene index (`webshop-env:full`). Set WEBSHOP_IMAGE to
+# `reasonwang/webshop-env:small` for the 1,000-catalog + synthetic-goals variant that
+# is aligned to verl-agent/RAGEN for framework comparison. (The old
+# `rifoag/webshop-simulator-env:latest` shipped a 1,000-doc index over the full
+# catalog -> 0% training-goal coverage; do not use it.)
+def server_mount() -> dict:
+    """Bind-mount the repo's simulator server over the image's copy.
+
+    The images predate per-session goals (``POST /session/{id}``, used for verl-agent-aligned
+    tasks); mounting ``dockers/webshop_env/webshop_simulator_server.py`` serves the current server
+    without an image rebuild. Opt out with ``AF_WEBSHOP_SERVER_MOUNT=0`` (e.g. once an image
+    ships the same server) or when the source file is not present.
+    """
+    source = os.path.join(os.path.dirname(__file__), "..", "dockers", "webshop_env", "webshop_simulator_server.py")
+    source = os.path.abspath(source)
+    if os.environ.get("AF_WEBSHOP_SERVER_MOUNT", "1") != "1" or not os.path.isfile(source):
+        return {}
+    return {f"{source}:/app/webshop_simulator_server.py:none": "bind,ro"}
+
+
 WebShopSpec = ContainerResourceSpec(
     category="webshop",
-    image="rifoag/webshop-simulator-env:latest",
+    image=os.environ.get("WEBSHOP_IMAGE", "reasonwang/webshop-env:full"),
     ports={"3000/tcp": None},
     container_port=3000,
     start_timeout=180.0,
     host_ip="127.0.0.1",
-    max_global_num=8,
+    max_global_num=64,
+    mount=server_mount(),
 )
 
 
@@ -53,6 +86,10 @@ class WebShopEnv(ContainerResource):
         self.state = {"html": None, "url": None}
         self.text_to_clickable = None
         self.server = None  # no server ref in resource mode
+        # True while the current episode's goal was provided by the caller (``goal_json``);
+        # the server then scores purchases against that goal and its prices, not ``task_id``.
+        self.session_goal = False
+        self.goal_session_id = "g" + "".join(random.choices(string.ascii_lowercase, k=10))
 
     @property
     def category(self) -> str:
@@ -107,7 +144,30 @@ class WebShopEnv(ContainerResource):
 
         Returns:
             str: None (kept for compatibility)
+
+        When ``env_args`` carries ``goal_json`` (and optionally ``prices_json``) the episode's goal
+        and product prices come from the caller instead of the server's goal list — e.g. tasks
+        generated from verl-agent's env workers. Failures on that path raise: silently falling
+        back to the server's own goal would train on different tasks.
         """
+        goal_json = (env_args or {}).get("goal_json")
+        if goal_json:
+            goal = json.loads(goal_json) if isinstance(goal_json, str) else goal_json
+            prices = (env_args or {}).get("prices_json") or {}
+            prices = json.loads(prices) if isinstance(prices, str) else prices
+            self.session_id = self.goal_session_id
+            r = await self._client.post(f"/session/{self.session_id}", json={"goal": goal, "prices": prices})
+            if r.status_code != 200:
+                raise RuntimeError(
+                    f"WebShop server rejected a caller-provided goal (HTTP {r.status_code}); the server "
+                    "must support POST /session/{id} (see AF_WEBSHOP_SERVER_MOUNT)."
+                )
+            r = await self._client.get(f"/index/{self.session_id}")
+            self.state.update({"html": r.text, "url": f"/index/{self.session_id}"})
+            self.text_to_clickable = None
+            self.session_goal = True
+            return
+        self.session_goal = False
         try:
             task_id = env_args.get("task_id", None)
             if task_id is not None:
@@ -153,9 +213,8 @@ class WebShopEnv(ContainerResource):
             url_parts = current_url.split("/")
             asin = url_parts[3]
             options = literal_eval(url_parts[4])
-            r = await self._client.get(
-                f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}"
-            )
+            query = "" if self.session_goal or task_id is None else f"?task_id={task_id}"
+            r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}{query}")
             r = r.json()
             self.state.update(
                 {
@@ -181,10 +240,7 @@ class WebShopEnv(ContainerResource):
         if action_name not in ["click", "search"]:
             return "Invalid action, action name should be 'click' or 'search'."  # invalid action, do nothing
         elif action_arg not in self.text_to_clickable.keys() and action_name == "click":
-            return (
-                "Invalid action, action argument should be one of the clickables: "
-                + str(clickables)
-            )
+            return "Invalid action, action argument should be one of the clickables: " + str(clickables)
         else:
             current_url = self.state.get("url")
             url_parts = current_url.split("/")
@@ -193,9 +249,7 @@ class WebShopEnv(ContainerResource):
             if current_page == "index":
                 if action_name == "search":
                     keywords = action_arg.split()
-                    r = await self._client.get(
-                        f"/search_results/{self.session_id}/{action_arg}/1"
-                    )
+                    r = await self._client.get(f"/search_results/{self.session_id}/{action_arg}/1")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -208,9 +262,7 @@ class WebShopEnv(ContainerResource):
                 keywords = literal_eval(url_parts[3])
                 if action_arg == NEXT_PAGE.lower():
                     next_page = page_num + 1
-                    r = await self._client.get(
-                        f"/search_results/{self.session_id}/{keywords}/{next_page}"
-                    )
+                    r = await self._client.get(f"/search_results/{self.session_id}/{keywords}/{next_page}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -224,9 +276,7 @@ class WebShopEnv(ContainerResource):
                     and page_num > 1
                 ):
                     prev_page = page_num - 1
-                    r = await self._client.get(
-                        f"/search_results/{self.session_id}/{keywords}/{prev_page}"
-                    )
+                    r = await self._client.get(f"/search_results/{self.session_id}/{keywords}/{prev_page}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -243,16 +293,10 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/index/{self.session_id}",
                             }
                         )
-                elif (
-                    action_arg.lower()
-                    and len(action_arg) == 10
-                    and action_arg.isalnum()
-                ):
+                elif action_arg.lower() and len(action_arg) == 10 and action_arg.isalnum():
                     asin = action_arg.upper()
                     options = str({})
-                    r = await self._client.get(
-                        f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}"
-                    )
+                    r = await self._client.get(f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -276,9 +320,9 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/index/{self.session_id}",
                             }
                         )
-                elif (
-                    action_arg in [k.lower() for k in ACTION_TO_TEMPLATE]
-                ):  # click on sub page such as description, features, reviews, attributes
+                elif action_arg in [
+                    k.lower() for k in ACTION_TO_TEMPLATE
+                ]:  # click on sub page such as description, features, reviews, attributes
                     sub_page = action_arg.capitalize()
                     r = await self._client.get(
                         f"/item_sub_page/{self.session_id}/{asin}/{keywords}/{page_num}/{sub_page}/{options}"
@@ -291,14 +335,10 @@ class WebShopEnv(ContainerResource):
                             }
                         )
                 elif action_arg == END_BUTTON.lower():
-                    if task_id:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}"
-                        )
+                    if task_id and not self.session_goal:
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}")
                     else:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}"
-                        )
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}")
                     if r.status_code == 200:
                         r = r.json()
                         self.state.update(
@@ -308,16 +348,12 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/done/{self.session_id}/{asin}/{options}",
                             }
                         )
-                elif (
-                    action_arg in self.text_to_clickable.keys()
-                ):  # click on product attributes
+                elif action_arg in self.text_to_clickable.keys():  # click on product attributes
                     input_html = str(self.text_to_clickable[action_arg])
                     element = self._parse_html(input_html).find("input")
                     name_value = element.get("name")
                     options[name_value] = action_arg
-                    r = await self._client.get(
-                        f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}"
-                    )
+                    r = await self._client.get(f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -334,9 +370,7 @@ class WebShopEnv(ContainerResource):
                 sub_page = url_parts[6].capitalize()
                 options = literal_eval(url_parts[7])
                 if action_arg == PREV_PAGE.lower():
-                    r = await self._client.get(
-                        f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}"
-                    )
+                    r = await self._client.get(f"/item_page/{self.session_id}/{asin}/{keywords}/{page_num}/{options}")
                     if r.status_code == 200:
                         self.state.update(
                             {
@@ -353,9 +387,9 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/index/{self.session_id}",
                             }
                         )
-                elif (
-                    action_arg in [k.lower() for k in ACTION_TO_TEMPLATE]
-                ):  # click on sub page such as description, features, reviews, attributes
+                elif action_arg in [
+                    k.lower() for k in ACTION_TO_TEMPLATE
+                ]:  # click on sub page such as description, features, reviews, attributes
                     sub_page = action_arg.capitalize()
                     r = await self._client.get(
                         f"/item_sub_page/{self.session_id}/{asin}/{keywords}/{page_num}/{sub_page}/{options}"
@@ -369,13 +403,9 @@ class WebShopEnv(ContainerResource):
                         )
                 elif action_arg == END_BUTTON.lower():
                     if task_id:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}"
-                        )
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}?task_id={task_id}")
                     else:
-                        r = await self._client.get(
-                            f"/done/{self.session_id}/{asin}/{options}"
-                        )
+                        r = await self._client.get(f"/done/{self.session_id}/{asin}/{options}")
                     if r.status_code == 200:
                         r = r.json()
                         self.state.update(
@@ -385,9 +415,7 @@ class WebShopEnv(ContainerResource):
                                 "url": f"/done/{self.session_id}/{asin}/{options}",
                             }
                         )
-                elif (
-                    action_arg in self.text_to_clickable.keys()
-                ):  # click on product attributes
+                elif action_arg in self.text_to_clickable.keys():  # click on product attributes
                     input_html = str(self.text_to_clickable[action_arg])
                     element = self._parse_html(input_html).find("input")
                     name_value = element.get("name")
@@ -445,9 +473,7 @@ class WebShopEnv(ContainerResource):
         product_links = html_obj.find_all(class_="product-link")
         buying_options = html_obj.select('input[type="radio"]')
 
-        self.text_to_clickable = {
-            f"{b.get_text()}".lower(): b for b in buttons + product_links
-        }
+        self.text_to_clickable = {f"{b.get_text()}".lower(): b for b in buttons + product_links}
         for opt in buying_options:
             opt_value = opt.get("value")
             self.text_to_clickable[f"{opt_value}"] = opt
@@ -541,9 +567,7 @@ class WebShopEnv(ContainerResource):
                         processed_t = f"  [button] {t} [button_]"
                 elif t.parent.get("class") == ["product-link"]:  # product asins
                     asins = []
-                    if getattr(self, "server", None) and self.session_id in getattr(
-                        self.server, "user_sessions", {}
-                    ):
+                    if getattr(self, "server", None) and self.session_id in getattr(self.server, "user_sessions", {}):
                         asins = self.server.user_sessions[self.session_id].get("asins", [])
                     if f"{t}" in asins:
                         processed_t = f"\n[clicked button] {t} [clicked button_]"
@@ -569,27 +593,10 @@ class WebShopEnv(ContainerResource):
         if element.parent.parent is not None:
             return (
                 element.parent.name not in ignore
-                and not isinstance(
-                    element, Comment
-                )  # and not (element.parent.parent.get('id') == 'instruction-text')
+                and not isinstance(element, Comment)  # and not (element.parent.parent.get('id') == 'instruction-text')
             )
         else:
-            return element.parent.name not in ignore and not isinstance(
-                element, Comment
-            )
-
-    @staticmethod
-    async def acquire():
-        """
-        Acquire and start a new WebAgentTextEnv environment asynchronously.
-
-        Returns:
-            WebAgentTextEnv: The started environment instance.
-        """
-        env = WebAgentTextEnv()
-        await env.start()
-        await env.reset()
-        return env
+            return element.parent.name not in ignore and not isinstance(element, Comment)
 
     @staticmethod
     def parse_action(action):

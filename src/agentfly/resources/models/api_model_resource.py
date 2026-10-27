@@ -56,17 +56,13 @@ class APIModelResource(BaseResource):
     async def start(self) -> None:
         model_name_or_path = self._spec.model_name_or_path
         if not model_name_or_path:
-            raise ValueError(
-                "APIModelResourceSpec.model_name_or_path is required for category='api_model'."
-            )
+            raise ValueError("APIModelResourceSpec.model_name_or_path is required for category='api_model'.")
 
         self._backend = ClientBackend(
             model_name_or_path=model_name_or_path,
             base_url=self.base_url,
             api_key=str(self._spec.api_key or "EMPTY"),
-            timeout=float(self._spec.request_timeout)
-            if self._spec.request_timeout is not None
-            else 3600,
+            timeout=float(self._spec.request_timeout) if self._spec.request_timeout is not None else 3600,
         )
         await self._wait_until_ready()
         self._status = ResourceStatus.RUNNING

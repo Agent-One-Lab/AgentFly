@@ -3,7 +3,11 @@ Evaluate a single sample (dataset instance) and return the result.
 
 Use this after importing swesmith_enroot so evaluation runs with Enroot.
 """
+
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def evaluate_swesmith(
@@ -36,14 +40,11 @@ def evaluate_swesmith(
     from swesmith.harness.eval import run_evaluation
 
     patch_to_use = patch
-    # patch_to_use = sample.get(KEY_PATCH)
     instance_id = sample[KEY_INSTANCE_ID]
     pred = {
         KEY_INSTANCE_ID: instance_id,
         KEY_PREDICTION: patch_to_use,
         KEY_MODEL: model_name,
     }
-    print(f"Pred: {pred}")
-    return run_evaluation(
-        pred, sample, run_id, f2p_only=f2p_only, is_gold=is_gold, container=container
-    )
+    logger.debug(f"Pred: {pred}")
+    return run_evaluation(pred, sample, run_id, f2p_only=f2p_only, is_gold=is_gold, container=container)

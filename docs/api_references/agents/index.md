@@ -16,42 +16,56 @@ AgentFly provides a comprehensive agent system with a base class and specialized
 
 ```python
 from agentfly.agents import ReactAgent
-from agentfly.tools import get_tools_from_names
+from agentfly.tools import calculator
 
-# Create a ReactAgent with tools
+# ReactAgent writes the tool list into its own ReAct prompt, so it uses a template
+# that does not add tools to the system message.
 agent = ReactAgent(
-    model_name_or_path="gpt2",
-    tools=get_tools_from_names(["calculator", "google_search"]),
-    template="react"
+    model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
+    tools=[calculator],
+    template="qwen2.5-no-system-tool",
+    backend_config={"backend": "async_vllm"},
 )
 ```
 
 ### Using AutoAgent
 
+`AutoAgent` builds an agent from a config dict, as training does. Here tools and the reward are
+given by registered name:
+
 ```python
 from agentfly.agents import AutoAgent
 
-# Create agent from config
 config = {
     "agent_type": "react",
-    "model_name_or_path": "gpt2",
-    "template": "react",
-    "tools": ["calculator"]
+    "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
+    "template": "qwen2.5-no-system-tool",
+    "tools": ["calculator"],
+    "reward_name": "math_equal_reward_tool",
+    "backend_config": {"backend": "async_vllm"},
 }
 agent = AutoAgent.from_config(config)
 ```
 
 ### Custom Agent
 
+Subclass `BaseAgent` and override `parse`, which turns raw model outputs into assistant messages.
+Put any tool calls the response asks for in `tool_calls`; the rollout runs them:
+
 ```python
 from agentfly.agents import BaseAgent
 
-class CustomAgent(BaseAgent):
-    def parse(self, response):
-        # Custom parsing logic
-        pass
 
-    def generate(self, messages):
-        # Custom generation logic
-        pass
+class CustomAgent(BaseAgent):
+    def parse(self, responses, context=None, **kwargs):
+        messages = []
+        for response in responses:
+            tool_calls = []  # e.g. [{"id": None, "type": "function",
+            #                         "function": {"name": "calculator", "arguments": {"expression": "1+1"}}}]
+            messages.append(
+                {"role": "assistant", "content": [{"type": "text", "text": response}], "tool_calls": tool_calls}
+            )
+        return messages
 ```
+
+See `ReactAgent` (`agentfly/agents/specialized/react_agent.py`) for a complete example.

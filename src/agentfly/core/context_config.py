@@ -40,4 +40,3 @@ def resolve_resource_backend(
     if context_config is not None:
         return str(context_config.resource_backend or "local").strip()
     return "local"
-

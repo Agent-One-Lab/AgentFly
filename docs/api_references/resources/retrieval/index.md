@@ -11,10 +11,10 @@ The Retrieval tools provide semantic search and document retrieval capabilities 
 ## Quick Start
 
 ```python
-from agentfly.tools.src.search.async_dense_retriever import asyncdense_retrieve
+from agentfly.tools.src.search.async_dense_retriever import async_dense_retrieve
 
 # Retrieve relevant documents
-result = await asyncdense_retrieve("What is machine learning?")
+result = await async_dense_retrieve("What is machine learning?")
 print(result)
 ```
 

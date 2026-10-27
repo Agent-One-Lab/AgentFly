@@ -1,5 +1,11 @@
-fastapi
-uvicorn
+# Pinned to the versions the working rifoag image used. Newer Starlette (>=0.47)
+# changed TemplateResponse to (request, name, context); the server's older
+# TemplateResponse(name, context) calls then pass a dict as the template name and every
+# page render 500s (agent gets no instruction -> all rewards zero). Do not unpin.
+fastapi==0.115.12
+starlette==0.46.2
+uvicorn==0.34.3
+jinja2==3.1.6
 pydantic
 sympy
 numpy
