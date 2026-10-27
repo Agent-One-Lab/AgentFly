@@ -29,18 +29,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Verify Python
-        run: |
-          which python
-          python --version
-          which pip
-          python -m pip --version
-
+      # Before setup-python: this removes the runner's tool cache, where setup-python installs Python.
       - name: Free up disk space
         run: |
           echo "Before cleanup:"
@@ -55,13 +44,25 @@ jobs:
           echo "After cleanup:"
           df -h
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify Python
+        run: |
+          which python
+          python --version
+          which pip
+          python -m pip --version
+
       - name: Install dependencies (main repo)
         run: |
-          pip install -e .
+          python -m pip install -e .
           # Pin datasets: 2.14.x uses pyarrow's removed PyExtensionType and breaks
           # on import; keep in sync with the pin in pyproject.toml's [verl] extra.
-          pip install 'datasets==2.19.0'
-          pip install -e '.[dev]' --no-build-isolation
+          python -m pip install 'datasets==2.19.0'
+          python -m pip install -e '.[dev]' --no-build-isolation
 
       - name: Cache AgentFly cache
         uses: actions/cache@v4
