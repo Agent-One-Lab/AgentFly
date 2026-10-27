@@ -11,12 +11,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import uuid
-from .types import BaseResource, ResourceStatus, BaseResourceSpec
-from .runner import LocalRunner, RayRunner, CloudRunner, K8sRunner
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from .runner import CloudRunner, K8sRunner, LocalRunner, RayRunner
+from .types import BaseResource, BaseResourceSpec, ResourceStatus
+
 if TYPE_CHECKING:
     from .runner import BaseRunner
+
+
+def _kind(pool_key: str) -> str:
+    """The resource kind of a pool key: category plus image / model / env class, without placement."""
+    return pool_key.split("|", 1)[0]
 
 
 def _pool_key(spec: BaseResourceSpec, backend: str) -> str:
@@ -26,6 +33,11 @@ def _pool_key(spec: BaseResourceSpec, backend: str) -> str:
     env_cls_path = getattr(spec, "env_cls_path", None)
     spec_key = f"{spec.category}:{image or model_name_or_path or env_cls_path or 'default'}"
     key = f"{spec_key}|{backend}"
+    # Explicit placement partitions the pool: a container pinned to one host must
+    # not be handed to a task that wants a different host.
+    docker_host = getattr(spec, "docker_host", None)
+    if docker_host:
+        key = f"{key}|dh={docker_host}"
     if backend == "ray":
         # Same image with different Ray placement options must not share a pool entry.
         ropts = getattr(spec, "ray_actor_options", None)
@@ -109,27 +121,27 @@ class ResourceEngine:
         if runner is None:
             raise ValueError(f"Unknown backend: {backend}")
         key = _pool_key(spec, backend)
-        
+
         pending_ids = []
         cond = cls._get_condition()
         async with cond:
             if key not in cls._free:
                 cls._free[key] = []
-            
+
             current_free = len(cls._free[key])
             if current_free >= size:
                 return
 
             total_existing = cls._count_for_pool(key)
             cap = spec.max_global_num
-            
+
             needed = size - current_free
             if cap is not None:
                 needed = min(needed, cap - total_existing)
-            
+
             if needed <= 0:
                 return
-            
+
             # Reserve slots with placeholders
             for _ in range(needed):
                 p_id = f"_pending_{key}_{uuid.uuid4().hex}"
@@ -182,7 +194,12 @@ class ResourceEngine:
             while True:
                 # If already acquired (or being acquired) for this id, return or wait.
                 if id in cls._acquired:
-                    resource, _ = cls._acquired[id]
+                    resource, held_key = cls._acquired[id]
+                    if _kind(held_key) != _kind(key):
+                        raise ValueError(
+                            f"Resource id {id!r} is already acquired for {_kind(held_key)!r}, not "
+                            f"{_kind(key)!r}. Give each resource a different id."
+                        )
                     if resource is not None:
                         return resource
                     # placeholder present; wait for the first caller to finish starting it
@@ -230,10 +247,7 @@ class ResourceEngine:
         return resource
 
     @classmethod
-    async def release(
-        cls,
-        id: str
-    ) -> None:
+    async def release(cls, id: str) -> None:
         """Return resource to the store and unregister from acquired."""
         cond = cls._get_condition()
         async with cond:
@@ -322,25 +336,12 @@ class ResourceEngine:
 
     @classmethod
     async def close(cls) -> None:
-        """Shut down: end all free and acquired resources, clear store."""
+        """Shut down: end all free and acquired resources concurrently, clear store."""
         async with cls._lock:
-            acquired_list = list(cls._acquired.values())
-            free_list: List[Tuple[str, BaseResource]] = []
-            for key, resources in cls._free.items():
-                for r in resources:
-                    free_list.append((key, r))
+            resources = [resource for resource, _ in cls._acquired.values() if resource is not None]
+            for pool in cls._free.values():
+                resources.extend(pool)
             cls._acquired.clear()
             cls._free.clear()
-        for _, resource in acquired_list:
-            if resource is None:
-                continue
-            try:
-                await resource.end()
-            except Exception:
-                pass
-        for _, resource in free_list:
-            try:
-                await resource.end()
-            except Exception:
-                pass
-
+        # Failures are ignored: every resource still gets its end() call.
+        await asyncio.gather(*(resource.end() for resource in resources), return_exceptions=True)

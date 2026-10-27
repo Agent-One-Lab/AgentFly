@@ -1,3 +1,9 @@
+"""Answer tools that end a ReAct-style episode.
+
+``answer``, ``answer_math`` (answer in ``\\boxed{}``) and ``answer_qa`` (a short direct answer)
+return the answer with status ``finish``, which ends the rollout so the reward can read it.
+"""
+
 from ...decorator import tool
 
 

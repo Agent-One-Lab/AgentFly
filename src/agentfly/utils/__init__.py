@@ -1,3 +1,5 @@
+"""Shared utilities: logging, timing, monitoring, image helpers and verl batch padding."""
+
 from .logging import Logger
 from .monitor import Monitor
 from .timing import Timer

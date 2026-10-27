@@ -36,7 +36,8 @@ def test_qa_f1_reward_tool_with_trajectory():
     trajectory = [
         {"role": "assistant", "content": "I need to search for information"},
         {"role": "tool", "content": "search results"},
-        {"role": "assistant", "content": "Based on my search, the answer is Paris"},
+        {"role": "assistant", "content": "The answer is Paris"},
+        {"role": "tool", "content": "Paris"},  # e.g. the answer tool's result
     ]
     result = qa_f1_reward_tool(
         final_response="Paris",
@@ -46,7 +47,7 @@ def test_qa_f1_reward_tool_with_trajectory():
     print(result)
     # --8<-- [end:qa_f1_reward_tool_with_trajectory]
     assert isinstance(result, dict)
-    assert "reward" in result and 0.0 <= result["reward"] <= 1.0
+    assert result["reward"] == 1.0
 
 
 def test_math_equal_reward_basic():

@@ -33,7 +33,7 @@ kl_coef=0.001
 train_dataset="./data/rlhf/qa/infoseek_train.json"
 eval_dataset="./data/rlhf/qa/infoseek_val.json"
 reward_name="infoseek_reward"
-tools="[asyncdense_retrieve,answer_qa]"
+tools="[async_dense_retrieve,answer_qa]"
 max_turns=5
 experiment_name="vlm_search_agent"
 
@@ -66,20 +66,20 @@ trust_remote_code=True
 
 # experiment_name="${model}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_turns}turns-${adv_estimator}"
 
-python3 -m verl.trainer.main_ppo \
+python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
     data.train_files=${train_dataset} \
     data.val_files=${eval_dataset} \
-    agent.num_chains=$num_chains \
+    agent.run_config.num_chains=$num_chains \
     data.val_batch_size=$val_batch_size \
     data.train_batch_size=$train_batch_size \
     agent.use_agent=True \
-    agent.model_name_or_path=$model \
-    agent.template=$template \
-    agent.max_turns=${max_turns} \
-    agent.agent_type=$agent_type \
-    agent.tools=${tools} \
-    agent.reward_name=${reward_name} \
+    agent.init_config.model_name_or_path=$model \
+    agent.init_config.template=$template \
+    agent.run_config.max_turns=${max_turns} \
+    agent.init_config.agent_type=$agent_type \
+    agent.init_config.tools=${tools} \
+    agent.init_config.reward_name=${reward_name} \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

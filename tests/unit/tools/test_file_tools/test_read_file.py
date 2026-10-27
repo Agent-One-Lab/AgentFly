@@ -17,11 +17,11 @@ async def test_read_file_existing():
     )
     try:
         listing = await list_files(path=".", context=context)
-        paths = [p.strip() for p in listing['observation'].split("\n") if p.strip()]
+        paths = [p.strip() for p in listing.observation.split("\n") if p.strip()]
         assert len(paths) > 0, "workspace should have at least one file"
         first_path = paths[0]
         result = await read_file(path=first_path, context=context)
-        print(result['observation'])
+        print(result.observation)
     finally:
         await context.end_resource(scope="rollout")
 
@@ -35,6 +35,6 @@ async def test_read_file_nonexistent_returns_error():
     )
     try:
         result = await read_file(path="README.rst", start_line=1, end_line=10, context=context)
-        print(result['observation'])
+        print(result.observation)
     finally:
         await context.end_resource(scope="rollout")

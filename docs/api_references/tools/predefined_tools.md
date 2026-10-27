@@ -21,7 +21,7 @@ The following are predefined tools that can be used directly with agents.
 
 ## SWE (container workspace)
 
-Tools for SWE-bench style rollouts: they are **stateful** and expect rollout `Context` with `context.metadata["image_id"]` set to the task container image. File tools mount `file_manager.py` into the container and delegate reads and edits to that helper. `run_shell_command` runs in the container with working directory `/testbed`. On first shell acquisition for a command, if `context.metadata` includes `git_commit_hash`, the shell tool runs `git fetch` and `git checkout` for that commit under `/testbed` (for example swe-smith style tasks).
+Tools for SWE-bench style rollouts: they are **stateful** and expect rollout `Context` with `context.metadata["image_id"]` set to the task container image. File tools copy `file_manager.py` into the container on first use and delegate reads and edits to that helper. `run_shell_command` runs in the container with working directory `/testbed` (or `context.metadata["workdir"]`). If `context.metadata` includes `git_commit_hash`, the first SWE tool call of a rollout (shell, file tools or MinisweAgent's `bash`) checks it out in the repository, running `git fetch` only if the checkout fails; if it still fails, the tool returns an error instead of running on the wrong code. SWE-smith tasks need this: their images start on `main` and each task's bug lives on a branch named after the task, which `swe-smith-py.json` stores in `git_commit_hash`.
 
 ### File workspace
 

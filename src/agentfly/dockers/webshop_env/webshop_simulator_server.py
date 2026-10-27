@@ -40,12 +40,19 @@ async def static_files(path: str):
     return FileResponse(os.path.join(static_dir, path))
 
 
-init_basedir(dataset="full")
+# Dataset ("full" 1.18M catalog or "small" 1,000-product subset) and goal type
+# ("1" human goals or "0" synthetic goals) are selected at container start via env
+# vars, so one image build can serve either benchmark. human_goals must be passed to
+# BOTH load_products (which populates instruction_text/instruction_attributes for the
+# synthetic path) and get_goals.
+_HUMAN_GOALS = os.environ.get("WEBSHOP_HUMAN_GOALS", "1") == "1"
+init_basedir(dataset=os.environ.get("WEBSHOP_DATASET", "full"))
 all_products, product_item_dict, product_prices, attribute_to_asins = load_products(
-    filepath=get_file_path()
+    filepath=get_file_path(),
+    human_goals=_HUMAN_GOALS,
 )
 search_engine = init_search_engine()
-goals = get_goals(all_products, product_prices)
+goals = get_goals(all_products, product_prices, human_goals=_HUMAN_GOALS)
 # random.shuffle(goals)
 weights = [goal["weight"] for goal in goals]
 
@@ -57,6 +64,23 @@ SHOW_ATTRS_TAB = False
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/session/{session_id}")
+async def set_session(session_id: str, request: Request):
+    """Start (or restart) a session with a caller-provided goal and product prices.
+
+    Lets a client serve tasks generated elsewhere, e.g. verl-agent's per-worker goals
+    (``examples/data_preprocess/prepare_webshop_verl_agent.py``): ``goal`` is a full goal dict
+    (instruction text, attributes, goal options, price limit, ...) and ``prices`` maps asin ->
+    price used by the reward's price check (verl-agent draws ranged prices per worker seed).
+    Products missing from ``prices`` fall back to this server's prices.
+    """
+    body = await request.json()
+    goal = body["goal"]
+    prices = {asin: float(price) for asin, price in (body.get("prices") or {}).items()}
+    user_sessions[session_id] = {"goal": goal, "done": False, "prices": prices}
+    return JSONResponse(content={"ok": True, "instruction_text": goal["instruction_text"]})
 
 
 @app.get("/")
@@ -271,16 +295,20 @@ async def done(session_id: str, asin: str, options: str, request: Request):
     global goals
     options = literal_eval(options)
 
-    # Extract task_id from request query params if present
+    # A session started through /session/{id} carries its own goal and prices. Otherwise the
+    # goal comes from ``task_id`` (index into this server's goals) or the session.
+    session = user_sessions.get(session_id, {})
     task_id = request.query_params.get("task_id")
-    if task_id is not None:
+    if "prices" in session:
+        goal = session["goal"]
+    elif task_id is not None:
         task_id = int(task_id)
         goal = goals[task_id]
     else:
-        goal = user_sessions[session_id]["goal"]
+        goal = session["goal"]
 
     purchased_product = product_item_dict[asin]
-    price = product_prices[asin]
+    price = session.get("prices", {}).get(asin, product_prices[asin])
 
     reward, reward_info = get_reward(
         purchased_product, goal, price=price, options=options, verbose=True

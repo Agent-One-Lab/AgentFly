@@ -1,3 +1,10 @@
+"""Agents for SWE-bench-style tasks.
+
+:class:`BashSWEAgent` acts only through bash commands, :class:`FunctionCallSWEAgent` through
+XML-style function calls, and :class:`Qwen3CoderSWEAgent` through Qwen3-Coder's tool-call format
+(importing this package registers the ``qwen3_coder`` vLLM tool parser).
+"""
+
 from .bash_swe_agent import BashSWEAgent
 from .function_call_swe_agent import FunctionCallSWEAgent
 

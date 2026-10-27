@@ -1,10 +1,21 @@
-import asyncio
+"""Tool base class and tool-call execution.
+
+:class:`BaseTool` wraps a sync or async function (or a ``call`` method) as a tool: schema,
+argument checks, context injection, resource handling for stateful tools, and normalizing any
+return value into a :class:`~agentfly.tools.types.ToolResult`. :func:`submit_tool_call` runs a
+model's tool call by name, turning malformed calls into ``status="invalid"`` results.
+"""
+
 import inspect
 import json
 import logging
-from typing import Any, Callable, List, Optional
+import traceback
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
-from .. import TOOL_ERROR_AS_OBSERVATION
+
+if TYPE_CHECKING:
+    from .types import ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +125,7 @@ class BaseTool:
 
         # Use __dict__ to avoid triggering __getattr__ in metaclass
         if "_is_async_call" not in cls.__dict__:
-            user_func_is_async = (
-                self.user_func is not None
-                and inspect.iscoroutinefunction(self.user_func)
-            )
+            user_func_is_async = self.user_func is not None and inspect.iscoroutinefunction(self.user_func)
             cls._is_async_call = user_func_is_async
 
         # Auto-register the tool instance by default
@@ -137,9 +145,7 @@ class BaseTool:
             is_method = True
         return is_method, instance
 
-    def _initialize_from_function(
-        self, func: Callable, name: str | None = None, description: str | None = None
-    ):
+    def _initialize_from_function(self, func: Callable, name: str | None = None, description: str | None = None):
         """
         Initialize the tool from a function and extract schema.
         Sets class attributes if they don't exist, otherwise uses existing class attributes.
@@ -159,20 +165,11 @@ class BaseTool:
         cls = type(self)
 
         # Extract schema if not already set (check class attributes)
-        if (
-            "schema" not in cls.__dict__
-            or cls.schema is None
-            or "args" not in cls.__dict__
-            or cls.args is None
-        ):
+        if "schema" not in cls.__dict__ or cls.schema is None or "args" not in cls.__dict__ or cls.args is None:
             signature = extract_signatures(func)
             docs = parse_docstring(inspect.getdoc(func))
             final_name = name or getattr(cls, "name", None) or func.__name__
-            final_desc = (
-                description
-                or docs.get("summary", "")
-                or getattr(cls, "description", "")
-            )
+            final_desc = description or docs.get("summary", "") or getattr(cls, "description", "")
 
             validated_schema = validate_schema(final_name, final_desc, signature, docs)
 
@@ -212,8 +209,10 @@ class BaseTool:
     def _execute_user_function_sync(self, **kwargs):
         """Execute the user function synchronously.
 
-        On error: returns str(e) if ``TOOL_ERROR_AS_OBSERVATION`` is True,
-        otherwise re-raises.
+        On a body exception: returns a ``status="error"`` result carrying the error
+        text (a *diagnosis*, not a control decision). The rollout's ``on_tool_error``
+        policy decides whether that error continues / ends / raises — the tool layer
+        no longer makes that call.
         """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
@@ -226,15 +225,13 @@ class BaseTool:
             else:
                 return self.user_func(**kwargs)
         except Exception as e:
-            if TOOL_ERROR_AS_OBSERVATION:
-                return str(e)
-            raise
+            return self._error_result(e)
 
     async def _execute_user_function_async(self, **kwargs):
         """Execute the user function, handling both sync and async functions.
 
-        On error: returns str(e) if ``agentfly.TOOL_ERROR_AS_OBSERVATION`` is True,
-        otherwise re-raises.
+        On a body exception: returns a ``status="error"`` result (see
+        :meth:`_execute_user_function_sync`).
         """
         # Infrastructure checks (these should raise if there's a problem)
         if self.is_method:
@@ -253,9 +250,17 @@ class BaseTool:
                 else:
                     return self.user_func(**kwargs)
         except Exception as e:
-            if TOOL_ERROR_AS_OBSERVATION:
-                return str(e)
-            raise
+            return self._error_result(e)
+
+    @staticmethod
+    def _error_result(e: Exception) -> dict:
+        """A ``status="error"`` raw result for an exception raised inside a tool body.
+
+        ``status`` marks it as an error *diagnosis*; the informative text goes to the
+        model as the observation if ``on_tool_error`` continues. No ``control`` is set,
+        so the rollout policy — not the tool — decides continue / end / raise.
+        """
+        return {"observation": f"{e}\n{traceback.format_exc()}", "status": "error"}
 
     def __call__(self, **kwargs):
         """
@@ -269,7 +274,7 @@ class BaseTool:
                 - "arguments": The arguments used to call the tool.
                 - "observation": The observation of the tool call.
                 - "status": The status of the tool call.
-                - "info": The info of the tool call.
+                - "metrics": Extra numeric metrics logged for the tool call.
         """
         cls = type(self)
         # If async is needed, return a coroutine
@@ -288,7 +293,7 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
+        # Execute the function (a body exception becomes a status="error" result)
         result = self._execute_user_function_sync(**kwargs)
 
         # Format and return result
@@ -303,34 +308,35 @@ class BaseTool:
         if validation_error is not None:
             return self._format_result(validation_error, kwargs)
 
-        # Execute the function (may convert errors to strings; see TOOL_ERROR_AS_OBSERVATION)
+        # Execute the function (a body exception becomes a status="error" result)
         result = await self._execute_user_function_async(**kwargs)
 
         # Format and return result
         return self._format_result(result, kwargs)
 
     def _format_result(self, result, kwargs):
-        """Format the result into the standard tool response dict.
+        """Normalize the user function's return into a typed :class:`ToolResult`.
 
-        Normalization is delegated to :meth:`ToolResult.from_raw`; the legacy
-        dict shape is reproduced via :meth:`ToolResult.to_dict` so existing
-        downstream consumers keep working.
+        Normalization is delegated to :meth:`ToolResult.from_raw`; downstream
+        rollout code reads the typed fields directly.
         """
         from .types import ToolResult
 
+        # Record only the LLM-provided arguments, not framework-injected params
+        # (``context``), which aren't tool inputs and can hold non-serializable
+        # objects (``Context``) that would break trajectory/metrics serialization.
+        recorded_args = {k: v for k, v in kwargs.items() if k not in ("context",)}
         return ToolResult.from_raw(
             result,
             name=self.name,
-            arguments=kwargs,
+            arguments=recorded_args,
             status=self.status,
             max_length=self.max_length,
-        ).to_dict()
+        )
 
     # ========== Registration ==========
     @classmethod
-    def register(
-        cls, tool_obj=None, name: str | None = None, auto_register: bool = True
-    ):
+    def register(cls, tool_obj=None, name: str | None = None, auto_register: bool = True):
         """
         Register a tool (class or instance) in the global tool registry.
 
@@ -361,10 +367,6 @@ class BaseTool:
         if register_name is None:
             register_name = getattr(tool_obj, "__name__", str(tool_obj))
 
-        # TODO: Should we warn for re-registration?
-        # if register_name in TOOL_REGISTRY:
-        #     warnings.warn(f"Tool {register_name!r} re-registered; overriding.")
-
         TOOL_REGISTRY[register_name] = tool_obj
 
         return tool_obj
@@ -386,12 +388,23 @@ def _tool_accepts_context(tool_obj: Any) -> bool:
     return False
 
 
+class InvalidToolCallError(Exception):
+    """Raised by the rollout for an *invalid tool call* — one the model formed with the
+    wrong shape (unknown tool name / non-JSON args / unknown argument names) — when the
+    run's ``on_invalid_tool_call`` policy is ``"raise"`` (fail-fast mode).
+
+    Distinct from an exception raised *inside* a tool's body while it runs: that is a
+    runtime tool error diagnosed as ``status="error"`` and governed by the run's
+    ``on_tool_error`` policy. A malformed call is diagnosed as ``status="invalid"``."""
+
+
 async def submit_tool_call(
     tool_name: str,
     tool_input: str,
     context: Optional[Any] = None,
     allowed_tool_names: Optional[List[str]] = None,
-) -> dict:
+    tools: Optional[Dict[str, Any]] = None,
+) -> "ToolResult":
     """
     Submit a tool call to the environment.
 
@@ -401,20 +414,45 @@ async def submit_tool_call(
         context: Optional Context instance for rollout-scoped data and resources.
                  Injected into tools that accept a `context` parameter.
         allowed_tool_names: Optional list of allowed tool names.
+        tools: Optional mapping of tool name to the tool object to call (an agent's own
+            tools, e.g. method tools bound to that agent). Names not in it are looked up in
+            the global tool registry.
 
     Returns:
-        dict: Tool result with keys like observation, status, etc.
+        ToolResult: Typed tool result (observation, status, metrics, ...). A *malformed*
+        call (unknown tool name, non-JSON args, or unknown argument names) returns a
+        ``status="invalid"`` result whose ``observation`` is an informative hint — the
+        diagnosis only. The continue / end / raise *decision* is the rollout's, via its
+        ``on_invalid_tool_call`` policy; this function never raises for a malformed call.
     """
     from .registry import TOOL_REGISTRY
+    from .types import ToolResult
 
     if allowed_tool_names is None:
         allowed_tool_names = list(TOOL_REGISTRY.keys())
 
-    if tool_name not in allowed_tool_names:
-        tool_name = "hallucination_tool"
-        tool_input = {"tool_name": str(tool_name)}
+    def invalid_call(observation: str, arguments: dict) -> "ToolResult":
+        """A malformed-call diagnosis: an informative hint tagged ``status="invalid"``.
 
-    tool_obj = TOOL_REGISTRY.get(tool_name, None)
+        Distinct from a tool-body ``status="error"`` so the rollout can route it to
+        ``on_invalid_tool_call`` (vs ``on_tool_error``). The rollout, not this function,
+        decides whether it continues / ends / raises."""
+        return ToolResult(
+            name=tool_name,
+            arguments=arguments,
+            observation=observation,
+            status="invalid",
+        )
+
+    # 1. Hallucinated tool: the model named a tool that does not exist. Report the
+    # real name and list what is actually available, so the hint is actionable.
+    if tool_name not in allowed_tool_names:
+        return invalid_call(
+            f'Tool "{tool_name}" does not exist. Available tools: {", ".join(allowed_tool_names)}.',
+            tool_input if isinstance(tool_input, dict) else {"raw": tool_input},
+        )
+
+    tool_obj = (tools or {}).get(tool_name) or TOOL_REGISTRY.get(tool_name, None)
     assert tool_obj is not None, f"Tool {tool_name} not found"
 
     if isinstance(tool_input, str):
@@ -430,10 +468,26 @@ async def submit_tool_call(
     else:
         tool_input_json = None
 
+    tool_args = getattr(tool_obj, "args", None) or {}
+
+    # 2. Arguments were not a JSON object we can splat as kwargs. Show what came in
+    # and the argument names the tool expects.
     if tool_input_json is None:
-        tool_name = "invalid_input_tool"
-        tool_input_json = {"tool_input": tool_input}
-        tool_obj = TOOL_REGISTRY["invalid_input_tool"]
+        expected = ", ".join(tool_args.keys()) or "(none)"
+        return invalid_call(
+            f'Arguments for tool "{tool_name}" must be a JSON object. '
+            f"Received: {tool_input!r}. Expected arguments: {expected}.",
+            {"raw": tool_input},
+        )
+
+    # 3. Unknown argument names (arguments the tool's schema does not declare).
+    unknown = [k for k in tool_input_json if k not in tool_args]
+    if unknown:
+        expected = ", ".join(tool_args.keys()) or "(none)"
+        return invalid_call(
+            f'Unknown argument(s) {", ".join(unknown)} for tool "{tool_name}". Expected arguments: {expected}.',
+            dict(tool_input_json),
+        )
 
     # Inject Context if the tool accepts it
     if context is not None and _tool_accepts_context(tool_obj):
@@ -467,6 +521,7 @@ if __name__ == "__main__":
             int: The sum of a and b.
         """
         return a + b
+
     # --8<-- [end:addition_tool_example]
 
     @tool(description="Concatenates two strings.")
@@ -505,6 +560,7 @@ if __name__ == "__main__":
             """
             # Use self.api_key here
             return f"Result for '{query}' using API key: {self.api_key[:5]}..."
+
     # --8<-- [end:api_tool_example]
 
     # Tool is automatically registered on initialization

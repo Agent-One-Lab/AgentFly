@@ -1,24 +1,20 @@
-import abc
-import asyncio
-import time
-import warnings
-from typing import Any
-from enroot import from_env
-from .manager.resource import GLOBAL_ENVS
+"""Environment base classes.
 
-# import docker
+:class:`BaseEnv` is the contract every environment implements (``start``, ``reset``, ``step``,
+``aclose`` / ``close``).
+"""
+
+import abc
+from typing import Any
 
 
 class BaseEnv(abc.ABC):
     """Minimal contract every environment must honour."""
 
-    def __init__(self):
-        GLOBAL_ENVS.add(self)
-
     @abc.abstractmethod
     async def start(self) -> None:
         """
-        Start the environment and allocate any resources. e.g. start a docker container and connect it.
+        Start the environment and allocate any resources. e.g. start a container and connect to it.
         This method is generally slow, and is often called when the environment is first created, the environment is broken or lost.
         """
         raise NotImplementedError
@@ -53,70 +49,3 @@ class BaseEnv(abc.ABC):
         This is the synchronous version of aclose.
         """
         raise NotImplementedError
-
-    @staticmethod
-    @abc.abstractmethod
-    async def acquire():
-        """Create a new environment."""
-        raise NotImplementedError
-
-
-class SupportsDocker:
-    """Adds Docker lifecycle; mix into envs that want it."""
-
-    _container = None  # set by subclass
-
-    async def _docker_start(self, image: str, runtime: str = "runc", **run_kw):
-        """
-        Launch the container without blocking the asyncio event-loop.
-
-        Args:
-            image (str): The Docker image to use.
-            runtime (str): The Docker runtime to use.
-            **run_kw: Additional keyword arguments to pass to the container run.
-
-        Raises:
-            RuntimeError: If the container fails to start.
-        """
-        # client = docker.from_env()
-        client = from_env()
-
-        # run docker-py call in default ThreadPoolExecutor
-        retry_times = 3
-        for _ in range(retry_times):
-            self._container = await asyncio.to_thread(
-                client.containers.run,
-                image,
-                detach=True,
-                auto_remove=True,
-                runtime=runtime,
-                **run_kw,
-            )
-
-            # wait until the container is actually running (non-blocking poll)
-            deadline = time.time() + 60
-            while self._container.status != "running":
-                await asyncio.sleep(0.1)
-                await asyncio.to_thread(self._container.reload)
-                if time.time() > deadline:
-                    # raise RuntimeError("container failed to start")
-                    warnings.warn("container failed to start, retrying...")
-                    continue
-            break
-
-    async def _docker_stop(self):
-        """
-        Stop the Docker container.
-        """
-        if self._container:
-            await asyncio.to_thread(self._container.kill)
-            self._container = None
-
-    def get_container_logs(self) -> str:
-        """Get logs from the container if it exists."""
-        if self._container:
-            try:
-                return self._container.logs().decode("utf-8")
-            except Exception as e:
-                return f"Could not get container logs: {str(e)}"
-        return "Container not found"

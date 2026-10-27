@@ -24,8 +24,8 @@ Configure the agent behavior and capabilities:
 - **`agent.init_config.model_name_or_path`**: HuggingFace model identifier or path (e.g., `Qwen/Qwen2.5-3B-Instruct`)
 - **`agent.init_config.template`**: Chat template name (e.g., `qwen2.5`, `qwen2.5-vl`)
 - **`agent.init_config.agent_type`**: Agent type - `hf`, `react`, `code`, `gui`, etc.
-- **`agent.init_config.tools`**: List of tools available to the agent (e.g., `[calculator]`, `[google_search,answer]`)
-- **`agent.init_config.reward_name`**: Name of the reward function to use (e.g., `math_equal_reward_tool`, `qa_f1_reward`)
+- **`agent.init_config.tools`**: List of tools available to the agent (e.g., `[calculator]`, `[async_dense_retrieve,answer_qa]`). Default: none
+- **`agent.init_config.reward_name`**: Name of the reward function to use (e.g., `math_equal_reward_tool`, `qa_f1_reward`). Required: training stops with an error if it's unset
 - **`agent.init_config.backend_config.backend`**: Backend for agent execution - `async_verl` (recommended) or others
 - **`agent.run_config.max_turns`**: Maximum number of interaction turns per episode
 - **`agent.run_config.num_chains`**: Number of parallel interaction chains per sample
@@ -39,8 +39,8 @@ Configure the agent behavior and capabilities:
 Configure the RL algorithm:
 
 - **`algorithm.adv_estimator`**: Advantage estimation method:
-    - `gae`: Generalized Advantage Estimation (default)
-    - `grpo`: Group Relative Policy Optimization
+    - `grpo`: Group Relative Policy Optimization (default)
+    - `gae`: Generalized Advantage Estimation (trains a critic model too)
     - `reinforce_plus_plus`: REINFORCE++ estimator
     - `rloo`: REINFORCE Leave-One-Out
     - `remax`: REINFORCE with Max
@@ -174,7 +174,7 @@ python -m agentfly.cli train \
     data.val_batch_size=512 \
     agent.use_agent=True \
     agent.init_config.agent_type=react \
-    agent.init_config.tools="[google_search,answer]" \
+    agent.init_config.tools="[async_dense_retrieve,answer_qa]" \
     agent.init_config.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
     agent.init_config.reward_name="qa_f1_reward" \
     agent.init_config.backend_config.backend=async_verl \
@@ -206,50 +206,6 @@ python -m agentfly.cli train \
     trainer.test_freq=10 \
     trainer.total_training_steps=200 \
     trainer.val_before_train=True
-```
-
-### Code Agent Training
-
-Train an agent for code generation tasks:
-
-```bash
-python -m agentfly.cli train \
-    algorithm.adv_estimator=grpo \
-    data.train_files="./data/rlhf/code/train.json" \
-    data.val_files="./data/rlhf/code/val.json" \
-    data.train_batch_size=64 \
-    agent.use_agent=True \
-    agent.init_config.agent_type=code \
-    agent.init_config.tools="[python_executor]" \
-    agent.init_config.model_name_or_path=Qwen/Qwen2.5-3B-Instruct \
-    agent.init_config.reward_name="code_reward" \
-    agent.init_config.backend_config.backend=async_verl \
-    agent.run_config.max_turns=5 \
-    agent.run_config.num_chains=4 \
-    agent.run_config.generation_config.max_tokens=512 \
-    agent.run_config.context_config.resource_backend=local \
-    actor_rollout_ref.actor.optim.lr=4e-7 \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-3B-Instruct \
-    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.actor.use_kl_loss=True \
-    actor_rollout_ref.actor.kl_loss_coef=0.001 \
-    actor_rollout_ref.actor.kl_loss_type=mse \
-    actor_rollout_ref.actor.entropy_coeff=0.001 \
-    actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.response_length=512 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
-    critic.model.path=Qwen/Qwen2.5-3B-Instruct \
-    algorithm.kl_ctrl.kl_coef=0.001 \
-    trainer.logger=['console','wandb'] \
-    trainer.project_name=AgentRL \
-    trainer.experiment_name=code_agent \
-    trainer.n_gpus_per_node=4 \
-    trainer.nnodes=1 \
-    trainer.save_freq=50 \
-    trainer.test_freq=10 \
-    trainer.total_training_steps=300
 ```
 
 ## Training Data Format

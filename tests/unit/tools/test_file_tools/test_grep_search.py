@@ -17,7 +17,7 @@ async def test_grep_search_has_matches():
     )
     try:
         result = await grep_search(pattern="import", path=".", context=context)
-        obs = result["observation"]
+        obs = result.observation
         print(obs)
         # Either matches or "No matches found"
         assert "No matches" in obs or ":" in obs
@@ -38,7 +38,7 @@ async def test_grep_search_no_matches():
             path=".",
             context=context,
         )
-        obs = result["observation"]
+        obs = result.observation
         print(obs)
         assert "No matches" in obs
     finally:

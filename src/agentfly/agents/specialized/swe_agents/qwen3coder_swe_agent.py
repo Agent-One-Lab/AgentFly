@@ -15,15 +15,16 @@ import re
 from typing import Any, Dict, List, Optional
 
 from ....core.context import Context
+from ....tools.src.shell.tools import run_shell_command
+from ....tools.types import ToolResult
 from ...agent_base import BaseAgent
-from ...chain.structures import Node
+from ...rollout.structures import Step
 from ..action_agent import (
     CONTEXT_TRIGGER_MESSAGE_DICT,
     CONTEXT_TRIGGER_MESSAGE_TYPE_ENV,
     CONTEXT_TRIGGER_TURNS_ENV,
 )
-from ....tools.src.shell.tools import run_shell_command
-from .prompts import Qwen3CoderSystemPrompt, Qwen3CoderToolPrompt
+from .prompts import Qwen3CoderToolPrompt
 
 
 class Qwen3CoderSWEAgent(BaseAgent):
@@ -52,9 +53,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
                 try:
                     context_trigger_turns = int(env_turns)
                 except ValueError as exc:
-                    raise ValueError(
-                        f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}"
-                    ) from exc
+                    raise ValueError(f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}") from exc
         if context_trigger_turns is not None and context_trigger_turns < 1:
             raise ValueError("context_trigger_turns must be >= 1 when set")
 
@@ -89,17 +88,17 @@ class Qwen3CoderSWEAgent(BaseAgent):
                 return str(first.get("text") or "")
         return ""
 
-    def _maybe_append_context_trigger_user_message(self, current_node: Node) -> None:
+    def maybe_append_context_trigger_user_message(self, current_step: Step) -> None:
         """After ``context_trigger_turns`` assistant messages, append a user nudge to force summarize."""
         if self.context_trigger_turns is None:
             return
-        turns = current_node.messages.messages
+        turns = current_step.messages.messages
         if self._count_assistant_turns(turns) != self.context_trigger_turns:
             return
         if turns and turns[-1].get("role") == "user":
             if self._turn_text(turns[-1]).strip() == self.context_trigger_message.strip():
                 return
-        current_node.messages.add("user", self.context_trigger_message)
+        current_step.messages.add("user", self.context_trigger_message)
 
     def _is_context_triggered_segment(self, current_segment: Optional[List[Dict]]) -> bool:
         """True when this segment ends with the injected summarize-trigger user message."""
@@ -131,9 +130,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
         ).strip()
 
         # If the model wrapped output in <summarize>...</summarize>, keep only inner text.
-        match = re.search(
-            r"<summarize>\s*(.*?)\s*</summarize>", text, re.IGNORECASE | re.DOTALL
-        )
+        match = re.search(r"<summarize>\s*(.*?)\s*</summarize>", text, re.IGNORECASE | re.DOTALL)
         if match:
             return match.group(1).strip()
 
@@ -142,6 +139,15 @@ class Qwen3CoderSWEAgent(BaseAgent):
             return re.sub(r"</?summarize>", "", text, flags=re.IGNORECASE).strip()
 
         return text
+
+    @staticmethod
+    def _truncate_after_tool_call(response: str) -> str:
+        """Drop trailing model output after the last </tool_call> tag."""
+        marker = "</tool_call>"
+        idx = response.rfind(marker)
+        if idx == -1:
+            return response
+        return response[: idx + len(marker)]
 
     def parse(
         self,
@@ -152,6 +158,8 @@ class Qwen3CoderSWEAgent(BaseAgent):
         trajectory_segments = []
         if context is not None:
             trajectory_segments = context.metadata.get("trajectory_segments", [])
+
+        responses = [self._truncate_after_tool_call(r) for r in responses]
 
         # Keep default parser behavior and only override context-triggered turns.
         parsed_messages = super().parse(responses, context=context, **kwargs)
@@ -193,8 +201,8 @@ class Qwen3CoderSWEAgent(BaseAgent):
         if tool_name == "summarize":
             return True
         return super().validate_tool_call(tool_call)
-    
-    async def _execute_tool_call(
+
+    async def execute_tool_call(
         self,
         context,
         tool_call,
@@ -203,7 +211,6 @@ class Qwen3CoderSWEAgent(BaseAgent):
         chain_id,
         depth,
         have_set_resources,
-        enable_streaming,
     ):
         """
         Execute tool call, with special handling for internal summarize pseudo-tool.
@@ -217,13 +224,13 @@ class Qwen3CoderSWEAgent(BaseAgent):
                 summary = str(parsed.get("summary") or "").strip()
             except (json.JSONDecodeError, TypeError, AttributeError):
                 summary = ""
-            return {
-                "name": "summarize",
-                "arguments": raw_args if isinstance(raw_args, str) else json.dumps(raw_args or {}),
-                "observation": summary,
-                "status": "continue",
-            }
-        return await super()._execute_tool_call(
+            return ToolResult(
+                name="summarize",
+                arguments=raw_args if isinstance(raw_args, str) else json.dumps(raw_args or {}),
+                observation=summary,
+                status="continue",
+            )
+        return await super().execute_tool_call(
             context,
             tool_call,
             newest_messages,
@@ -231,5 +238,4 @@ class Qwen3CoderSWEAgent(BaseAgent):
             chain_id,
             depth,
             have_set_resources,
-            enable_streaming,
         )

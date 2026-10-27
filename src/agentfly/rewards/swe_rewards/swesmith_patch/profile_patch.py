@@ -4,6 +4,10 @@ Also normalizes image_name so profile names like swesmith.architecture.x86_64 ma
 (swebench/swesmith.x86_64....) and enroot pulls the correct image.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _enroot_image_ref(image_name: str) -> str:
     """Convert Docker image name to Enroot ref (e.g. org/repo:tag -> org+repo+tag)."""
@@ -43,7 +47,7 @@ def _patch_repo_profile():
             return
         name = self.image_name  # use normalized name for pull
         try:
-            print(f"Pulling image {name}")
+            logger.debug(f"Pulling image {name}")
             client = _get_enroot_client()
             client.images.pull(name)
         except Exception as e:

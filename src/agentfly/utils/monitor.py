@@ -17,6 +17,7 @@ import base64
 import contextlib
 import io
 import json
+import logging
 import os
 import time
 from dataclasses import asdict, dataclass, field, is_dataclass
@@ -25,7 +26,11 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import numpy as np
 from PIL import Image
 
-import wandb
+logger = logging.getLogger(__name__)
+
+# NOTE: ``wandb`` (~1.5s) is imported lazily inside WandbSink's methods so that
+# importing this module (pulled in by agent_base for the light Monitor/emit path)
+# doesn't pay for wandb. Only the wandb sink actually needs it.
 
 
 @dataclass(slots=True)
@@ -103,8 +108,11 @@ def serialize_for_json(obj):
         return tuple(serialize_for_json(i) for i in obj)
     elif isinstance(obj, bytes):
         return {"__image__": base64.b64encode(obj).decode("utf-8")}
+    elif isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj  # JSON primitives pass through
     else:
-        return obj  # leave other types as-is
+        # Opaque object (e.g. Context) — stringify so JSON logging can't crash the run.
+        return str(obj)
 
 
 class JsonlSink(BaseSink):
@@ -118,9 +126,7 @@ class JsonlSink(BaseSink):
             with open(default_file, "w"):
                 pass
 
-            self.log_files = {
-                "default": open(default_file, "a", buffering=1, encoding="utf-8")
-            }
+            self.log_files = {"default": open(default_file, "a", buffering=1, encoding="utf-8")}
         else:
             self.log_files = {}
 
@@ -132,15 +138,11 @@ class JsonlSink(BaseSink):
             file_name = os.path.join(self.directory, f"{evt_name}.jsonl")
             with open(file_name, "w"):
                 pass
-            self.log_files[evt_name] = open(
-                file_name, "a", buffering=1, encoding="utf-8"
-            )
+            self.log_files[evt_name] = open(file_name, "a", buffering=1, encoding="utf-8")
         file_obj = self.log_files[evt_name]
 
         async with self._lock:
-            file_obj.write(
-                json.dumps(serialize_for_json(asdict(evt)), ensure_ascii=False) + "\n"
-            )
+            file_obj.write(json.dumps(serialize_for_json(asdict(evt)), ensure_ascii=False) + "\n")
 
     async def flush(self) -> None:
         for file_obj in self.log_files.values():
@@ -156,35 +158,33 @@ class WandbSink(BaseSink):
     """Weights & Biases backend (lazy import)."""
 
     def __init__(self, project: str, **wandb_init_kwargs: Any) -> None:  # noqa: D401
-        # self.wandb = importlib.import_module("wandb")  # lazy, keeps wandb optional
-        # if wandb.run is None:
-        #     wandb.init(project=project, **wandb_init_kwargs)
         self._defined_axes: Set[Tuple[str, str]] = set()
-        self.tables: Dict[str, wandb.Table] = {}
+        self.tables: Dict[str, Any] = {}  # values are wandb.Table (lazy import)
 
     async def log(self, evt: MetricEvent) -> None:  # pragma: no cover
         """
         Log the event to wandb.
         """
+        import wandb  # lazy: heavy import
+
         if wandb.run is not None:
             payload = {evt.name: evt.value, **evt.tags}
             if evt.x is not None:
+                # Carry the axis value in the SAME payload as the metric. The monitor
+                # drains its queue asynchronously, so logging the axis as a separate
+                # wandb.log call lets another logger's commit land in between, which
+                # silently pairs each value with the previous step's axis value.
+                payload[evt.x_name] = evt.x
                 if evt.kind == "list":
                     data = [[x, y] for x, y in zip(evt.x, evt.value)]
                     table = wandb.Table(data=data, columns=[evt.x_name, evt.name])
                     wandb.log(
-                        {
-                            evt.name: wandb.plot.line(
-                                table, evt.x_name, evt.name, title=evt.name
-                            )
-                        },
+                        {evt.name: wandb.plot.line(table, evt.x_name, evt.name, title=evt.name)},
                         commit=evt.commit,
                     )
                 elif evt.kind == "text":
                     if evt.name not in self.tables:
-                        self.tables[evt.name] = wandb.Table(
-                            columns=["step", "text"], log_mode="INCREMENTAL"
-                        )
+                        self.tables[evt.name] = wandb.Table(columns=["step", "text"], log_mode="INCREMENTAL")
                     self.tables[evt.name].add_data(evt.x, evt.value)
                     wandb.log({evt.name: self.tables[evt.name]}, commit=evt.commit)
                 else:
@@ -193,15 +193,23 @@ class WandbSink(BaseSink):
                         wandb.define_metric(evt.x_name)
                         wandb.define_metric(evt.name, step_metric=evt.x_name)
                         self._defined_axes.add(key)
+                    if evt.kind == "hist":
+                        # A distribution over the run's samples (e.g. per-task pass
+                        # rates); wandb renders one histogram per x value.
+                        payload[evt.name] = wandb.Histogram(evt.value)
                     wandb.log(payload, commit=evt.commit)
             else:
                 wandb.log(payload, step=evt.step, commit=evt.commit)
 
     async def flush(self) -> None:  # pragma: no cover
+        import wandb  # lazy: heavy import
+
         wandb.log({}, commit=True)  # forces step commit
         wandb.flush()
 
     async def close(self) -> None:  # pragma: no cover
+        import wandb  # lazy: heavy import
+
         await super().close()
         wandb.finish()
 
@@ -261,16 +269,12 @@ class Monitor:
         # Create new consumer task
         try:
             loop = asyncio.get_running_loop()
-            cls._consumer_task = loop.create_task(
-                cls._consumer_loop(), name="monitor-consumer"
-            )
+            cls._consumer_task = loop.create_task(cls._consumer_loop(), name="monitor-consumer")
             cls._running = True
         except RuntimeError:
             # No running event loop - this shouldn't happen in normal usage
             # but we'll handle it gracefully
-            print(
-                "[Monitor] Warning: No running event loop found. Monitor consumer not started."
-            )
+            logger.warning("[Monitor] No running event loop found. Monitor consumer not started.")
             cls._running = False
             cls._consumer_task = None
 
@@ -323,7 +327,7 @@ class Monitor:
                 try:
                     await sink.log(evt)
                 except Exception as exc:
-                    print(f"[Monitor] Sink {sink!r} failed: {exc}")
+                    logger.warning(f"[Monitor] Sink {sink!r} failed: {exc}")
         # drain any remaining events (best‑effort)
         while not queue.empty():
             queue.get_nowait()

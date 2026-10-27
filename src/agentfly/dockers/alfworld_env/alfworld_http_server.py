@@ -211,6 +211,13 @@ def _acquire_env(split: str, task_info: Optional[Dict]) -> Any:
     return env
 
 
+def _unwrap_slot(value):
+    """Peel length-1 batch lists (batch_size=1) to a scalar so bool() is correct."""
+    while isinstance(value, list) and value:
+        value = value[0]
+    return value
+
+
 def _extract_admissible_commands(info: Dict) -> list:
     if not info or "admissible_commands" not in info:
         return []
@@ -432,8 +439,10 @@ async def step(request: ActionRequest):
                 "done": bool(done),
                 "info": {
                     "admissible_commands": admissible_commands,
-                    "won": current_info.get("won", False),
-                    "lost": current_info.get("lost", False),
+                    # infos is a dict of per-slot lists (batch_size=1); unwrap so
+                    # won/lost are scalars, not [False] (which is truthy).
+                    "won": _unwrap_slot(current_info.get("won", False)),
+                    "lost": _unwrap_slot(current_info.get("lost", False)),
                 },
             }
 

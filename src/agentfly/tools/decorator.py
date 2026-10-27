@@ -1,6 +1,13 @@
+"""The ``@tool`` decorator: turn a function into a registered tool.
+
+``tool(name=..., description=...)`` builds a :class:`~agentfly.tools.tool_base.BaseTool` subclass
+around the function, derives the JSON schema from its signature and docstring, and registers it
+in the tool registry under ``name``. The resulting class is callable like the function
+(``calculator(expression="1+1")``) through a lazily created singleton instance.
+"""
+
 import inspect
 import logging
-from typing import Any
 
 from .utils.schema import extract_signatures, parse_docstring, validate_schema
 
@@ -55,14 +62,13 @@ def tool(
     status: str = "success",
     max_length: int = 2048,
     auto_register: bool = True,
-    stateful: bool = False,
-    resource_spec: Any = None,
-    backend: str = "local",
-    pool_size: int = -1,  # -1, or 0 means no pool
 ):
     """
     Decorator that registers a callable as a tool.
-    Creates a Tool instance that can handle both stateful and non-stateful behavior.
+
+    A tool that keeps state across calls (a game, a sandbox) declares a ``context: Context``
+    parameter and acquires its environment with ``context.acquire_resource(...)``; see
+    docs/start/custom_environment.md.
 
     Args:
         name (str): The name of the tool.
@@ -72,10 +78,6 @@ def tool(
             - "continue": The tool call is not the final step in the chain. The search will continue.
         max_length (int): The maximum length of the tool's output/observation.
         auto_register (bool): Whether to automatically register the tool. This is used to get tool by name.
-        stateful (bool): Whether the tool is stateful (manages resources via ResourceEngine).
-        resource_spec: Structured resource spec for the tool (used when stateful).
-        backend (str): Backend name for the resource engine (e.g. "local").
-        pool_size (int): The size of the resource pool.
     """
     from .tool_base import BaseTool
 
@@ -87,11 +89,10 @@ def tool(
         final_name = name or func_name
         if name and name != func_name:
             logger.debug(f"Tool name {func_name!r} overridden by {name!r}")
-            # warnings.warn(f"Tool name {func_name!r} overridden by {name!r}")
 
         signature = extract_signatures(func)
         docs = parse_docstring(inspect.getdoc(func))
-        final_desc = description or docs.get("summary", "")
+        final_desc = description or docs.get("description", "")
         validated_schema = validate_schema(final_name, final_desc, signature, docs)
 
         # Create a Tool subclass with class-level metadata attributes
@@ -102,9 +103,7 @@ def tool(
         tool_class_name = f"_Tool_{final_name}"
         tool_class = _CallableToolClass(
             tool_class_name,
-            (
-                BaseTool,
-            ),  # Inherit from Tool class - ensures isinstance(tool_class(), Tool) == True
+            (BaseTool,),  # Inherit from Tool class - ensures isinstance(tool_class(), Tool) == True
             {
                 "name": final_name,
                 "description": final_desc,
@@ -112,10 +111,6 @@ def tool(
                 "args": validated_schema["args"],
                 "max_length": max_length,
                 "status": status,
-                "resource_spec": resource_spec,
-                "backend": backend,
-                "pool_size": pool_size,
-                "is_stateful": stateful or resource_spec is not None,
                 # Store the function as a class attribute for reference
                 "_func": func,
             },

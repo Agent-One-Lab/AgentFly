@@ -15,10 +15,53 @@ import httpx
 
 from ..resources import ContainerResource, ContainerResourceSpec
 
+# Fallback task loaded when reset() is called without a task_id (e.g. smoke tests).
+# Real training always passes task_id via context.metadata.
+_DEFAULT_TASK_ID = "trial_T20190909_013611_626994"
+
+
+def _scalar(value: Any) -> Any:
+    """Unwrap a per-slot batch value to a scalar.
+
+    ALFWorld's TextWorld batch env returns info fields as length-1 lists
+    (batch_size=1), e.g. ``won == [False]``. The HTTP server forwards them raw,
+    and ``bool([False])`` is ``True`` — which would make every episode look won.
+    Peel any list nesting so ``won``/``lost`` are read correctly.
+    """
+    while isinstance(value, list) and value:
+        value = value[0]
+    return value
+
+
+def _clean_obs(obs: Any) -> str:
+    """Return the plain observation text.
+
+    ALFWorld's TextWorld batch env yields observations as length-1 tuples and the HTTP
+    server forwards them as their ``str(...)`` repr — e.g. ``"('You arrive ...',)"`` — which
+    otherwise leaks tuple syntax + escaped newlines into the prompt. Unwrap real nesting, and
+    parse a tuple/list *repr string* back to its inner text, so the observation is the bare
+    string (matching verl-agent).
+    """
+    import ast
+
+    obs = _scalar(obs)
+    if isinstance(obs, str):
+        s = obs.strip()
+        if s[:1] in ("(", "[") and s[-1:] in (")", "]"):
+            try:
+                parsed = ast.literal_eval(s)
+                while isinstance(parsed, (list, tuple)) and parsed:
+                    parsed = parsed[0]  # peel tuple/list nesting (unlike list-only _scalar)
+                if isinstance(parsed, str):
+                    return parsed
+            except (ValueError, SyntaxError):
+                pass
+    return str(obs)
+
 
 ALFWorldSpec = ContainerResourceSpec(
     category="alfworld",
-    image="bitalov/alfworld-http-env-3:latest",
+    image="reasonwang/alfworld-env:latest",
     ports={"8000/tcp": None},
     environment={
         "ALFWORLD_DATA": "/root/.cache/alfworld",
@@ -28,7 +71,7 @@ ALFWorldSpec = ContainerResourceSpec(
     container_port=8000,
     start_timeout=120.0,
     host_ip="127.0.0.1",
-    max_global_num=8,
+    max_global_num=32,
 )
 
 
@@ -91,23 +134,23 @@ class ALFWorldEnv(ContainerResource):
     async def reset(
         self, env_args: Optional[Dict[str, Any]] = None, split: Optional[str] = None
     ) -> Tuple[str, Dict[str, Any]]:
-        env_args = env_args or {"task_id": "trial_T20190909_013611_626994"}
-        task_id = env_args.get("task_id", "trial_T20190909_013611_626994")
+        task_id = (env_args or {}).get("task_id", _DEFAULT_TASK_ID)
         split = split or "train"
         reset_data = {"split": split, "task_id": task_id}
         resp = await self._client.post("/reset", json=reset_data)
         data = resp.json()
         if resp.status_code != 200:
             raise RuntimeError(f"Reset failed: {data}")
-        self._current_obs = data["observation"]
+        obs = _clean_obs(data["observation"])
+        self._current_obs = obs
         self._current_info = data.get("info", {})
-        return data["observation"], self._current_info
+        return obs, self._current_info
 
     async def step(self, action: str) -> Tuple[str, float, bool, Dict[str, Any]]:
         resp = await self._client.post("/step", json={"action": action})
         data = resp.json()
         if resp.status_code == 200:
-            obs = data["observation"]
+            obs = _clean_obs(data["observation"])
             reward = data.get("reward", 0.0)
             done = data.get("done", False)
             info = data.get("info", {})
@@ -127,22 +170,27 @@ class ALFWorldEnv(ContainerResource):
             return []
 
     async def get_info(self) -> Dict[str, Any]:
-        if self._current_info:
-            task_info = self._current_info.get("extra.gamefile", self._current_info.get("task", "unknown"))
-            task = task_info[0] if isinstance(task_info, list) and task_info else task_info
-            return {
-                "task": task,
-                "goal": self._current_info.get("goal") or self._current_info.get("task_description") or "",
-                "won": self._current_info.get("won", False),
-                "lost": self._current_info.get("lost", False),
-                "admissible_commands_count": len(self._current_info.get("admissible_commands", [])),
-            }
-        try:
-            resp = await self._client.get("/info")
-            resp.raise_for_status()
-            return resp.json().get("info", {})
-        except (httpx.RequestError, httpx.HTTPStatusError):
-            return {}
+        """Normalized episode info. Prefers the info stored from the last
+        reset/step; falls back to the server's /info endpoint. Both paths return
+        the same shape so callers (reward, task-objective tool) can rely on it."""
+        info = self._current_info
+        if not info:
+            try:
+                resp = await self._client.get("/info")
+                resp.raise_for_status()
+                info = resp.json().get("info", {})
+            except (httpx.RequestError, httpx.HTTPStatusError):
+                return {}
+        task = info.get("extra.gamefile", info.get("task", "unknown"))
+        if isinstance(task, list) and task:
+            task = task[0]
+        return {
+            "task": task,
+            "goal": info.get("goal") or info.get("task_description") or "",
+            "won": bool(_scalar(info.get("won", False))),
+            "lost": bool(_scalar(info.get("lost", False))),
+            "admissible_commands_count": len(info.get("admissible_commands", [])),
+        }
 
     async def end(self) -> None:
         if self._client:

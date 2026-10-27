@@ -1,16 +1,24 @@
 from agentfly.agents import ImageEditingAgent
+from agentfly.agents.utils.tokenizer import tokenize_trajectories
 import pytest
 
 
 @pytest.mark.gpu
 @pytest.mark.asyncio
-async def test_image_agent():
+async def test_image_agent(release_image_agent):
     agent = ImageEditingAgent(
         model_name_or_path="Qwen/Qwen2.5-VL-3B-Instruct",
         template="qwen2.5-vl-system-tool",
-        backend_config={"backend": "async_vllm"},
-        streaming="console",
+        # Leaves room on the GPU for the image-edit model the tool loads.
+        backend_config={"backend": "async_vllm", "gpu_memory_utilization": 0.4},
     )
+    try:
+        await _run_and_inspect(agent)
+    finally:
+        release_image_agent(agent)
+
+
+async def _run_and_inspect(agent):
     # --8<-- [start:messages_list]
     messages_list = [
         {
@@ -33,15 +41,20 @@ async def test_image_agent():
     ]
     # --8<-- [end:messages_list]
     # --8<-- [start:agent_run_print]
-    await agent.run(
+    from agentfly.agents.utils.inspection import print_trajectory
+
+    result = await agent.run(
         messages=messages_list,
         max_turns=4,
         num_chains=1,
-        enable_streaming=True,
     )
-    agent.print_messages(index=0)
+    print_trajectory(result[0])
     # --8<-- [end:agent_run_print]
 
-    inputs, _ = agent.tokenize_trajectories()
+    # Inspect tokenization directly; no rollout object is needed.
+    inputs = tokenize_trajectories(
+        agent, [segment.messages for trajectory in result for segment in trajectory.segments],
+        tokenizer=agent.tokenizer,
+    )
     for k, v in inputs.items():
         print(f"{k}: {v.shape}")

@@ -30,15 +30,16 @@ from pathlib import Path
 from typing import Any, List
 
 import click
-from ..tools import run_shell_command
+
 from ..agents.specialized.swe_agents import BashSWEAgent, Qwen3CoderSWEAgent
 from ..agents.specialized.swe_agents.prompts import (
     InstructionSystemPrompt,
     Qwen3CoderToolPrompt,
 )
+from ..agents.types import RunResult
 from ..core import ContextConfig
 from ..rewards.reward_base import get_reward_from_name
-from ..tools import create_file, edit_file, grep_search, read_file, run_python, undo_edit
+from ..tools import create_file, edit_file, grep_search, read_file, run_python, run_shell_command, undo_edit
 from .monitor import serialize_for_json
 
 
@@ -74,11 +75,7 @@ def _row_to_message_item(row: dict) -> dict:
     if "messages" in row and isinstance(row["messages"], list):
         return dict(row)
     text = _problem_text(row)
-    meta = {
-        k: v
-        for k, v in row.items()
-        if k not in ("problem_statement", "instruction", "text", "question")
-    }
+    meta = {k: v for k, v in row.items() if k not in ("problem_statement", "instruction", "text", "question")}
     return {
         "messages": [
             {"role": "user", "content": [{"type": "text", "text": text}]},
@@ -116,7 +113,7 @@ async def _run_agent_async(
     max_concurrent_chains: int | None,
     temperature: float,
     resource_backend: str,
-) -> Any:
+) -> RunResult:
     reward_fn = get_reward_from_name(reward_name)
     tools = None
     if tools_mode == "file":
@@ -144,7 +141,6 @@ async def _run_agent_async(
         backend_config=backend_config,
         reward_fn=reward_fn,
         monitors=[],
-        streaming="console",
     )
 
     if agent_kind == "bash":
@@ -160,7 +156,7 @@ async def _run_agent_async(
     else:
         raise click.BadParameter(f"Unknown agent kind: {agent_kind!r}")
 
-    await agent.run(
+    return await agent.run(
         messages=messages,
         max_turns=max_turns,
         num_chains=num_chains,
@@ -168,15 +164,13 @@ async def _run_agent_async(
         max_concurrent_chains=max_concurrent_chains,
         context_config=ContextConfig(resource_backend=resource_backend),
     )
-    return agent
 
 
 def _save_per_sample_results(
     result_dir: Path,
-    agent: Any,
+    run_result: RunResult,
 ) -> tuple[float, int]:
     result_dir.mkdir(parents=True, exist_ok=True)
-    run_result = agent._require_last_run()
     trajectories = run_result.trajectories
     reward_scalars = run_result.rewards
     reward_extras = run_result.reward_extras
@@ -186,17 +180,11 @@ def _save_per_sample_results(
         # Task identifiers come from the dataset row, which is preserved in
         # Trajectory.metadata after the typed-trajectory refactor.
         iid = traj.metadata.get("instance_id") or traj.metadata.get("uid")
-        basename = _safe_result_basename(
-            str(iid) if iid is not None else None, idx
-        )
+        basename = _safe_result_basename(str(iid) if iid is not None else None, idx)
         out_path = result_dir / f"{basename}.json"
 
-        r_scalar = (
-            reward_scalars[idx] if idx < len(reward_scalars) else traj.reward
-        )
-        extras_row = {
-            k: (v[idx] if idx < len(v) else None) for k, v in reward_extras.items()
-        }
+        r_scalar = reward_scalars[idx] if idx < len(reward_scalars) else traj.reward
+        extras_row = {k: (v[idx] if idx < len(v) else None) for k, v in reward_extras.items()}
         record = {
             "index": idx,
             "instance_id": iid,
@@ -240,7 +228,7 @@ def _save_per_sample_results(
     "--data-path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
-    help="JSON file: list of instances, or {\"data\": [...]} / {\"instances\": [...]}.",
+    help='JSON file: list of instances, or {"data": [...]} / {"instances": [...]}.',
 )
 @click.option(
     "--result-dir",
@@ -360,8 +348,7 @@ def main(
     os.environ["ENROOT_ASYNC"] = "1" if enroot_async else "0"
     if backend != "async_vllm" and (tensor_parallel_size != 1 or data_parallel_size != 1):
         raise click.BadParameter(
-            "--tp/--dp only affect --backend async_vllm; use --backend async_vllm "
-            "or leave tp/dp at 1."
+            "--tp/--dp only affect --backend async_vllm; use --backend async_vllm or leave tp/dp at 1."
         )
     if backend == "async_vllm":
         click.echo(
@@ -382,7 +369,7 @@ def main(
     messages = [_row_to_message_item(r) for r in rows]
     tools_mode = "file" if tool_set == "file" else "bash"
 
-    rollout_agent = asyncio.run(
+    run_result = asyncio.run(
         _run_agent_async(
             agent_kind=agent.lower(),
             model_name_or_path=model_name_or_path,
@@ -404,11 +391,8 @@ def main(
         )
     )
 
-    accuracy, n = _save_per_sample_results(result_dir, rollout_agent)
-    click.echo(
-        f"Wrote {len(rollout_agent._require_last_run())} sample(s) under {result_dir.resolve()} "
-        f"(see run_summary.json)."
-    )
+    accuracy, n = _save_per_sample_results(result_dir, run_result)
+    click.echo(f"Wrote {len(run_result)} sample(s) under {result_dir.resolve()} (see run_summary.json).")
     if n:
         click.echo(f"Final accuracy: {accuracy:.4f} ({accuracy * 100:.2f}%, n={n})")
     else:

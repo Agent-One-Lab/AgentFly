@@ -50,6 +50,12 @@ def _safe_builtins():
     return safe  # <-- return dict, not mappingproxy
 
 
+# Numeric libraries (numpy's OpenBLAS, MKL, OpenMP) start one thread per CPU core by default;
+# on a many-core machine those threads alone exceed the memory limit and the process is killed.
+# A snippet gets a few CPU-seconds anyway, so one thread is enough.
+for _var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
 # --- 3 🚦  runtime hard-limits (address space + CPU) -------------
 resource.setrlimit(resource.RLIMIT_AS, (MAX_RSS, MAX_RSS))
 resource.setrlimit(resource.RLIMIT_CPU, (MAX_CPUT, MAX_CPUT))
@@ -60,8 +66,10 @@ src = sys.stdin.read()
 try:
     parsed = ast.parse(src, "<user>", "exec")
     #  (optional) quick AST sanity checks could go here
-    exec_env = {"__builtins__": _safe_builtins()}
-    exec(compile(parsed, "<user>", "exec"), exec_env, {})
+    # One namespace for globals and locals, as in a normal script: functions can then see
+    # top-level names (other functions, imports), and `if __name__ == "__main__":` runs.
+    exec_env = {"__builtins__": _safe_builtins(), "__name__": "__main__"}
+    exec(compile(parsed, "<user>", "exec"), exec_env)
 except MemoryError:
     print("Memory limit exceeded", file=sys.stderr)
     sys.exit(1)

@@ -1,8 +1,6 @@
 multiprocess
 requests
 PyYAML
-timeout-decorator
-redis
 docker
 openai
 faiss-cpu

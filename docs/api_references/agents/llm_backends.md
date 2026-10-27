@@ -68,50 +68,63 @@ OpenAI-compatible client backend for remote API inference:
 
 ## Usage Examples
 
-Backends are designed to work together with agents. Here are examples showing how to configure different backends when creating agents:
+Agents take the backend as `backend_config`: a dict with a `"backend"` key (`"async_vllm"`,
+`"client"`, or `"async_verl"`, which training sets up) plus that backend's settings. Generation
+settings such as temperature are passed per call, through `agent.run(generation_config=...)`.
 
-### Async VLLM Backend
+### Async vLLM backend
+
+Runs the model in-process with vLLM. Every other key is passed to vLLM's
+[`AsyncEngineArgs`](https://docs.vllm.ai/en/latest/configuration/engine_args.html):
 
 ```python
 from agentfly.agents import HFAgent
 from agentfly.tools import calculator
 from agentfly.rewards import math_equal_reward_tool
-from agentfly.utils.llm_backends import AsyncVLLMConfig
 
 agent = HFAgent(
     model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
     tools=[calculator],
     reward_fn=math_equal_reward_tool,
     template="qwen2.5",
-    backend_config=AsyncVLLMConfig(
-        pipeline_parallel_size=2,
-        data_parallel_size=1,
-        tensor_parallel_size=1,
-        gpu_memory_utilization=0.8
-    )
+    backend_config={
+        "backend": "async_vllm",
+        "tensor_parallel_size": 2,
+        "gpu_memory_utilization": 0.8,
+        "max_model_len": 16384,
+    },
 )
 ```
 
-### Client Backend (OpenAI-compatible)
+Scripts that use this backend need an `if __name__ == "__main__":` guard (see
+[Build an Agent](../../start/first_agent.md#a-complete-script)).
+
+### Client backend (OpenAI-compatible)
+
+Sends requests to a server, for example one started with `agentfly deploy` or `vllm serve`, or a
+hosted API. The server applies its own chat template, so don't pass `template`:
 
 ```python
 from agentfly.agents import HFAgent
 from agentfly.tools import calculator
 from agentfly.rewards import math_equal_reward_tool
-from agentfly.utils.llm_backends import ClientConfig
 
 agent = HFAgent(
-    model_name_or_path="Qwen/Qwen2.5-3B-Instruct",
+    model_name_or_path="Qwen/Qwen2.5-3B-Instruct",  # the model name the server expects
     tools=[calculator],
     reward_fn=math_equal_reward_tool,
-    template="qwen2.5",
-    backend_config=ClientConfig(
-        base_url="http://localhost:8000/v1",
-        api_key="your-api-key",
-        max_requests_per_minute=200,
-        timeout=300,
-        temperature=0.7,
-        max_new_tokens=1024
-    )
+    backend_config={
+        "backend": "client",
+        "base_url": "http://localhost:8000/v1",
+        "api_key": "EMPTY",
+        "max_requests_per_minute": 200,
+        "timeout": 300,
+    },
+)
+result = await agent.run(
+    messages={"messages": [{"role": "user", "content": "What is 3 * 7?"}], "answer": "21"},
+    max_turns=3,
+    num_chains=1,
+    generation_config={"temperature": 0.7, "max_tokens": 1024},
 )
 ```

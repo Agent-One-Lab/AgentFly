@@ -1,6 +1,13 @@
+"""Context-management tool: ``summarize`` lets the model fold its history into a summary.
+
+:func:`fold_messages_with_summarize` rewrites a conversation after a ``summarize`` call, keeping
+the summary in place of the folded turns (used by context-folding rollouts).
+"""
+
 import re
-from typing import Any, Dict, List
 from copy import deepcopy
+from typing import Any, Dict, List
+
 from ...decorator import tool
 
 # Pattern for a previously added summary (from an earlier fold).

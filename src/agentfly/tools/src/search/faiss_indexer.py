@@ -1,4 +1,7 @@
+"""FAISS index wrapper used by the dense retrievers: load (or create) an inner-product index, optionally on GPUs, and search it for the top-n document ids."""
+
 import logging
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -18,7 +21,10 @@ class Indexer:
         try:
             import faiss
         except ImportError:
-            raise ImportError("faiss is not installed, please install it using `conda install pytorch::faiss-gpu`")
+            raise ImportError(
+                'faiss is not installed; install the search extra: `uv pip install "agentfly-rl[search]"` '
+                "(or `uv sync --extra search` in a source checkout)."
+            )
         self.faiss = faiss
 
         self.similarity = similarity
@@ -33,9 +39,7 @@ class Indexer:
             self.index.add(embeddings)
         elif index_file is not None:
             self.index = self.faiss.read_index(index_file)
-            print(
-                f"Loaded FAISS index: {self.index.ntotal} vectors, {self.index.d} dimensions"
-            )
+            logger.debug(f"Loaded FAISS index: {self.index.ntotal} vectors, {self.index.d} dimensions")
 
         # 2. Move to GPU if requested
         if self.use_gpu:
@@ -67,11 +71,11 @@ class Indexer:
         """Robustly shards the index across multiple GPUs using GpuMultipleClonerOptions."""
         res_count = self._get_gpu_count()
         if res_count == 0:
-            print("No GPUs found, using CPU index")
+            logger.debug("No GPUs found, using CPU index")
             return cpu_index
 
         actual_gpus = min(num_gpus, res_count)
-        print(f"Sharding index across {actual_gpus} GPUs...")
+        logger.debug(f"Sharding index across {actual_gpus} GPUs...")
 
         # Multiple versions compatibility
         try:
@@ -80,9 +84,7 @@ class Indexer:
             co.shard = True  # Enable sharding (splits data)
             co.useFloat16 = True  # Critical for 21M vectors to fit VRAM
 
-            gpu_index = self.faiss.index_cpu_to_all_gpus(
-                cpu_index, co=co, ngpu=actual_gpus
-            )
+            gpu_index = self.faiss.index_cpu_to_all_gpus(cpu_index, co=co, ngpu=actual_gpus)
             return gpu_index
         except Exception as e:
             # Fallback: try single-GPU with StandardGpuResources if available
@@ -95,12 +97,10 @@ class Indexer:
                 try:
                     res = self.faiss.StandardGpuResources()
                     gpu_index = self.faiss.index_cpu_to_gpu(res, 0, cpu_index)
-                    print(f"Using single GPU (multi-GPU failed: {e})")
+                    logger.warning(f"Using single GPU (multi-GPU failed: {e})")
                     return gpu_index
                 except Exception as e2:
-                    logger.warning(
-                        "GPU index creation failed (%s), using CPU index", e2
-                    )
+                    logger.warning("GPU index creation failed (%s), using CPU index", e2)
             else:
                 logger.warning("GPU index creation failed (%s), using CPU index", e)
             return cpu_index
@@ -114,11 +114,7 @@ class Indexer:
         self.index.add(embeddings)
 
         # Update IDs
-        new_ids = (
-            ids
-            if ids is not None
-            else list(range(self.ids[-1] + 1, self.ids[-1] + 1 + embeddings.shape[0]))
-        )
+        new_ids = ids if ids is not None else list(range(self.ids[-1] + 1, self.ids[-1] + 1 + embeddings.shape[0]))
         if self.ids is not None:
             self.ids.extend(new_ids)
         else:
@@ -129,9 +125,7 @@ class Indexer:
             queries = queries.reshape(1, -1)
 
         if queries.shape[1] != self.index.d:
-            raise ValueError(
-                f"Query dimension {queries.shape[1]} doesn't match {self.index.d}"
-            )
+            raise ValueError(f"Query dimension {queries.shape[1]} doesn't match {self.index.d}")
 
         if self.similarity == "cosine":
             queries /= np.linalg.norm(queries, axis=1)[:, None]

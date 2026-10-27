@@ -1,8 +1,8 @@
 # Code HTTP Server
 
-The Code HTTP server provides a FastAPI-based execution environment for Python code snippets. It runs inside Docker containers and offers secure, isolated code execution with timeout and resource controls.
+The Code HTTP server provides a FastAPI-based execution environment for Python code snippets. It runs inside the sandbox container (enroot by default) and executes each snippet in a fresh process with time and memory limits.
 
-The server is implemented as a FastAPI application that runs inside Docker containers. The server script is located at `agentfly/dockers/python_env/python_http_server.py` and is designed to be executed within a containerized environment.
+The server is implemented as a FastAPI application that runs inside the sandbox container. The server script is located at `agentfly/dockers/python_env/python_http_server.py` and is designed to be executed within a containerized environment.
 
 ## API Endpoints
 
@@ -41,9 +41,11 @@ The server uses a subprocess-based execution model:
 4. **Result Collection**: stdout/stderr are captured and returned
 5. **Cleanup**: Process groups are killed on timeout or completion
 
-The execution flow ensures that:
+As a result:
 
-* No code can escape the sandbox environment
-* Resource usage is strictly controlled
+* Each execution starts from a clean interpreter; nothing carries over between requests
+* Memory (1 GiB) and CPU time (8 s) are capped per execution, and wall time (10 s) by the parent
 * Long-running or infinite loops are terminated
-* Multiple concurrent executions are safely isolated
+* Concurrent executions run in separate processes
+
+This is resource control, not a security sandbox: see [Limits and isolation](index.md#limits-and-isolation).

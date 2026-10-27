@@ -1,11 +1,11 @@
+"""Run coroutines from synchronous code on one shared background event loop (:func:`syncronize`)."""
+
 import asyncio
 import threading
 from typing import Any, Coroutine
 
 # ---------- one global background loop ----------
 _loop_holder = {"loop": None, "thread": None}
-
-# atexit.register(_loop_holder["loop"].stop)
 
 
 def _ensure_background_loop():

@@ -1,180 +1,60 @@
+""":class:`BaseAgent`: the base class every agent derives from.
+
+An agent holds the model backend, chat template, tools, skills and reward function, and runs
+them through a rollout strategy with :meth:`BaseAgent.run`. Subclasses customize how responses
+are parsed into tool calls (:meth:`BaseAgent.parse`). It also converts finished runs into
+training batches for the verl trainer (:meth:`BaseAgent.to_verl_dataproto`).
+"""
+
 import inspect
 import json
 import logging
 import os
 from abc import ABC
-from math import lcm
-from collections import defaultdict
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
-import torch
-from chat_bricks import (
-    get_template,
-    split_messages_with_assistant,
-    tokenize_conversations,
-)
-from termcolor import colored
 
-from ..templates import *  # noqa: F403
-from ..rewards.types import RewardResult
-from ..tools.tool_base import BaseTool
 from ..core.context import Context
 from ..core.context_config import ContextConfig
-from ..utils.monitor import JsonlSink, Monitor, WandbSink
-from ..utils.verl import pad_tensor_batch_dim_with_zeros, pad_tensor_to_rank_size
-from .chain.chain_base import ChainRollout
-from .chain.streaming_observer import ConsoleStreamObserver, StreamingManager
-from .types import RunResult, Trajectory
+
+# NOTE: ``torch`` is imported lazily inside the two methods that use it
+# (``tokenize_trajectories`` / ``to_verl_dataproto``) so a bare
+# ``import agentfly.agents`` doesn't pull torch (~3s). It's only needed when
+# actually building tensors for the trainer.
+from ..templates import *  # noqa: F403
+from ..tools.src.skills import Skill
+from ..tools.tool_base import BaseTool, submit_tool_call
 from ..utils.llm_backends import AsyncVerlBackend, AsyncVLLMBackend, ClientBackend
 from ..utils.llm_backends.backend_configs import BACKEND_CONFIGS
+from ..utils.monitor import JsonlSink, Monitor, WandbSink
+from .rollout.conversion import result_to_dataproto
+from .rollout.registry import resolve_rollout
+from .types import RunResult, Trajectory
+
+# Import the module (not the vLLM-derived values) so the vLLM stack loads lazily:
+# read ``tool_parser.ChatCompletionRequest`` / ``VLLM_TOOL_PARSER_AVAILABLE`` at
+# runtime, after ``tool_parser.ensure_vllm_tool_parser()``, rather than binding
+# them here at import time.
+from .utils import tool_parser
 from .utils.messages import MessagesList
-from .utils.tokenizer import create_processor, create_tokenizer
+from .utils.tokenizer import create_processor, create_tokenizer, get_jinja_template
+from .utils.tool_parser import create_tool_parser
 
-try:
-    from ..verl.protocol import DataProto
-except ImportError:
-    print("verl can not be imported.")
-    pass
+if TYPE_CHECKING:
+    from .rollout.base import Rollout
 
-from transformers import AutoTokenizer
+# NOTE: ``DataProto`` (from the verl trainer) is imported lazily inside
+# ``to_verl_dataproto`` — it pulls the whole verl/torch/ray stack, which a bare
+# ``import agentfly.agents`` must not load. It's only needed when actually
+# converting trajectories to a verl batch (i.e. under the trainer).
 
-ChatCompletionRequest = None
-ToolParserManager = None
-VLLM_TOOL_PARSER_AVAILABLE = False
-
-try:
-    # vLLM >= 0.19: ChatCompletionRequest lives under chat_completion.protocol;
-    # ToolParserManager is exposed from vllm.tool_parsers.
-    from vllm.entrypoints.openai.chat_completion.protocol import (
-        ChatCompletionRequest,
-    )
-    from vllm.tool_parsers import ToolParserManager
-
-    VLLM_TOOL_PARSER_AVAILABLE = True
-except ImportError:
-    try:
-        from vllm.entrypoints.openai.protocol import ChatCompletionRequest
-        from vllm.entrypoints.openai.tool_parsers import ToolParserManager
-
-        VLLM_TOOL_PARSER_AVAILABLE = True
-    except ImportError:
-        pass
-
-if VLLM_TOOL_PARSER_AVAILABLE:
-
-    def silence_tool_parsers():
-        # vLLM has used both namespaces across versions
-        prefixes = [
-            "vllm.tool_parsers",
-            "vllm.entrypoints.openai.tool_parsers",
-        ]
-        for p in prefixes:
-            lg = logging.getLogger(p)
-            lg.setLevel(logging.CRITICAL + 1)
-            lg.propagate = False  # don't bubble to root handlers
-
-    silence_tool_parsers()
 
 logger = logging.getLogger(__name__)
 
 
-REWARD_DECOMPOSITION_MODES = ("last_only", "broadcast", "uniform", "geometric")
-
-
-def decompose_trajectory_reward(
-    reward: float,
-    num_segments: int,
-    mode: str = "last_only",
-    gamma: float = 0.9,
-) -> List[float]:
-    """Distribute a trajectory's outcome reward across its segments.
-
-    Modes:
-        - "last_only": [0, 0, ..., 0, R]
-              Sparse outcome — only the final segment receives the reward.
-        - "broadcast": [R, R, ..., R]
-              Each segment sees the full R. Total trajectory reward = n * R
-              (NOT conservative — inflates magnitude with segment count).
-        - "uniform":   [R/n, R/n, ..., R/n]
-              Sum-to-R, equal weight per segment. Conservative.
-        - "geometric": [R · γ^{n-1-k} · (1 − γ) / (1 − γ^n)] for k = 0..n-1
-              Sum-to-R, more weight on segments closer to the outcome.
-              γ → 1 collapses to "uniform". Conservative.
-
-    Conservative modes preserve total trajectory reward equal to R, so PPO
-    clipping ranges, KL budgets, and learning rates tuned against sparse
-    rewards continue to apply without retuning.
-
-    Args:
-        reward: trajectory outcome reward R.
-        num_segments: number of segments n in the trajectory (>= 1).
-        mode: one of REWARD_DECOMPOSITION_MODES.
-        gamma: decay rate for "geometric" mode. Ignored otherwise.
-
-    Returns:
-        List of per-segment rewards of length num_segments.
-
-    Raises:
-        ValueError: if mode is unknown or num_segments < 1.
-    """
-    if num_segments < 1:
-        raise ValueError(f"num_segments must be >= 1, got {num_segments}")
-    if mode not in REWARD_DECOMPOSITION_MODES:
-        raise ValueError(
-            f"mode must be one of {REWARD_DECOMPOSITION_MODES}, got: {mode!r}"
-        )
-
-    n = num_segments
-    if mode == "last_only":
-        return [0.0] * (n - 1) + [reward]
-    if mode == "broadcast":
-        return [reward] * n
-    if mode == "uniform":
-        per = reward / n
-        return [per] * n
-    # geometric
-    if n == 1 or gamma >= 1.0:
-        per = reward / n
-        return [per] * n
-    raw = [gamma ** (n - 1 - k) for k in range(n)]
-    total = sum(raw)
-    return [reward * (w / total) for w in raw]
-
-
-def _resolve_reward_decomposition_config() -> tuple:
-    """Resolve (mode, gamma) for trajectory reward decomposition from env vars.
-
-    Env vars:
-        REWARD_DECOMPOSITION:       one of REWARD_DECOMPOSITION_MODES.
-                                    Default: "last_only".
-        REWARD_DECOMPOSITION_GAMMA: float decay rate for "geometric" mode.
-                                    Default: 0.9.
-    """
-    env_decomp = os.getenv("REWARD_DECOMPOSITION")
-    if env_decomp is not None and env_decomp.strip() != "":
-        mode = env_decomp.strip().lower()
-        if mode not in REWARD_DECOMPOSITION_MODES:
-            raise ValueError(
-                f"REWARD_DECOMPOSITION must be one of {list(REWARD_DECOMPOSITION_MODES)}, "
-                f"got: {env_decomp!r}"
-            )
-    else:
-        mode = "last_only"
-
-    env_gamma = os.getenv("REWARD_DECOMPOSITION_GAMMA", "0.9")
-    try:
-        gamma = float(env_gamma)
-    except ValueError as exc:
-        raise ValueError(
-            f"REWARD_DECOMPOSITION_GAMMA must be a float, got: {env_gamma!r}"
-        ) from exc
-
-    return mode, gamma
-
-
-class BaseAgent(ChainRollout, ABC):
+class BaseAgent(ABC):
     """
     Base class for all agents. All agent should subclass this class. A customized agent can implement the following methods:
 
@@ -190,10 +70,10 @@ class BaseAgent(ChainRollout, ABC):
         template: str = None,
         system_prompt: str = None,
         tools: List = [],
+        skills: List = [],
         max_model_len: int = None,
         backend_config: Optional[Dict[str, Any]] = None,
         reward_fn: Callable = None,
-        streaming: str = "console",
         debug: bool = False,
         monitors: List[str] = ["wandb"],
         wandb_project_name: str = None,
@@ -201,6 +81,8 @@ class BaseAgent(ChainRollout, ABC):
         local_cache_dir: str = None,
         tool_parser: Optional[Any] = None,
         tool_parser_name: Optional[str] = None,
+        default_tool_call_source: str = "parser",
+        render_tools_in_prompt: bool = True,
         **kwargs,  # To pass other unused arguments
     ):
         """
@@ -209,14 +91,41 @@ class BaseAgent(ChainRollout, ABC):
             template: The template to use for the agent.
             system_prompt: The system prompt to use for the agent.
             tools: The tools to use for the agent.
+            skills: Optional list of ``Skill`` objects (or skill names) to advertise to the model in the system
+                prompt's ``<available_skills>`` section. The skill content (SKILL.md body, scripts, references)
+                is loaded on demand via the ``load_skill`` tool — only ``name`` + ``description`` are surfaced here.
+            reward_fn: The reward function (e.g. a ``@reward``), available as ``agent.reward_fn``. After
+                each rollout it is called with ``final_response``, ``trajectory``, and the dataset fields of
+                the task; ``None`` skips reward computation.
             debug: Whether to enable debug mode.
             backend_config: Dict specifying the backend and its parameters. Must include "backend" (e.g. "async_vllm", "client").
                 Other keys are passed as kwargs to that backend (e.g. "gpu_memory_utilization" for async_vllm).
                 Defaults to {"backend": "async_vllm"}.
             tool_parser: Optional tool parser instance from vLLM. If provided, will be used for parsing tool calls.
             tool_parser_name: Optional name of the tool parser to use (e.g., "hermes", "pythonic"). If provided and tool_parser is None, will create a parser using this name.
+            default_tool_call_source: Which tool calls to use when both are available. ``"parser"`` (default) re-parses
+                the response text with the agent's own tool parser (falling back to backend-provided tool calls only
+                when no parser is set); ``"backend"`` prefers tool calls already parsed by the inference backend
+                (e.g. an OpenAI-compatible server with ``--enable-auto-tool-choice``), falling back to the local
+                parser per response when the backend provided none.
+            render_tools_in_prompt: Whether the tools' schemas are rendered into the model prompt
+                (the chat template's tools block). ``True`` for native tool-calling agents. ``False``
+                for agents whose prompt already carries the environment interface directly (e.g. the
+                ``<action>`` format), where the tools exist only to execute the parsed action. Read
+                exclusively through :meth:`prompt_tools`, which both generation and training
+                tokenization consult, so the two always render the same prompt.
+
+        Note:
+            Loop control — whether a malformed tool call, a tool-body error, or a no-tool-call
+            turn continues / ends / raises — is NOT an agent setting. It's the rollout's, via the
+            run-config policies ``on_no_tool_call`` / ``on_invalid_tool_call`` / ``on_tool_error``
+            (see :class:`~agentfly.agents.rollout.base.Rollout`).
 
         """
+        if default_tool_call_source not in ("parser", "backend"):
+            raise ValueError(
+                f"default_tool_call_source must be 'parser' or 'backend', got: {default_tool_call_source!r}"
+            )
         if backend_config is None:
             backend_config = {"backend": "async_vllm"}
         self._validate_init_args(
@@ -226,7 +135,6 @@ class BaseAgent(ChainRollout, ABC):
             tools,
             backend_config,
             reward_fn,
-            streaming,
             debug,
             monitors,
             wandb_project_name,
@@ -239,9 +147,13 @@ class BaseAgent(ChainRollout, ABC):
         self.debug = debug
         self.backend_config = backend_config
         self.backend = backend_config["backend"]
-        self.tools = tools
+        self.tools = self._bind_method_tools(tools)
         self.max_model_len = max_model_len
-        self.tool_names = [tool.name for tool in tools]
+        self.default_tool_call_source = default_tool_call_source
+        self.tool_names = [tool.name for tool in self.tools]
+        self.render_tools_in_prompt = render_tools_in_prompt
+        self.skills = self._normalize_skills(skills)
+        self.skill_names = [s.name for s in self.skills]
 
         if isinstance(system_prompt, str):
             system_prompt = system_prompt.replace("\\n", "\n")
@@ -252,7 +164,7 @@ class BaseAgent(ChainRollout, ABC):
         self.tokenizer = create_tokenizer(model_name_or_path)
         self.processor = create_processor(model_name_or_path)
 
-        self._reward_fn = reward_fn
+        self.reward_fn = reward_fn
 
         # We use model name as template if no template is provided
         # For a model name, chat-bricks will use HF's template by default
@@ -264,7 +176,7 @@ class BaseAgent(ChainRollout, ABC):
         if self.template is None:
             self.jinja_template = None
         else:
-            self.jinja_template = get_template(self.template).jinja_template()
+            self.jinja_template = get_jinja_template(self.template)
 
         self.llm_engine = self._init_llm_engine(model_name_or_path, self.backend)
 
@@ -274,28 +186,12 @@ class BaseAgent(ChainRollout, ABC):
         self.local_run_cache_dir = None
         self._initialize_monitor(monitors)
 
-        self.streaming_manager = StreamingManager()
-        if streaming == "console":
-            self.streaming_manager.add_observer(ConsoleStreamObserver())
-        else:
-            # TODO: Support other streaming modes
-            raise ValueError(f"Streaming mode {streaming} is not supported.")
-
         # Initialize tool parser
         self.tool_parser = tool_parser
         if self.tool_parser is None and tool_parser_name is not None:
-            if not VLLM_TOOL_PARSER_AVAILABLE:
-                raise ImportError(
-                    "vLLM tool parser is not available. Please install vllm to use tool_parser_name."
-                )
-            ParserCls = ToolParserManager.get_tool_parser(tool_parser_name)
-            self.tool_parser = ParserCls(self.tokenizer)
+            self.tool_parser = create_tool_parser(tool_parser_name, self.tokenizer)
 
         super().__init__()
-
-        # Result of the most recent agent.run(...) call. Populated by run();
-        # consumed by get_verl_data_proto(). None until the first run.
-        self._last_run_result: Optional["RunResult"] = None
 
         if kwargs:
             raise ValueError(f"Unused arguments for agent: {kwargs}")
@@ -308,7 +204,6 @@ class BaseAgent(ChainRollout, ABC):
         tools,
         backend_config,
         reward_fn,
-        streaming,
         debug,
         monitors,
         wandb_project_name,
@@ -322,63 +217,68 @@ class BaseAgent(ChainRollout, ABC):
                 "backend_config must be a dict with at least a 'backend' key (e.g. {'backend': 'async_vllm'})."
             )
         backend = backend_config["backend"]
-        if backend == "client":
-            assert template is None, (
-                "For client backend, we do not support chat template. Set the template when deploying the model."
-            )
-            
-        if tool_parser is not None and tool_parser_name is not None:
+        if backend == "client" and template is not None:
             raise ValueError(
-                "Cannot specify both tool_parser and tool_parser_name. Use only one."
+                "The client backend does not take a chat template: the server applies its own. Pass the "
+                "template to the server instead (e.g. agentfly deploy --template ...), and leave template unset here."
             )
 
-    def _bind_method_tools(self):
-        tool_methods = []
-        for name, method in inspect.getmembers(self):
-            if isinstance(method, BaseTool):
-                tool_methods.append(method)
-        for tool_method in tool_methods:
-            if hasattr(tool_method, "is_method") and tool_method.is_method:
-                tool_method.instance = self
+        if tool_parser is not None and tool_parser_name is not None:
+            raise ValueError("Cannot specify both tool_parser and tool_parser_name. Use only one.")
+
+        # Names and import references ("pkg.mod:tool") are resolved by AutoAgent and the training
+        # config; constructing an agent directly takes the objects themselves.
+        agent_cls = type(self).__name__
+        for t in tools or []:
+            if isinstance(t, str):
+                raise TypeError(
+                    f"{agent_cls}(tools=...) takes tool objects (e.g. `from agentfly.tools import calculator`); "
+                    f'got the string {t!r}. To use tool names or import references ("pkg.mod:tool"), '
+                    "build the agent with AutoAgent.from_config(...)."
+                )
+        if isinstance(reward_fn, str):
+            raise TypeError(
+                f"{agent_cls}(reward_fn=...) takes a reward object (e.g. a `@reward` function); got the string "
+                f"{reward_fn!r}. To use reward names or import references, build the agent with "
+                "AutoAgent.from_config(...) and reward_name."
+            )
+
+    def _bind_method_tools(self, tools: List) -> List:
+        """Give this agent its own instance of each ``@tool``-decorated method of its class.
+
+        ``@tool`` on a method yields a tool class shared by every instance of the agent class,
+        and calling it as-is has no ``self``. Each agent gets a fresh tool instance bound to it,
+        set as an instance attribute (so ``self.<method>`` is this agent's tool), and ``tools``
+        entries that refer to the shared class are replaced by it.
+        """
+        bound = {}
+        for attr, value in inspect.getmembers(type(self)):
+            func = value.__dict__.get("_func") if isinstance(value, type) else None
+            if isinstance(value, type) and issubclass(value, BaseTool) and func is not None:
+                params = list(inspect.signature(func).parameters)
+                if params and params[0] == "self":
+                    tool = type.__call__(value)  # a new instance, not the class's shared singleton
+                    tool.instance = self
+                    setattr(self, attr, tool)
+                    bound[value] = tool
+        return [bound.get(t, t) if isinstance(t, type) else t for t in tools]
 
     def _init_llm_engine(self, model_name_or_path: str, backend: str):
         if isinstance(model_name_or_path, str):
-            # Backend params: all keys in backend_config except "backend". Optionally merge with default config.
+            # Backend params: all keys in backend_config except "backend", over the backend's defaults.
             config_kwargs = {k: v for k, v in self.backend_config.items() if k != "backend"}
             config_class = BACKEND_CONFIGS.get(backend)
-            if config_class:
-                try:
-                    default_instance = config_class()
-                    default_dict = {
-                        k: v
-                        for k, v in default_instance.__dict__.items()
-                        if not k.startswith("_")
-                    }
-                    default_dict.update(config_kwargs)
-                    config_kwargs = default_dict
-                except Exception:
-                    pass
-
-            # For async_vllm, prefer explicit kwargs like tensor/data parallel sizes over
-            # a default config's pre-built engine_args placeholder.
-            if backend == "async_vllm":
-                explicit_async_vllm_keys = {
-                    "tensor_parallel_size",
-                    "data_parallel_size",
-                    "pipeline_parallel_size",
-                    "max_model_len",
-                    "gpu_memory_utilization",
-                    "dtype",
-                    "quantization",
-                    "trust_remote_code",
-                }
-                if any(k in self.backend_config for k in explicit_async_vllm_keys):
-                    config_kwargs.pop("engine_args", None)
+            # async_vllm passes its keys straight to vLLM's AsyncEngineArgs, which has its own defaults.
+            # Building AsyncVLLMConfig() here would create a throwaway AsyncEngineArgs for vLLM's default
+            # model (and log about it) and would hide the user's keys behind that placeholder.
+            if config_class and backend != "async_vllm":
+                default_instance = config_class()
+                default_dict = {k: v for k, v in default_instance.__dict__.items() if not k.startswith("_")}
+                default_dict.update(config_kwargs)
+                config_kwargs = default_dict
 
             if backend == "async_vllm":
-                llm_engine = AsyncVLLMBackend(
-                    model_name_or_path, self.template, **config_kwargs
-                )
+                llm_engine = AsyncVLLMBackend(model_name_or_path, self.template, **config_kwargs)
             elif backend == "async_verl":
                 llm_engine = AsyncVerlBackend(
                     llm_engine=None,
@@ -387,7 +287,6 @@ class BaseAgent(ChainRollout, ABC):
                     **config_kwargs,
                 )
             elif backend == "client":
-                
                 llm_engine = ClientBackend(model_name_or_path, **config_kwargs)
             else:
                 raise ValueError(f"Backend {backend} is not supported.")
@@ -407,18 +306,55 @@ class BaseAgent(ChainRollout, ABC):
         """
         messages_list = MessagesList.from_data(messages)
         tools = [tool.schema for tool in self.tools]
-        if self.system_prompt and "{tools}" in self.system_prompt:
-            system_prompt = self.system_prompt.replace(
-                "{tools}", json.dumps(tools, indent=4)
-            )
-        else:
-            system_prompt = self.system_prompt
+        system_prompt = self.system_prompt
+        if system_prompt:
+            if "{tools}" in system_prompt:
+                system_prompt = system_prompt.replace("{tools}", json.dumps(tools, indent=4))
+            # Skills ride in the system message content (not the chat template's
+            # ``chat_template_kwargs``) so hosted models (OpenAI/Gemini) advertise
+            # them the same way local vLLM does. ``{skills}`` expands to the full
+            # block or "" — no dangling header when the agent has no skills.
+            if "{skills}" in system_prompt:
+                system_prompt = system_prompt.replace("{skills}", self._render_skills_block())
 
         for messages in messages_list:
             if system_prompt:
                 messages.set_system_prompt(system_prompt, enforce=False)
 
         return messages_list.to_list()
+
+    @staticmethod
+    def _normalize_skills(skills) -> List["Skill"]:
+        """Accept ``Skill`` objects or skill names (str); resolve names to ``Skill``."""
+        if not skills:
+            return []
+        normalized: List[Skill] = []
+        for item in skills:
+            if isinstance(item, Skill):
+                normalized.append(item)
+            elif isinstance(item, str):
+                from ..tools.src.skills import load_skills
+
+                normalized.extend(load_skills([item]))
+            else:
+                raise TypeError(f"skills entries must be Skill or str, got {type(item).__name__}")
+        return normalized
+
+    def _render_skills_block(self) -> str:
+        """Render the agent's skills for the system-prompt ``{skills}`` slot.
+
+        Returns the full ``<available_skills>`` block (lead-in + one entry per
+        skill) when the agent has skills, or an empty string when it has none —
+        so the ``{skills}`` slot leaves no dangling header for a skill-less agent.
+        Only ``name`` + ``description`` are surfaced here; the SKILL.md body,
+        scripts, and references are loaded on demand via the ``load_skill`` tool.
+        """
+        if not self.skills:
+            return ""
+        entries = "\n".join(
+            f"<skill>\n<name>{s.name}</name>\n<description>{s.description}</description>\n</skill>" for s in self.skills
+        )
+        return f"You have the following available skills:\n<available_skills>\n{entries}\n</available_skills>"
 
     def _preprocess_backends(self):
         self.llm_engine.preprocess()
@@ -429,17 +365,14 @@ class BaseAgent(ChainRollout, ABC):
     def _initialize_monitor(self, monitors: List[str]) -> None:
         for monitor in monitors:
             if monitor == "local":
-                assert self.local_cache_dir is not None, (
-                    "local_cache_dir must be set when using local monitor."
-                )
+                if self.local_cache_dir is None:
+                    raise ValueError("monitors=['local'] needs local_cache_dir.")
                 self.local_run_cache_dir = f"{os.path.join(self.local_cache_dir, os.path.basename(self.model_name_or_path), datetime.now().strftime('%Y%m%d_%H%M%S'))}"
                 Monitor.add_sink("jsonl", JsonlSink(f"{self.local_run_cache_dir}/"))
             elif monitor == "wandb":
                 Monitor.add_sink(
                     "wandb",
-                    WandbSink(
-                        project=self.wandb_project_name, run_name=self.wandb_run_name
-                    ),
+                    WandbSink(project=self.wandb_project_name, run_name=self.wandb_run_name),
                 )
             else:
                 raise ValueError(f"Monitor {monitor} is not supported.")
@@ -448,50 +381,79 @@ class BaseAgent(ChainRollout, ABC):
         self,
         messages: Union[List[dict], np.ndarray, Dict],
         max_turns: int,
+        rollout: Union[str, "Rollout"] = "chain",
+        rollout_config: Optional[Dict[str, Any]] = None,
         generation_config: Optional[Dict[str, Any]] = {},
         context_config: Optional[ContextConfig] = None,
+        global_step: Optional[int] = None,
+        use_token_ids: bool = True,
         **kwargs,
     ) -> RunResult:
         """Run the agent on a batch of messages and return the rollout result.
 
-        This is the main interface for running the agent. It is a wrapper of
-        different rollout methods, which must be asynchronous. Currently we
-        only support chain-based rollout.
+        This is the main interface for running the agent. The *rollout* is how the
+        agent completes the task — a per-call :class:`~agentfly.agents.rollout.base.Rollout`
+        strategy (``"chain"`` by default). The agent passes itself to the strategy as the
+        agent; the strategy drives the loop and reaches agent-specific behavior back
+        through the agent.
 
         Args:
             messages: List of messages to generate responses for.
             max_turns: The maximum number of turns to generate.
+            rollout: The rollout strategy — a registered name (``"chain"``), an import
+                reference (``"pkg.mod:MyRollout"``), or a ``Rollout`` instance.
             generation_config: The generation configuration.
             context_config: Optional settings for :class:`~agentfly.core.context.Context` (resource backend).
-            **kwargs: Additional keyword arguments for generation (passed to ``run_async``).
+            global_step: The caller's step counter, used as the x value of this run's
+                ``agent/rollout/*`` metrics. A training loop should pass its own global
+                step so the agent's curves share the trainer's axis, validation doesn't
+                advance the training axis, and a resumed run continues from its
+                checkpoint's step. Left ``None``, the strategy counts its own runs —
+                and since a strategy is constructed per call, that yields a constant
+                step unless the caller reuses one strategy instance.
+            use_token_ids: Carry the backend's sampled token ids on each generated
+                assistant message, so tokenization (chat-bricks) splices them instead of
+                re-encoding the text — the sampling prompts and training rows then use
+                exactly the sampled tokens. False leaves them off: every turn is
+                re-encoded from text (sampling and training still render alike).
+            **kwargs: Additional keyword arguments forwarded to the rollout strategy
+                (e.g. ``num_chains``, ``max_concurrent_chains`` for the chain rollout).
 
         Returns:
             :class:`~agentfly.agents.types.RunResult` containing the trajectories
-            produced by this run. The same result is also cached on the agent so
-            that :meth:`get_verl_data_proto` can be called afterwards without
-            re-running.
+            produced by this run, including its rollout identifier. Pass this result
+            explicitly to :meth:`to_verl_dataproto` for training conversion.
+            Latest-run caches are retained only for inspection and timing helpers.
         """
         processed_messages = self._preprocess_messages(messages)
         self._preprocess_backends()
 
-        await self.run_async(
-            processed_messages,
+        # ``rollout_config`` holds the strategy's constructor kwargs (e.g.
+        # ``{"prompt_builder": "alfworld_flat", "history_length": 2}`` for StepRollout),
+        # so a training config can select AND configure the rollout. Coerce an OmegaConf
+        # mapping to a plain dict; ignored when ``rollout`` is already a Rollout instance.
+        rc = dict(rollout_config) if rollout_config else {}
+        resolved_rollout = resolve_rollout(rollout, **rc)
+        run_result = await resolved_rollout.run(
+            agent=self,
+            messages=processed_messages,
             max_turns=max_turns,
             generation_config=generation_config,
             context_config=context_config,
+            global_step=global_step,
+            use_token_ids=use_token_ids,
             **kwargs,
         )
 
         self._postprocess_backends()
 
-        trajectories = self.postprocess_trajectories(self.get_trajectories())
-        self._last_run_result = RunResult(trajectories=trajectories)
-        return self._last_run_result
+        trajectories = self.postprocess_trajectories(run_result.trajectories)
+        run_result = RunResult(trajectories=trajectories, rollout=run_result.rollout)
+        return run_result
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
-        assert self.backend == "async_verl", (
-            "Only async verl backend is supported for now"
-        )
+        if self.backend != "async_verl":
+            raise RuntimeError("set_llm_engine is only supported with the async_verl backend.")
 
         self.llm_engine.llm_engine = llm_engine
         self.tokenizer = tokenizer
@@ -513,114 +475,124 @@ class BaseAgent(ChainRollout, ABC):
         """
         return await self.llm_engine.generate_async(messages_list_or_inputs, **kwargs)
 
-    async def generate_streaming(
-        self, messages_list_or_inputs: List[List[Dict]], **kwargs
-    ):
-        """
-        Generate responses with streaming support. This method yields response chunks as they are generated.
-
-        Args:
-            messages_list_or_inputs: List of messages to generate responses for.
-            **args: Additional arguments for generation.
-
-        Yields:
-            str: Response chunks as they are generated.
-        """
-        if hasattr(self.llm_engine, "generate_streaming"):
-            async for chunk in self.llm_engine.generate_streaming(
-                messages_list_or_inputs, **kwargs
-            ):
-                yield chunk
-        else:
-            # Fallback to non-streaming generation
-            responses = await self.generate_async(messages_list_or_inputs, **kwargs)
-            for response in responses:
-                yield response
-
-    @property
-    def timing_data(self):
-        return self.timer.timing_data
-
     def postprocess_trajectories(self, trajectories: List[Trajectory]) -> List[Trajectory]:
         """Hook for subclasses to post-process trajectories before they're
         wrapped in a :class:`RunResult`. Default implementation is identity.
+        Training-row eligibility is handled by conversion, not this rollout hook.
         """
         return trajectories
 
-    def _require_last_run(self) -> RunResult:
-        """Return the cached :class:`RunResult` from the most recent
-        :meth:`run` call, raising a clear error if ``run`` hasn't been called yet."""
-        if self._last_run_result is None:
-            raise RuntimeError(
-                "agent.run(...) has not been called yet; no RunResult is available. "
-                "Call `result = await agent.run(...)` first."
-            )
-        return self._last_run_result
+    # ---- L1 rollout hooks (defaults; specialized agents override) ----
+    # These are reached by a rollout strategy through the agent (the agent). The
+    # defaults live here so `agent.<hook>` resolves to the agent's (possibly
+    # overridden) behavior under composition.
 
-    def tokenize_trajectories(
+    def maybe_append_context_trigger_user_message(self, current_step) -> None:
+        """Hook for subclasses to append a user turn before the next LLM call. No-op by default."""
+        return
+
+    def skills_payload(self) -> Optional[List[Dict[str, str]]]:
+        """Skill list as JSON-serializable dicts for ``chat_template_kwargs``.
+
+        This is the *template* path: chat-bricks renders the skills slot from
+        these dicts. It is mutually exclusive with the agent-layer ``{skills}``
+        substitution in ``_preprocess_messages`` — when the system prompt carries
+        a ``{skills}`` slot the agent already renders the block into the system
+        message, so we return None here to avoid injecting skills twice.
+
+        Returns None when no skills are configured (so the backend can skip the
+        ``extra_body`` field entirely) or when the agent renders skills itself.
+        """
+        skills = getattr(self, "skills", None)
+        if not skills:
+            return None
+        system_prompt = getattr(self, "system_prompt", None)
+        if system_prompt and "{skills}" in system_prompt:
+            return None
+        return [{"name": s.name, "description": s.description} for s in skills]
+
+    def prompt_tools(self) -> List[Dict]:
+        """Tool schemas rendered into the model prompt (``[]`` for none).
+
+        This is the ONLY place prompt tools come from: the rollout passes the
+        result to the backend for generation AND to ``tokenize_trajectories``
+        for training, so sampling and training are conditioned on the same
+        prompt by construction. Returns ``[]`` (not ``None``) so it can flow
+        through numpy/DataProto columns unchanged.
+        """
+        if not self.render_tools_in_prompt or not self.tools:
+            return []
+        return [tool.schema for tool in self.tools]
+
+    def validate_tool_call(self, tool_call):
+        tool_name = tool_call["function"]["name"]
+        # TODO: validate tool input
+        tool_input = tool_call["function"]["arguments"]  # noqa: F841
+        if tool_name not in self.tool_names:
+            return False
+        return True
+
+    async def execute_tool_call(
         self,
-        messages_list,
-        template=None,
-        tokenizer=None,
-        processor=None,
-        return_reward_mask: bool = False,
-        concatenate_mm_inputs: bool = True,
-        train_on_last_turn: bool = False,
+        context,
+        tool_call,
+        newest_messages,
+        chain,
+        chain_id,
+        depth,
+        have_set_resources,
     ):
+        """Execute a tool call."""
+        tool_name = tool_call["function"]["name"]
+        tool_input = tool_call["function"]["arguments"]
 
-        # TODO: we will remove this argument in the future
-        train_on_last_turn = False
-
-        inputs = tokenize_conversations(
-            messages_list,
-            tokenizer=tokenizer,
-            template=template or self.template,
-            processor=processor or self.processor,
-            max_length=self.max_model_len,
-            return_reward_mask=return_reward_mask,
-            add_generation_prompt=True,
-            concatenate_mm_inputs=concatenate_mm_inputs,
-            ignore_tool_calls=True,
-            train_on_last_turn_only=train_on_last_turn,
+        # Execute tool call. A malformed call comes back as a ``status="invalid"`` result
+        # (not raised); the rollout applies its ``on_invalid_tool_call`` policy.
+        result = await submit_tool_call(
+            tool_name,
+            tool_input,
+            context=context,
+            allowed_tool_names=self.tool_names,
+            # The agent's own tool objects, so method tools run bound to this agent.
+            tools={tool.name: tool for tool in self.tools},
         )
-        position_ids = torch.clip(
-            torch.cumsum(inputs["attention_mask"], dim=-1) - 1, min=0, max=None
-        )
-        inputs["position_ids"] = position_ids
 
-        return inputs
+        return result
 
     def extract_final_response(self, messages: List[Dict[str, Any]]) -> str:
         """
-        Extract the final response text from a trajectory.
+        Extract the agent's final answer from a trajectory; rewards receive it as ``final_response``.
 
-        We scan messages in reverse order and take the last assistant/tool
-        message as the final response.
+        It is the output of a *finishing* tool (one declared with ``status="finish"`` or
+        ``"terminal"``, such as ``answer_math`` / ``answer_qa``) if the episode ended with one,
+        otherwise the text of the last assistant message. Results of ordinary tools (calculator,
+        search, code, ...) are never the answer: if the episode stopped right after one (for
+        example at ``max_turns``), the model's last message is graded, not the tool output.
         """
+        finishing_tools = {t.name for t in self.tools if getattr(t, "status", None) in ("finish", "terminal")}
         for msg in reversed(messages):
-            last_message_role = msg.get("role")
-            if last_message_role not in ("assistant", "tool"):
+            role = msg.get("role")
+            if role == "tool" and msg.get("tool_name") not in finishing_tools:
                 continue
-            content = msg.get("content") or []
-            if (
-                isinstance(content, list)
-                and content
-                and isinstance(content[0], dict)
-                and content[0].get("type") == "text"
-            ):
-                return content[0].get("text", "")
-            # Fallback: stringify first content part if structure is unexpected
+            if role not in ("assistant", "tool"):
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                return content
             if isinstance(content, list) and content:
+                if isinstance(content[0], dict) and content[0].get("type") == "text":
+                    return content[0].get("text", "")
+                # Fallback: stringify first content part if structure is unexpected
                 return str(content[0])
+            return ""
 
-        raise ValueError(
-            "No assistant or tool message found in trajectory when extracting final response."
-        )
+        raise ValueError("No assistant message found in trajectory when extracting final response.")
 
     def parse(
         self,
         responses: List[str],
         context: Optional[Context] = None,
+        tool_calls: Optional[List] = None,
         **kwargs,
     ) -> List[Dict]:
         """
@@ -659,7 +631,14 @@ class BaseAgent(ChainRollout, ABC):
         ]
         ```
         """
-        # If tool_parser is available, use it
+        if tool_calls is not None and not any(tool_calls):
+            tool_calls = None
+
+        # ``default_tool_call_source`` decides whether the local parser or the
+        # backend-provided tool calls take precedence when both are available.
+        prefer_backend = getattr(self, "default_tool_call_source", "parser") == "backend"
+
+        # If a local tool parser is available, use it.
         if self.tool_parser is not None:
             if self.tools is None or len(self.tools) == 0:
                 return [
@@ -672,27 +651,110 @@ class BaseAgent(ChainRollout, ABC):
                     }
                     for response in responses
                 ]
-            return self._parse_with_tool_parser(responses)
+            # When the parser is preferred (default), ignore backend tool calls and
+            # re-parse the text; when the backend is preferred, pass them through so
+            # ``_parse_with_tool_parser`` uses them (falling back to the parser per response).
+            return self._parse_with_tool_parser(
+                responses,
+                backend_tool_calls=tool_calls if prefer_backend else None,
+            )
+        elif tool_calls is not None or self.backend == "client":
+            # No local parser: tool calls (if any) come from the backend itself, e.g. an
+            # OpenAI-compatible server with --enable-auto-tool-choice. A response with no
+            # tool call is a valid terminal text turn, not a parsing failure — so the client
+            # backend never needs a local parser, even when this turn produced no tool call.
+            def _calls_for(i: int):
+                if tool_calls is None or i >= len(tool_calls):
+                    return None
+                return tool_calls[i]
+
+            return [
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": response}],
+                    "tool_calls": self._format_tool_calls(_calls_for(i)),
+                    "loss": True,
+                    "status": "continue" if _calls_for(i) else "terminal",
+                }
+                for i, response in enumerate(responses)
+            ]
         else:
-            # If no tool_parser, raise NotImplementedError to force subclasses to implement
+            # No parser, and the backend does not parse tool calls for us (e.g. async_vllm /
+            # verl return raw text only). The subclass must implement parsing or provide one.
             raise NotImplementedError(
                 "parse method must be implemented by subclass or tool_parser must be provided. "
                 "Either override this method or provide tool_parser/tool_parser_name in __init__."
             )
 
-    def _parse_with_tool_parser(self, responses: List[str]) -> List[Dict]:
+    def _format_tool_calls(self, raw_tool_calls: Optional[List]) -> List[Dict]:
+        """Normalize tool calls (vLLM ToolCall objects or OpenAI-style dicts) to our format.
+
+        Accepts either vLLM ``ToolCall`` objects (from the local tool parser) or plain
+        dicts (from an OpenAI-compatible backend). Tool calls whose ``arguments`` are not
+        valid JSON are dropped.
         """
-        Parse responses using vLLM tool parser.
+        formatted: List[Dict] = []
+        for tool_call in raw_tool_calls or []:
+            # vLLM ToolCall object with .function.name / .function.arguments
+            if hasattr(tool_call, "function") and hasattr(tool_call.function, "name"):
+                name = tool_call.function.name
+                arguments_str = tool_call.function.arguments
+                call_id = getattr(tool_call, "id", None)
+                call_type = getattr(tool_call, "type", "function")
+            elif isinstance(tool_call, dict) and "function" in tool_call:
+                func_info = tool_call["function"]
+                if isinstance(func_info, dict):
+                    name = func_info.get("name", "")
+                    arguments_str = func_info.get("arguments", "")
+                else:
+                    name = getattr(func_info, "name", "")
+                    arguments_str = getattr(func_info, "arguments", "")
+                call_id = tool_call.get("id", None)
+                call_type = tool_call.get("type", "function")
+            else:
+                continue
+
+            # Validate that arguments is a valid JSON string before accepting the call.
+            try:
+                json.loads(arguments_str)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"Invalid JSON in tool call arguments for {name}: {arguments_str}")
+                continue
+
+            formatted.append(
+                {
+                    "id": call_id,
+                    "type": call_type,
+                    "function": {"name": name, "arguments": arguments_str},
+                }
+            )
+        return formatted
+
+    def _parse_with_tool_parser(
+        self,
+        responses: List[str],
+        backend_tool_calls: Optional[List] = None,
+    ) -> List[Dict]:
+        """
+        Build assistant messages, preferring tool calls already parsed by the backend.
+
+        When the inference backend (e.g. an OpenAI-compatible server started with
+        ``--enable-auto-tool-choice``) parses tool calls itself, it strips the tool-call
+        markup out of ``content`` and returns structured ``tool_calls``. In that case we
+        must use those directly: re-running the local vLLM parser on the stripped text
+        would find nothing. Only when the backend did not provide tool calls for a given
+        response do we fall back to parsing the raw text with ``self.tool_parser``.
 
         Args:
             responses: List of response strings to parse.
-            tools: List of tool objects.
-            **args: Additional arguments.
+            backend_tool_calls: Optional per-response tool calls from the backend, aligned
+                to ``responses``. Each entry is a list of OpenAI-style tool-call dicts, or
+                ``None`` when the backend did not parse any for that response.
 
         Returns:
             List of assistant messages with tool_calls.
         """
-        if not VLLM_TOOL_PARSER_AVAILABLE:
+        if not tool_parser.ensure_vllm_tool_parser():
             raise ImportError("vLLM tool parser is not available. Please install vllm.")
 
         # Convert tools to vLLM format (tool.schema is already in OpenAI format)
@@ -706,97 +768,39 @@ class BaseAgent(ChainRollout, ABC):
                 if isinstance(schema, dict):
                     tool_schemas.append(schema)
                 else:
-                    logger.warning(
-                        f"Tool {getattr(tool, 'name', 'unknown')} has invalid schema format: {type(schema)}"
-                    )
+                    logger.warning(f"Tool {getattr(tool, 'name', 'unknown')} has invalid schema format: {type(schema)}")
                     continue
 
         new_messages_list = []
-        for response in responses:
-            # Create a ChatCompletionRequest for the parser
-            # We use a minimal request structure
-            req_dict = {
-                "messages": [
-                    {"role": "user", "content": "dummy"}
-                ],  # Dummy message, not used for parsing
-                "tool_choice": "auto",
-            }
-            if tool_schemas:
-                req_dict["tools"] = tool_schemas
+        for i, response in enumerate(responses):
+            backend_calls = (
+                backend_tool_calls[i] if backend_tool_calls is not None and i < len(backend_tool_calls) else None
+            )
 
-            req = ChatCompletionRequest(**req_dict)
+            if backend_calls:
+                # Backend already parsed tool calls and stripped them from the text;
+                # trust those instead of re-parsing the stripped response.
+                formatted_tool_calls = self._format_tool_calls(backend_calls)
+                info_status = None
+            else:
+                # Create a ChatCompletionRequest for the parser
+                # We use a minimal request structure
+                req_dict = {
+                    "messages": [{"role": "user", "content": "dummy"}],  # Dummy message, not used for parsing
+                    "tool_choice": "auto",
+                }
+                if tool_schemas:
+                    req_dict["tools"] = tool_schemas
 
-            # Adjust request (some parsers may modify it)
-            req = self.tool_parser.adjust_request(req)
+                req = tool_parser.ChatCompletionRequest(**req_dict)
 
-            # Extract tool calls from the response
-            info = self.tool_parser.extract_tool_calls(response, req)
+                # Adjust request (some parsers may modify it)
+                req = self.tool_parser.adjust_request(req)
 
-            # Format tool calls to match our expected format
-            formatted_tool_calls = []
-            if info.tool_calls:
-                for tool_call in info.tool_calls:
-                    # tool_call is a vLLM ToolCall object with attributes: id, type, function
-                    # function is a FunctionCall object with attributes: name, arguments
-                    if hasattr(tool_call, "function") and hasattr(
-                        tool_call.function, "name"
-                    ):
-                        # Handle ToolCall object from vLLM
-                        arguments_str = tool_call.function.arguments
-                        # Validate that arguments is a valid JSON string
-                        try:
-                            json.loads(arguments_str)
-                            # If valid JSON, append the tool call
-                            formatted_tool_calls.append(
-                                {
-                                    "id": getattr(tool_call, "id", None),
-                                    "type": getattr(tool_call, "type", "function"),
-                                    "function": {
-                                        "name": tool_call.function.name,
-                                        "arguments": arguments_str,  # Already a JSON string
-                                    },
-                                }
-                            )
-                        except (json.JSONDecodeError, TypeError):
-                            # Invalid JSON, skip this tool call
-                            # logger.warning(f"Invalid JSON in tool call arguments for {tool_call.function.name}: {arguments_str}")
-                            continue
-                    elif isinstance(tool_call, dict):
-                        # Fallback: handle dictionary format (for compatibility)
-                        if "function" in tool_call:
-                            func_info = tool_call["function"]
-                            arguments_str = (
-                                func_info.get("arguments", "")
-                                if isinstance(func_info, dict)
-                                else getattr(func_info, "arguments", "")
-                            )
-                            # Validate that arguments is a valid JSON string
-                            try:
-                                json.loads(arguments_str)
-                                # If valid JSON, append the tool call
-                                formatted_tool_calls.append(
-                                    {
-                                        "id": tool_call.get("id", None),
-                                        "type": "function",
-                                        "function": {
-                                            "name": func_info.get("name", "")
-                                            if isinstance(func_info, dict)
-                                            else getattr(func_info, "name", ""),
-                                            "arguments": arguments_str,
-                                        },
-                                    }
-                                )
-                            except (json.JSONDecodeError, TypeError):
-                                # Invalid JSON, skip this tool call
-                                tool_name = (
-                                    func_info.get("name", "")
-                                    if isinstance(func_info, dict)
-                                    else getattr(func_info, "name", "unknown")
-                                )
-                                logger.warning(
-                                    f"Invalid JSON in tool call arguments for {tool_name}: {arguments_str}"
-                                )
-                                continue
+                # Extract tool calls from the response
+                info = self.tool_parser.extract_tool_calls(response, req)
+                formatted_tool_calls = self._format_tool_calls(info.tool_calls)
+                info_status = getattr(info, "status", None)
 
             # Use the full response text (not the text after removing tool calls)
             content_text = response
@@ -809,8 +813,8 @@ class BaseAgent(ChainRollout, ABC):
             }
 
             # Add status if available
-            if hasattr(info, "status"):
-                message["status"] = info.status
+            if info_status is not None:
+                message["status"] = info_status
             elif len(formatted_tool_calls) > 0:
                 message["status"] = "continue"
             else:
@@ -820,194 +824,92 @@ class BaseAgent(ChainRollout, ABC):
 
         return new_messages_list
 
-
-    def print_messages(self, index: int = 0):
-        messages = self.get_messages()
-        for message in messages[index]["messages"]:
-            role = message["role"]
-            text = f"{role}: "
-            if "content" in message:
-                content = message["content"]
-                if isinstance(content, str):
-                    text += content
-                elif isinstance(content, list):
-                    for item in content:
-                        if item["type"] == "text":
-                            text += item["text"]
-                        elif item["type"] == "image":
-                            text += colored("ImagePlaceholder", "red")
-                elif content is None:
-                    assert role == "assistant", (
-                        f"Invalid content type: {type(content)} for role {role}"
-                    )
-                    if "tool_calls" in message:
-                        tool_calls = message["tool_calls"]
-                        for tool_call in tool_calls:
-                            text += f"Tool call: {tool_call['name']} Arguments: {tool_call['arguments']}"
-                    else:
-                        raise ValueError(
-                            f"Invalid message: {message} must have content or tool_calls."
-                        )
-            print(text)
-
-    def get_verl_data_proto(
+    def to_verl_dataproto(
         self,
+        run_result: RunResult,
+        *,
         train_on_last_turn: bool = False,
         world_size: int = 1,
         pad_to_multiple_of: Optional[int] = None,
+        log_token_drift: bool = False,
     ):
-        run_result = self._require_last_run()
-        trajectories = run_result.trajectories
-        segments_list = []
-        other_info_list = []
-        for batch_idx, trajectory in enumerate(trajectories):
-            trajectory_segments = trajectory.segments
-            for segment_idx, segment in enumerate(trajectory_segments):
-                segments_list.append(segment)
-                # Per-segment metadata: everything about the trajectory
-                # except segments themselves, plus segment indexing.
-                info = trajectory.model_dump(exclude={"segments"})
-                info["batch_idx"] = batch_idx
-                info["segment_idx"] = segment_idx
-                other_info_list.append(info)
+        """Convert an explicit ``RunResult`` into a verl ``DataProto``.
 
-        inputs = self.tokenize_trajectories(
-            messages_list=segments_list,
-            tokenizer=self.tokenizer,
-            processor=self.processor,
-            return_reward_mask=True,
-            concatenate_mm_inputs=False,
+        This is the agent→trainer boundary. It flattens trajectories into rows
+        (one row per trainable **segment**), tokenizes them, and packs trainer fields.
+        ``run_result.rollout`` selects the stateless converter; latest-run caches
+        are never consulted. Built-ins are ``"chain"`` and ``"step"``; missing
+        or unsupported identifiers raise ``ValueError``.
+
+        Empty/context-only segments are excluded from the batch, as are rows
+        with no action-mask tokens after tokenization. No trajectory, segment,
+        or runtime step is removed from the supplied result. An entirely
+        untrainable batch raises ``ValueError``.
+
+        Use the in-memory result: JSON serialization excludes internal steps and
+        is not a complete training snapshot. The agent supplies its current
+        tokenizer, processor, template, and prompt tools.
+
+        The returned ``DataProto`` carries the following contract.
+
+        ``batch`` (tensors, shape ``[B, L]`` unless noted):
+
+        - ``input_ids`` / ``attention_mask`` / ``position_ids`` — the sequence.
+        - ``action_mask`` — 1 on assistant (policy) tokens, 0 elsewhere; the
+          per-token loss mask. Contiguous runs of 1s delimit turns.
+        - ``reward_mask`` — 1 on the single token that carries the outcome
+          reward (each segment's last assistant token).
+        - ``rm_scores`` — the scalar outcome reward placed on the ``reward_mask``
+          token (``reward_mask * reward``). The full episode outcome is broadcast
+          to every retained segment, including earlier context-folded views;
+          it is not divided by the number of segments.
+        - ``multi_modal_inputs`` — present only for vision-language models.
+
+        ``non_tensor_batch`` (arrays, shape ``[B]``):
+
+        - ``uid`` — prompt/group id shared by a prompt's rollouts; the group a
+          group-relative estimator (GRPO, GiGPO episode level) normalizes within.
+
+        Chain-specific arrays:
+
+        - ``batch_idx`` — per-trajectory index; the de-facto trajectory id (all
+          rows of one trajectory share it).
+        - ``segment_idx`` — original segment index within a trajectory; skipping
+          untrainable segments does not renumber it.
+        - ``step_observations`` / ``step_rewards`` / ``step_invalids`` — per-turn
+          lists (turn order, projected from the trajectory's ``steps``): the
+          observation the agent acted on (grouping anchor), the per-step **raw**
+          env reward, and a 0/1 invalid-action flag per turn. Consumed by step-level
+          estimators (GiGPO), which map them to token spans via a ``turn_ids``
+          derived from ``action_mask`` and apply the invalid-action penalty as a
+          local post-discount deduction; ignored otherwise.
+
+        Step-specific arrays: ``traj_uid``, ``anchor_obs``, ``step_env_reward``,
+        ``is_action_valid``, and ``active_masks`` (0 for padding). These are scalar
+        signals for each segment's generation step, rather than per-turn lists.
+        Both converters broadcast ``rm_<key>`` reward metrics to segment rows.
+
+        ``meta_info``:
+
+        - ``use_agent`` — marks this as an agent-produced batch.
+        - ``repeat_times`` — training-row count per original trajectory, including
+          padding copies; zero for trajectories with no retained rows.
+        - ``layout`` — ``"per_segment"`` (chain) or ``"per_step"`` (step); the trainer
+          uses it to pick the estimator implementation in :mod:`agentfly.algorithms`.
+
+        Args:
+            run_result: The result to convert, even if another run has completed.
+            train_on_last_turn: (forced ``False``) restrict the loss to the last turn.
+            world_size: data-parallel world size.
+            pad_to_multiple_of: pad the batch dimension to a multiple of this
+                (extra rows repeat the last row) so it shards evenly.
+            log_token_drift: Include the token-drift diagnostic (spliced vs re-tokenized ids) in the batch log and meta_info. Off by default.
+        """
+        return result_to_dataproto(
+            agent=self,
+            run_result=run_result,
             train_on_last_turn=train_on_last_turn,
+            world_size=world_size,
+            pad_to_multiple_of=pad_to_multiple_of,
+            log_token_drift=log_token_drift,
         )
-
-        reward_values = run_result.rewards
-        other_values = defaultdict(list)
-        for k, v in run_result.reward_extras.items():
-            other_values[k] = list(v)
-
-        # Expand trajectory reward to segment level. See docstring of
-        # `decompose_trajectory_reward` for the available modes.
-        decomposition_mode, decomposition_gamma = _resolve_reward_decomposition_config()
-        reward_values_segment: List[float] = []
-        for trajectory in trajectories:
-            n = trajectory.num_segments
-            if n <= 0:
-                continue
-            reward_values_segment.extend(
-                decompose_trajectory_reward(
-                    reward=trajectory.reward,
-                    num_segments=n,
-                    mode=decomposition_mode,
-                    gamma=decomposition_gamma,
-                )
-            )
-        num_trajectories = len(trajectories)
-        other_values_segment = {}
-        for key, values in other_values.items():
-            # When reward is scalar (not dict), that trajectory never appends to other_values[key],
-            # so values may be shorter than num_trajectories. Pad to match.
-            if len(values) < num_trajectories:
-                values = list(values) + [0.0] * (num_trajectories - len(values))
-            other_values_segment[key] = []
-            for traj_idx, trajectory in enumerate(trajectories):
-                n = trajectory.num_segments
-                val = values[traj_idx]
-                other_values_segment[key].extend([val] * n)
-        reward_values = reward_values_segment
-        other_values = other_values_segment
-
-        # Number of segments per trajectory (one integer per trajectory).
-        repeat_times = [t.num_segments for t in trajectories]
-
-        align = pad_to_multiple_of
-        if align and align > 1:
-            n = inputs["input_ids"].shape[0]
-            pad_size = (align - n % align) % align
-            for k, v in inputs.items():
-                if k == "action_mask" and isinstance(v, torch.Tensor) and not v.is_nested:
-                    inputs[k] = pad_tensor_batch_dim_with_zeros(v, align)
-                else:
-                    inputs[k] = pad_tensor_to_rank_size(v, align)
-            if pad_size > 0:
-                # Pad other_info_list with copies of the last element (matches last-row repeat in pad_tensor_to_rank_size)
-                other_info_list = other_info_list + [other_info_list[-1]] * pad_size
-                # Pad reward_values and other_values to match the padded inputs
-                reward_values = reward_values + [reward_values[-1]] * pad_size
-                other_values = {
-                    k: v + [v[-1]] * pad_size for k, v in other_values.items()
-                }
-                # Add pad_size to the last trajectory's segment count
-                repeat_times[-1] += pad_size
-
-        group_ids_list = [info["group_id"] for info in other_info_list]
-        segment_index_list = [info["segment_idx"] for info in other_info_list]
-        batch_index_list = [info["batch_idx"] for info in other_info_list]
-        discarded_segment_list = [bool(info.get("discarded", False)) for info in other_info_list]
-        group_ids = np.array(group_ids_list, dtype=object)
-        segment_index = np.array(segment_index_list, dtype=np.int32)
-        batch_index = np.array(batch_index_list, dtype=np.int32)
-
-
-        batch_size = len(group_ids_list)
-        unique_group_ids = []
-        seen_group_ids = set()
-        for group_id in group_ids_list:
-            if group_id not in seen_group_ids:
-                unique_group_ids.append(group_id)
-                seen_group_ids.add(group_id)
-
-        # For discarded trajectories, mask out all response tokens for every segment row.
-        if discarded_segment_list:
-            discarded_tensor = torch.tensor(
-                discarded_segment_list, dtype=torch.bool, device=inputs["attention_mask"].device
-            ).unsqueeze(dim=-1)
-            if "action_mask" in inputs:
-                inputs["action_mask"] = inputs["action_mask"] * (~discarded_tensor).to(
-                    dtype=inputs["action_mask"].dtype
-                )
-            if "reward_mask" in inputs:
-                inputs["reward_mask"] = inputs["reward_mask"] * (~discarded_tensor).to(
-                    dtype=inputs["reward_mask"].dtype
-                )
-
-        inputs["rm_scores"] = inputs["reward_mask"] * torch.tensor(
-            reward_values, dtype=torch.float32
-        ).unsqueeze(dim=-1)  # BS x L
-        # Handle other values as np.array
-        for key, values in other_values.items():
-            aligned_values = list(values)
-            if len(aligned_values) == len(unique_group_ids) and unique_group_ids:
-                group_to_value = {
-                    group_id: aligned_values[idx]
-                    for idx, group_id in enumerate(unique_group_ids)
-                }
-                aligned_values = [
-                    group_to_value[group_id] for group_id in group_ids_list
-                ]
-            elif len(aligned_values) == 1 and batch_size > 1:
-                aligned_values = aligned_values * batch_size
-            if len(aligned_values) != batch_size:
-                logger.warning(
-                    f"Adjusting rm_{key} length from {len(aligned_values)} to {batch_size} to match batch size."
-                )
-                if len(aligned_values) < batch_size:
-                    aligned_values = aligned_values + [0.0] * (
-                        batch_size - len(aligned_values)
-                    )
-                else:
-                    aligned_values = aligned_values[:batch_size]
-            inputs[f"rm_{key}"] = np.array(aligned_values)
-        
-        # We handle the group id in the agent side, to be compatible with GRPO
-        inputs["uid"] = group_ids
-        inputs["segment_idx"] = segment_index
-        inputs["batch_idx"] = batch_index
-        
-        if "mm_inputs" in inputs:
-            mm_inputs = inputs.pop("mm_inputs")
-            inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
-        batch = DataProto.from_single_dict(
-            inputs, meta_info={"use_agent": True, "repeat_times": repeat_times}
-        )
-
-        return batch

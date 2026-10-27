@@ -1,3 +1,10 @@
+"""SWE task rewards (R2E-Gym, SWE-bench, SWE-smith).
+
+Importing this package replaces the ``docker`` module in ``sys.modules`` with enroot's Docker
+compatibility layer (:func:`patch_docker_with_enroot`), so the SWE evaluation code, written for
+the Docker SDK, runs against enroot containers. This applies to the whole process.
+"""
+
 import sys
 
 

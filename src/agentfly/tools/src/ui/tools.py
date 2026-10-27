@@ -1,10 +1,19 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: Apache-2.0
 
+"""GUI tools for computer-use agents.
+
+``pyautogui_code_generator`` converts a structured action (click, type, scroll, drag, ...) into
+PyAutoGUI code; ``capture_screenshot`` captures the current screen.
+"""
+
 import json
+import logging
 
 from ....utils.ui_action_parser import parsing_response_to_pyautogui_code
 from ...decorator import tool
+
+logger = logging.getLogger(__name__)
 
 # Default image dimensions for UI interactions
 DEFAULT_IMAGE_HEIGHT = 1080
@@ -23,7 +32,7 @@ def pyautogui_code_generator(action: dict, **kwargs) -> str:
     Returns:
         PyAutoGUI code string or execution result
     """
-    print(f"[pyautogui_code_generator] Received action: {action}")
+    logger.debug(f"[pyautogui_code_generator] Received action: {action}")
 
     # Extract image dimensions from kwargs or use defaults
     image_height = kwargs.get("image_height", DEFAULT_IMAGE_HEIGHT)
@@ -90,8 +99,6 @@ def capture_screenshot(**kwargs) -> str:
         return f"Screenshot captured successfully (base64): {img_str[:100]}..."
 
     except ImportError:
-        return (
-            "Error: PyAutoGUI not installed. Please install it to capture screenshots."
-        )
+        return "Error: PyAutoGUI not installed. Please install it to capture screenshots."
     except Exception as e:
         return f"Error capturing screenshot: {str(e)}"

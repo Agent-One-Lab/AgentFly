@@ -8,5 +8,4 @@ AgentFly provides a unified resource system for managing runtime dependencies us
 
 - [Resource Types and Interfaces](resources.md) - `ResourceSpec`, `BaseResource`, and `ContainerResource`
 - [Resource Engine](resource_engine.md) - pooled lifecycle management and backend orchestration
-- [Base Environment Resource Class](environment.md) - environment-oriented base interfaces
 - [Predefined Environment Resources](predefined_envs.md) - built-in environment resources

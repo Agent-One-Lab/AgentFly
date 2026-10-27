@@ -39,7 +39,7 @@ For HTTP-based integration, see the [HTTP Server](http_server.md) documentation.
 
 ## Key Features
 
-* **Docker-based Isolation**: Runs in containers for consistent environments
+* **Container-based**: Each environment runs in its own container (enroot by default)
 * **Task Selection**: Support for both random and specific task selection
 * **HTTP API**: RESTful interface for language-agnostic integration
 * **Comprehensive State Access**: Full access to observations, admissible commands, and environment state

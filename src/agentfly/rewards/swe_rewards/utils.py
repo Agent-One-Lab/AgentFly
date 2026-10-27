@@ -1,3 +1,5 @@
+"""Helpers for SWE rewards: extract the agent's git patch from its container, without binary-file diffs."""
+
 from __future__ import annotations
 
 import asyncio

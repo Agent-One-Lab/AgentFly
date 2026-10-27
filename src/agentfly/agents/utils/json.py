@@ -1,4 +1,4 @@
-import json
+"""Lenient JSON parsing for model output (:func:`jsonish`): repairs invalid escapes and line breaks before decoding."""
 
 
 def jsonish(text: str) -> dict:
@@ -42,11 +42,3 @@ def jsonish(text: str) -> dict:
 
     fixed_text = "".join(result_chars)
     return fixed_text
-
-
-if __name__ == "__main__":
-    # test data (Note: The string contains real line breaks and invalid escapes)
-    text = """{\n  "code": "from sympy import symbols, Eq, solve\\n\\n# define the variables\\nx, y = symbols(\\'x y\\')\\n\\n# define the equations\\neq1 = Eq(2*x + 5*y, 4)\\neq2 = Eq(x + y, 7)\\n\\n# solve the second equation for x\\nsol_y = solve(eq2, y)[0]\\n\\n# substitute the solution of y in the first equation\\neq1_sub = eq1.subs(y, sol_y)\\n\\n# solve the substituted equation\\nsol_x = solve(eq1_sub, x)[0]\\n\\n# solve the equation for y\\nsol = solve(eq2.subs(x, sol_x), y)\\n\\n{\\'x\\': sol_x, \\'y\\': sol[\\'y\\']}"\n}"""
-
-    data = json.loads(jsonish(text))
-    print(data)  # Successfully parsed dictionary

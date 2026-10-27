@@ -10,7 +10,7 @@ class TestToolResultFromRawString:
         assert tr.observation == "hello"
         assert tr.name == "echo"
         assert tr.arguments == {"x": 1}
-        assert tr.info == {}
+        assert tr.metrics == {}
         assert tr.image is None
         assert tr.status == "success"
 
@@ -29,7 +29,7 @@ class TestToolResultFromRawDict:
             {"observation": "see"}, name="t", arguments={"a": 1}
         )
         assert tr.observation == "see"
-        assert tr.info == {}
+        assert tr.metrics == {}
         assert tr.image is None
 
     def test_image_extracted_to_field(self):
@@ -40,7 +40,7 @@ class TestToolResultFromRawDict:
         )
         assert tr.observation == "see"
         assert tr.image == "http://x"
-        assert tr.info == {"score": 0.5}
+        assert tr.metrics == {"score": 0.5}
 
     def test_max_length_truncation_with_marker(self):
         tr = ToolResult.from_raw(
@@ -80,7 +80,7 @@ class TestToolResultToDict:
             "arguments": {"x": 1},
             "observation": "hi",
             "status": "success",
-            "info": {},
+            "metrics": {},
         }
 
     def test_with_image(self):
@@ -98,8 +98,8 @@ class TestToolResultToDict:
         legacy_in = {"observation": "see", "image": "http://x", "score": 0.5}
         tr = ToolResult.from_raw(legacy_in, name="t", arguments={"a": 1})
         d = tr.to_dict()
-        assert set(d) == {"name", "arguments", "observation", "status", "info", "image"}
-        assert d["info"] == {"score": 0.5}
+        assert set(d) == {"name", "arguments", "observation", "status", "metrics", "image"}
+        assert d["metrics"] == {"score": 0.5}
 
 
 class TestToolReturn:

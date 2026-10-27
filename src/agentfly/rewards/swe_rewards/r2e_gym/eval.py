@@ -20,14 +20,16 @@ creates /run_tests.sh so reward_from_container can run it. For "swesmith", setup
 requires ds to build the test script.
 """
 
+import asyncio
+import concurrent.futures
 import json
 import re
-import concurrent.futures
-import asyncio
 from types import SimpleNamespace
 
 # Match R2E-Gym Docker runtime PATH for /run_tests.sh
-DOCKER_PATH = "/root/.venv/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+DOCKER_PATH = (
+    "/root/.venv/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+)
 
 # Default test script path per dataset (before setup). After setup_container_for_reward, use /run_tests.sh.
 # R2E Dockerfiles (aiohttp, pillow, etc.) copy run_tests.sh to /testbed/run_tests.sh; WORKDIR is /testbed.
@@ -63,10 +65,7 @@ def setup_container_for_reward(
     """
 
     if dataset not in ("swebench", "swebench_verified", "swesmith", "r2e"):
-        raise ValueError(
-            f"Unknown dataset: {dataset!r}. "
-            "Expected one of: swebench, swebench_verified, swesmith, r2e"
-        )
+        raise ValueError(f"Unknown dataset: {dataset!r}. Expected one of: swebench, swebench_verified, swesmith, r2e")
 
     def exec_run(cmd: list | str, workdir: str = "/testbed", timeout: int | None = None):
         """Run a short setup command inside the container with a hard timeout."""
@@ -142,19 +141,25 @@ def setup_container_for_reward(
         if ds is None:
             raise ValueError("setup_container_for_reward(..., dataset='swesmith') requires ds")
         import base64
+
         from r2egym.swesmith.utils import get_test_command
 
         test_command, _ = get_test_command(ds)
-        content = "\n".join([
-            "#!/bin/bash",
-            "set -uxo pipefail",
-            "source /opt/miniconda3/bin/activate",
-            "conda activate testbed",
-            "cd testbed/",
-            ": '>>>>> Start Test Output'",
-            test_command,
-            ": '>>>>> End Test Output'",
-        ]) + "\n"
+        content = (
+            "\n".join(
+                [
+                    "#!/bin/bash",
+                    "set -uxo pipefail",
+                    "source /opt/miniconda3/bin/activate",
+                    "conda activate testbed",
+                    "cd testbed/",
+                    ": '>>>>> Start Test Output'",
+                    test_command,
+                    ": '>>>>> End Test Output'",
+                ]
+            )
+            + "\n"
+        )
         b64 = base64.b64encode(content.encode()).decode()
         exec_run(f"echo '{b64}' | base64 -d > /run_tests.sh && chmod +x /run_tests.sh", workdir="/")
         return
@@ -174,10 +179,10 @@ def _ensure_r2e_tests_in_testbed(container, timeout: int = 60) -> None:
             # Avoid this by removing DEST first.
             "desired=''; "
             "[ -d /root/r2e_tests ] && desired=/root/r2e_tests || true; "
-            "[ -z \"$desired\" ] && [ -d /r2e_tests ] && desired=/r2e_tests || true; "
-            "[ -z \"$desired\" ] && exit 0; "
+            '[ -z "$desired" ] && [ -d /r2e_tests ] && desired=/r2e_tests || true; '
+            '[ -z "$desired" ] && exit 0; '
             "rm -rf /testbed/r2e_tests || true; "
-            "ln -s \"$desired\" /testbed/r2e_tests || true",
+            'ln -s "$desired" /testbed/r2e_tests || true',
         ],
         workdir="/",
         stdout=True,
@@ -352,9 +357,7 @@ def _reward_swebench(ds: dict, out: str, get_test_output: bool):
             FAIL_TO_PASS: test_spec.FAIL_TO_PASS,
             PASS_TO_PASS: test_spec.PASS_TO_PASS,
         }
-        report = get_eval_tests_report(
-            eval_status_map, eval_ref, eval_type=get_eval_type(test_spec)
-        )
+        report = get_eval_tests_report(eval_status_map, eval_ref, eval_type=get_eval_type(test_spec))
         reward = 1.0 if get_resolution_status(report) == ResolvedStatus.FULL.value else 0.0
     if get_test_output:
         return reward, out
@@ -423,11 +426,7 @@ def _reward_r2e(
                 stderr=True,
                 environment={"PATH": DOCKER_PATH},
             )
-            expected_json = (
-                result.output.decode("utf-8", errors="replace")
-                if result.output
-                else "{}"
-            )
+            expected_json = result.output.decode("utf-8", errors="replace") if result.output else "{}"
         if isinstance(expected_json, dict):
             expected = expected_json
         else:
@@ -485,10 +484,7 @@ def reward_from_container(
         float: reward 0.0 or 1.0; or tuple (reward, test_output) if get_test_output=True.
     """
     if dataset not in ("swebench", "swebench_verified", "swesmith", "r2e"):
-        raise ValueError(
-            f"Unknown dataset: {dataset!r}. "
-            "Expected one of: swebench, swebench_verified, swesmith, r2e"
-        )
+        raise ValueError(f"Unknown dataset: {dataset!r}. Expected one of: swebench, swebench_verified, swesmith, r2e")
 
     out = _run_tests_in_container(container, timeout=timeout, dataset=dataset)
 
@@ -513,10 +509,7 @@ async def setup_container_for_reward_async(
     setup_timeout: int = 60,
 ) -> None:
     if dataset not in ("swebench", "swebench_verified", "swesmith", "r2e"):
-        raise ValueError(
-            f"Unknown dataset: {dataset!r}. "
-            "Expected one of: swebench, swebench_verified, swesmith, r2e"
-        )
+        raise ValueError(f"Unknown dataset: {dataset!r}. Expected one of: swebench, swebench_verified, swesmith, r2e")
 
     async def exec_run(cmd: list | str, workdir: str = "/testbed", timeout: int | None = None):
         if timeout is None:
@@ -574,6 +567,7 @@ async def setup_container_for_reward_async(
             raise ValueError("swebench_verified setup needs ds to build /run_tests.sh")
 
         import base64
+
         from swebench.harness.test_spec.test_spec import make_test_spec
 
         test_spec = make_test_spec(ds)
@@ -589,21 +583,25 @@ async def setup_container_for_reward_async(
         if ds is None:
             raise ValueError("setup_container_for_reward_async(..., dataset='swesmith') requires ds")
         import base64
+
         from r2egym.swesmith.utils import get_test_command
 
         test_command, _ = get_test_command(ds)
-        content = "\n".join(
-            [
-                "#!/bin/bash",
-                "set -uxo pipefail",
-                "source /opt/miniconda3/bin/activate",
-                "conda activate testbed",
-                "cd testbed/",
-                ": '>>>>> Start Test Output'",
-                test_command,
-                ": '>>>>> End Test Output'",
-            ]
-        ) + "\n"
+        content = (
+            "\n".join(
+                [
+                    "#!/bin/bash",
+                    "set -uxo pipefail",
+                    "source /opt/miniconda3/bin/activate",
+                    "conda activate testbed",
+                    "cd testbed/",
+                    ": '>>>>> Start Test Output'",
+                    test_command,
+                    ": '>>>>> End Test Output'",
+                ]
+            )
+            + "\n"
+        )
         b64 = base64.b64encode(content.encode()).decode()
         await exec_run(
             f"echo '{b64}' | base64 -d > /run_tests.sh && chmod +x /run_tests.sh",
@@ -621,10 +619,10 @@ async def _ensure_r2e_tests_in_testbed_async(container, timeout: int = 60) -> No
             "-c",
             "desired=''; "
             "[ -d /root/r2e_tests ] && desired=/root/r2e_tests || true; "
-            "[ -z \"$desired\" ] && [ -d /r2e_tests ] && desired=/r2e_tests || true; "
-            "[ -z \"$desired\" ] && exit 0; "
+            '[ -z "$desired" ] && [ -d /r2e_tests ] && desired=/r2e_tests || true; '
+            '[ -z "$desired" ] && exit 0; '
             "rm -rf /testbed/r2e_tests || true; "
-            "ln -s \"$desired\" /testbed/r2e_tests || true",
+            'ln -s "$desired" /testbed/r2e_tests || true',
         ],
         workdir="/",
         stdout=True,
@@ -722,10 +720,7 @@ async def reward_from_container_async(
     get_test_output: bool = False,
 ):
     if dataset not in ("swebench", "swebench_verified", "swesmith", "r2e"):
-        raise ValueError(
-            f"Unknown dataset: {dataset!r}. "
-            "Expected one of: swebench, swebench_verified, swesmith, r2e"
-        )
+        raise ValueError(f"Unknown dataset: {dataset!r}. Expected one of: swebench, swebench_verified, swesmith, r2e")
 
     out = await _run_tests_in_container_async(container, timeout=timeout, dataset=dataset)
     if dataset in ("swebench", "swebench_verified"):

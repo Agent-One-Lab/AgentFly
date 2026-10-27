@@ -63,7 +63,7 @@ total_training_steps=200
 project_name="Open"
 experiment_name="gui_agent"
 
-python3 -m verl.trainer.main_ppo \
+python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
     data.train_files=${train_dataset} \
     data.val_files=${eval_dataset} \
@@ -75,9 +75,9 @@ python3 -m verl.trainer.main_ppo \
     agent.init_config.model_name_or_path=$model \
     agent.init_config.reward_name=${reward_name} \
     agent.init_config.tools=${tools} \
-    agent.generation_config.max_tokens=${max_new_tokens_per_turn} \
-    agent.max_turns=${max_turns} \
-    agent.num_chains=${num_chains} \
+    agent.run_config.generation_config.max_tokens=${max_new_tokens_per_turn} \
+    agent.run_config.max_turns=${max_turns} \
+    agent.run_config.num_chains=${num_chains} \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

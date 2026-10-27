@@ -1,3 +1,14 @@
+"""Dense Wikipedia retrieval: an asynchronous E5 + FAISS retriever and the ``async_dense_retrieve`` tool.
+
+:class:`DenseRetriever` embeds queries with ``intfloat/e5-base-v2`` and searches a FAISS index over
+the wiki-18 corpus, loading the corpus in the background and caching embeddings and documents.
+The tool builds one shared retriever on first use, fetching a missing corpus/index first
+(:func:`~agentfly.utils.download.ensure_tool_data`). Heavy dependencies (torch, transformers,
+datasets) are imported only when a retriever is built.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import logging
 import multiprocessing
@@ -5,18 +16,18 @@ import os
 import pickle
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
-import datasets
-import torch
-from torch import Tensor
-from transformers import AutoModel, AutoTokenizer
-
-from .... import AGENT_CACHE_DIR
+from .... import AF_CACHE_DIR
 from ...decorator import tool
 from .faiss_indexer import Indexer
 
+# torch / transformers / datasets are imported where a retriever is built, so importing the
+# tool (which loading any built-in tool does) stays cheap.
+if TYPE_CHECKING:
+    from torch import Tensor
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 def average_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
@@ -44,19 +55,17 @@ class DenseRetriever:
         self._max_cache = 10000
 
         # 1. Load Model & Tokenizer
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
         model_name = "intfloat/e5-base-v2"
         # Use CPU for now
         self.device = torch.device("cpu")
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name, use_fast=True, trust_remote_code=True
-        )
-        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(
-            self.device
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True).to(self.device)
 
         # 2. Apply Hardware Optimizations
         if self.device.type == "cpu":
-            # self.model = quantize_dynamic(self.model, {torch.nn.Linear}, dtype=torch.qint8)
             pass
         else:
             self.model.half()
@@ -72,9 +81,7 @@ class DenseRetriever:
         loop = asyncio.get_event_loop()
 
         # Pass the loop as an argument to the background thread
-        threading.Thread(
-            target=self._load_corpus_task, args=(loop,), daemon=True
-        ).start()
+        threading.Thread(target=self._load_corpus_task, args=(loop,), daemon=True).start()
 
         # Limit the number of concurrent heavy-compute tasks
         self._semaphore = asyncio.Semaphore(max_concurrent)
@@ -86,6 +93,8 @@ class DenseRetriever:
         """Internal task to load corpus without blocking main thread."""
         # This prevents the .cache.pkl file from being used with the new loading mechanism
         # In a real scenario, you might want more robust cache invalidation
+
+        import datasets
 
         corpus = datasets.load_dataset(
             "json",
@@ -110,18 +119,14 @@ class DenseRetriever:
         # Ensure queries have E5 prefix
         prefixed = [f"query: {q}" if not q.startswith("query:") else q for q in queries]
 
-        batch = self.tokenizer(
-            prefixed, padding=True, truncation=True, max_length=256, return_tensors="pt"
-        )
+        batch = self.tokenizer(prefixed, padding=True, truncation=True, max_length=256, return_tensors="pt")
         batch = {k: v.to(self.device) for k, v in batch.items()}
+
+        import torch
 
         with torch.inference_mode():
             out = self.model(**batch)
-            return (
-                average_pool(out.last_hidden_state, batch["attention_mask"])
-                .cpu()
-                .numpy()
-            )
+            return average_pool(out.last_hidden_state, batch["attention_mask"]).cpu().numpy()
 
     def _get_docs_by_ids(self, doc_ids: list[int]):
         """Fetch docs from dictionary (Wait is now handled in search())."""
@@ -147,14 +152,10 @@ class DenseRetriever:
 
         async with self._semaphore:
             # 1. Embed
-            embeddings = await loop.run_in_executor(
-                self._POOL, self._get_embeddings, queries
-            )
+            embeddings = await loop.run_in_executor(self._POOL, self._get_embeddings, queries)
 
             # 2. FAISS Search
-            score_ids_list = await loop.run_in_executor(
-                self._POOL, self.indexer.search, embeddings, top_k
-            )
+            score_ids_list = await loop.run_in_executor(self._POOL, self.indexer.search, embeddings, top_k)
             logger.debug(f"Retrieved score_ids_list: {score_ids_list}")
 
         # 3. Doc retrieval
@@ -170,17 +171,16 @@ class DenseRetriever:
 GLOBAL_RETRIEVER = None
 
 
-@tool(
-    name="async_dense_retrieve", description="Retrieve wiki documents.", max_length=8192
-)
+@tool(name="async_dense_retrieve", description="Retrieve wiki documents.", max_length=8192)
 async def async_dense_retrieve(query: str):
     global GLOBAL_RETRIEVER
     if GLOBAL_RETRIEVER is None:
+        from ....utils.download import ensure_tool_data
+
+        ensure_tool_data("async_dense_retrieve")  # corpus + index, if missing (approval-gated)
         GLOBAL_RETRIEVER = DenseRetriever(
-            corpus_file=os.path.join(
-                AGENT_CACHE_DIR, "data", "search", "wiki-18.jsonl"
-            ),
-            index_file=os.path.join(AGENT_CACHE_DIR, "data", "search", "e5_Flat.index"),
+            corpus_file=os.path.join(AF_CACHE_DIR, "data", "search", "wiki-18.jsonl"),
+            index_file=os.path.join(AF_CACHE_DIR, "data", "search", "e5_Flat.index"),
         )
 
     # Simplified call

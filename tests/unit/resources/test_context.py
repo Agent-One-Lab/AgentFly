@@ -31,4 +31,4 @@ async def test_context_resource():
     result = await container.run_cmd("cat test_add_urls.py")
     print(result)
 
-    await context.release_resource(scope="rollout")
+    await context.end_resource(scope="rollout")

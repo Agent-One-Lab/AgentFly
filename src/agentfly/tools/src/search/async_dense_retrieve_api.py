@@ -19,9 +19,7 @@ SEARCH_PATH = "/search"
 TIMEOUT_SEC = 300.0
 
 
-def _format_retriever_error(
-    exc: Exception, response: httpx.Response | None = None
-) -> str:
+def _format_retriever_error(exc: Exception, response: httpx.Response | None = None) -> str:
     """Build a non-empty error message from exception and optional response body."""
     parts = []
     if response is not None:
@@ -43,7 +41,7 @@ def _format_retriever_error(
 
 
 @tool(
-    name="search", # Using search as the name maybe confusing, but we keep it to align with search-r1
+    name="search",  # Using search as the name maybe confusing, but we keep it to align with search-r1
     description="Search wiki documents based on provided query.",
     max_length=8192,
 )
@@ -65,9 +63,4 @@ async def async_dense_retrieve_api(query: str):
         err_msg = _format_retriever_error(e)
         return f"[Retriever API error: {err_msg}]"
     results = data.get("results") or []
-    return (
-        "\n".join(
-            f"Doc {i + 1}: {r.get('contents', '')}" for i, r in enumerate(results)
-        )
-        + "\n"
-    )
+    return "\n".join(f"Doc {i + 1}: {r.get('contents', '')}" for i, r in enumerate(results)) + "\n"

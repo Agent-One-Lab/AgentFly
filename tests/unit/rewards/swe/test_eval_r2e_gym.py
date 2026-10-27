@@ -5,6 +5,11 @@ import contextlib
 os.environ.setdefault("ENROOT_IMAGES_PATH", "/path/to/enroot/images/r2e-gym-lite")
 os.environ["ENROOT_ASYNC"] = "1"
 import enroot
+
+# The r2e_gym eval imports swebench (installed separately, see docs/examples/swe.md);
+# skip the whole module when it isn't available rather than erroring at collection.
+pytest.importorskip("swebench")
+
 from agentfly.rewards.swe_rewards.r2e_gym.eval import (
     reward_from_container,
     setup_container_for_reward,
