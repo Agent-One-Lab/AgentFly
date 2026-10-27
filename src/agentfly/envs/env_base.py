@@ -14,7 +14,7 @@ class BaseEnv(abc.ABC):
     @abc.abstractmethod
     async def start(self) -> None:
         """
-        Start the environment and allocate any resources. e.g. start a docker container and connect it.
+        Start the environment and allocate any resources. e.g. start a container and connect to it.
         This method is generally slow, and is often called when the environment is first created, the environment is broken or lost.
         """
         raise NotImplementedError
@@ -48,10 +48,4 @@ class BaseEnv(abc.ABC):
         Release everything allocated by the environment.
         This is the synchronous version of aclose.
         """
-        raise NotImplementedError
-
-    @staticmethod
-    @abc.abstractmethod
-    async def acquire():
-        """Create a new environment."""
         raise NotImplementedError

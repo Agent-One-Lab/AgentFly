@@ -136,7 +136,8 @@ def test_prompt_check_reports_identical_with_turn_depth(tokenizer, caplog):
     caplog.set_level(logging.DEBUG, logger="agentfly")
     msgs = multi_turn_messages(tokenizer)
     engine = EchoEngine(tokenizer, [IM_END])
-    asyncio.run(_backend(tokenizer, engine).generate_async([msgs], return_dict=True, tools=[]))
+    backend = _backend(tokenizer, engine, check_prompt_consistency=True)
+    asyncio.run(backend.generate_async([msgs], return_dict=True, tools=[]))
     out = caplog.text
     assert "prompt_check: 1/1 rows identical" in out
     assert "assistant turns=[1]" in out
@@ -152,7 +153,7 @@ def test_prompt_check_prints_mismatch_when_verl_rerenders(tokenizer, caplog):
         return row[:k] + TEXT_THINK + row[k + 3:]
 
     engine = EchoEngine(tokenizer, [IM_END], tamper=retokenize)
-    backend = _backend(tokenizer, engine)
+    backend = _backend(tokenizer, engine, check_prompt_consistency=True)
     asyncio.run(backend.generate_async([msgs], return_dict=True, tools=[]))
     out = caplog.text
     assert "PROMPT MISMATCH" in out and "1/1 rows differ" in out

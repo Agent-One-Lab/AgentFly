@@ -14,14 +14,7 @@ All per-user state lives under `AF_HOME` (default `~/.agentfly`), following the
 |---|---|---|
 | `AF_HOME` | `~/.agentfly` | Root for all per-user state. Set this to relocate everything at once. |
 | `AF_CACHE_DIR` | `$AF_HOME/cache` | Downloaded artifacts (search corpus + FAISS index, jinja templates). Enroot images are not stored here: they go to `ENROOT_IMAGES_PATH` (default `~/.cache/enroot/images`). |
-| `AF_DATA_DIR` | `$AF_HOME/data` | Runtime data (e.g. Redis data dir). |
-| `AF_CONFIG_DIR` | `$AF_HOME/config` | User-editable config files. Packaged defaults (`search.yaml`, `redis/redis.conf`) are seeded here on first run if missing — edit `~/.agentfly/config/search.yaml` to set your search API keys. |
-
-!!! note "Config lives under `AF_HOME` now"
-    In earlier versions `AF_CONFIG_DIR` pointed *inside the installed package*.
-    It now defaults to `~/.agentfly/config`, seeded from the packaged defaults on
-    first import (existing files are never overwritten). Put your API keys in
-    `~/.agentfly/config/search.yaml`, not in `site-packages`.
+| `AF_DATA_DIR` | `$AF_HOME/data` | Runtime data (e.g. logs of model servers started as resources). |
 
 ## Behavior toggles
 
@@ -39,7 +32,7 @@ All per-user state lives under `AF_HOME` (default `~/.agentfly`), following the
 
 These follow each tool's own convention and are read directly:
 
-- **Search** — `search.yaml` (`SERPER_API_KEY`, `GOOGLE_API_KEY`, `CUSTOM_SEARCH_ENGINE_ID`) under `AF_CONFIG_DIR`; `RETRIEVER_*` env vars override the retriever server's corpus/index paths and host/port (see [CLI](cli.md#agentfly-search)).
+- **Search** — `RETRIEVER_*` env vars override the retriever server's corpus/index paths and host/port (see [CLI](cli.md#agentfly-search)).
 - **Daytona** — `DAYTONA_API_KEY` (required for the `daytona` engine), `DAYTONA_API_URL`, `DAYTONA_TARGET` (the Daytona SDK's own variables).
 
 ## Daytona sandbox limits

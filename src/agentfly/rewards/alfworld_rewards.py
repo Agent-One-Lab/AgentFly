@@ -1,4 +1,4 @@
-"""ALFWorld reward: ``alfworld_episode_reward`` gives ``10 * won`` (verl-agent's scale) from the episode's environment state."""
+"""ALFWorld reward: ``alfworld_reward`` gives ``10 * won`` (verl-agent's scale) from the episode's environment state."""
 
 from typing import Any, Dict
 
@@ -7,8 +7,8 @@ from ..envs.alfworld_env import ALFWorldSpec
 from .reward_base import reward
 
 
-@reward(name="alfworld_episode_reward")
-async def alfworld_episode_reward(context: Context) -> Dict[str, Any]:
+@reward(name="alfworld_reward")
+async def alfworld_reward(context: Context) -> Dict[str, Any]:
     """
     ALFWorld episode reward: ``10 * won`` (verl-agent scale), else 0.
 

@@ -11,7 +11,6 @@ The container keeps model-written code off your own Python process and filesyste
 - [Environment](environment.md) - PythonSandboxEnv class reference
 - [HTTP Server](http_server.md) - FastAPI server implementation
 - [Tools](tools.md) - Code execution tools
-- [Rewards](rewards.md) - Code evaluation rewards
 
 ## Quick Start
 

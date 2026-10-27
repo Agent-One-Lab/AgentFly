@@ -147,7 +147,7 @@ logger = logging.getLogger(__name__)
 # Multi-model VLM endpoint config: model at index i uses server at index i.
 # Configure via the VLM_MODELS / VLM_SERVER_IPS environment variables, each a
 # comma-separated list. The two must have the same length; see
-# examples/train_scripts/simuscene/test_vlm_as_judge_train.sh for an example.
+# examples/train_scripts/simuscene/train_simuscene.slurm for an example.
 def _parse_csv_env(name: str) -> List[str]:
     return [item.strip() for item in os.getenv(name, "").split(",") if item.strip()]
 
@@ -185,11 +185,6 @@ Example Format:
   }}
 ]
 """
-VLM_ENSEMBLE_MIN_RESPONSES = 2
-LADDER_CODE_EXTRACTION_REWARD = 0.04
-LADDER_CODE_RENDER_REWARD = 0.06
-LADDER_VIDEO_OPEN_REWARD = 0.1
-LADDER_VLM_REWARD = 1.0 - LADDER_CODE_EXTRACTION_REWARD - LADDER_CODE_RENDER_REWARD - LADDER_VIDEO_OPEN_REWARD
 MULTI_MODEL_LADDER_CODE_REWARD = 0.02
 MULTI_MODEL_LADDER_VIDEO_SAVED_REWARD = 0.04
 MULTI_MODEL_LADDER_VIDEO_OPEN_REWARD = 0.06
@@ -965,9 +960,10 @@ async def vlm_as_judge_pass_reward_multi_model(
 
     Each configured judge decides pass/fail for the rendered video. ``reward`` is 1.0 when a
     majority of judges pass it; otherwise it is a small "ladder" credit for progress:
-    ``MULTI_MODEL_LADDER_CODE_REWARD`` (0.02) when code was extracted,
-    ``MULTI_MODEL_LADDER_VIDEO_SAVED_REWARD`` (0.04) when a video was saved, and
-    ``MULTI_MODEL_LADDER_VIDEO_OPEN_REWARD`` (0.06) when it can be opened.
+    ``MULTI_MODEL_LADDER_VIDEO_OPEN_REWARD`` (0.06) when the video opens, else
+    ``MULTI_MODEL_LADDER_VIDEO_SAVED_REWARD`` (0.04). The reward is 0 when no code is found, no
+    video is rendered, or any judge returns no parseable answer (so the code-only step,
+    ``MULTI_MODEL_LADDER_CODE_REWARD``, is never reached).
 
     Returns:
         ``reward``, per-model ``model_pass@<model>`` / ``model_response_success@<model>`` /

@@ -477,7 +477,7 @@ def math_equal_reward(final_response: str, answer: str, **kwargs) -> float:
     - 0.0 otherwise
 
     Args:
-        prediction (str): The agent's predicted answer
+        final_response (str): The agent's final answer
         answer (str): The correct answer
         **kwargs: Additional arguments (ignored)
 
@@ -609,7 +609,7 @@ def parse_thinking_response(response: str):
 
 
 @reward(name="math_equal_reward_think")
-def math_equal_reward_think(final_response: str, answer: str, trajectory: List[Dict]) -> float:
+def math_equal_reward_think(final_response: str, answer: str, trajectory: List[Dict]) -> dict:
     """
     This reward function is used to reward the agent for using thinking and tool calling. The reward contains two parts:
     format: if there is <think> in the response, and the agent has called the tool, then the reward is 1.0 if the answer is correct, otherwise 0.1. if there is no <think> or the agent has not called the tool, then the reward is 0.0.

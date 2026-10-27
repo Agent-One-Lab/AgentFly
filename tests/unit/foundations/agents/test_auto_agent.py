@@ -152,3 +152,15 @@ def test_from_pretrained_keeps_reward_fn_and_tool_objects():
         monitors=[],
     )
     assert agent.reward_fn is my_reward and agent.tool_names == ["calculator"]
+
+
+def test_client_backend_rejects_a_template():
+    config = {
+        "agent_type": "hf",
+        "model_name_or_path": "Qwen/Qwen2.5-3B-Instruct",
+        "template": "qwen2.5",
+        "tools": ["calculator"],
+        "backend_config": {"backend": "client"},
+    }
+    with pytest.raises(ValueError, match="client backend does not take a chat template"):
+        AutoAgent.from_config(config)

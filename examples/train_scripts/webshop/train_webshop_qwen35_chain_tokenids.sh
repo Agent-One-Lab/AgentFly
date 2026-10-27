@@ -66,7 +66,7 @@ kl_coef=0.01
 kl_loss_type=low_var_kl
 
 tools="[webshop_browser_action]"
-reward_name="webshop_episode_reward"  # 10 x success (score == 1.0); task_score = dense score
+reward_name="webshop_reward"  # 10 x success (score == 1.0); task_score = dense score
 agent_type=action
 template=null
 # verl-agent's WebShop instruction as the system message; the task, the page and the

@@ -25,8 +25,7 @@ def static_modules():
     ("package_name", "unavailable_exports"),
     [
         ("agentfly.rewards", set()),
-        # This pre-existing broken export is outside the lazy-discovery fix.
-        ("agentfly.tools", {"google_search_serper"}),
+        ("agentfly.tools", set()),
     ],
 )
 def test_public_exports_have_static_declarations(
@@ -45,11 +44,11 @@ def test_public_exports_have_static_declarations(
     [
         (
             "agentfly.rewards.math_equal_reward",
-            "agentfly.rewards.math_reward.math_equal_reward",
+            "agentfly.rewards.math_rewards.math_equal_reward",
         ),
         (
             "agentfly.rewards.qa_f1_reward",
-            "agentfly.rewards.qa_reward.qa_f1_reward",
+            "agentfly.rewards.qa_rewards.qa_f1_reward",
         ),
         (
             "agentfly.tools.code_interpreter",
@@ -96,7 +95,6 @@ def test_public_exports_remain_lazy_at_runtime(tmp_path, package_name, export_na
         **os.environ,
         "AF_HOME": str(tmp_path),
         "AF_CACHE_DIR": str(tmp_path / "cache"),
-        "AF_CONFIG_DIR": str(tmp_path / "config"),
         "AF_DATA_DIR": str(tmp_path / "data"),
         "PYTHONDONTWRITEBYTECODE": "1",
         "HF_HUB_OFFLINE": "1",

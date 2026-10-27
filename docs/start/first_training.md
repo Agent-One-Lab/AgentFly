@@ -113,8 +113,40 @@ validation (`trainer.val_before_train=False`).
 
 ## Reading the metrics
 
-The console prints one line of metrics per step; wandb shows the same metrics plus AgentFly's
-rollout metrics. The ones to watch first:
+### Console output
+
+Each training step prints two AgentFly lines and then verl's metrics line:
+
+```
+[Rollout] step 12: trajs=512 reward_mean=0.412 reward>0=230/512 turns=2.8 tool_calls=1.9/traj {calculator: 940, answer: 31}
+  | groups(64 tasks x 8, pass=reward>=1): all_pass=0.25 all_fail=0.12 mixed=0.62 | finish={tool_end: 480, max_turns: 32}
+  capped_turns=0 | time(s) avg=21.4 max=58.0
+[ChainRollout] training batch: rows=512 (+0 pad)
+step:12 - actor/pg_loss:... critic/score/mean:0.412 ... reward_extra/rm_<key>/mean:... timing_s/step:...
+```
+
+(Each is a single line in the log; they are wrapped here.)
+
+| `[Rollout]` field | Meaning |
+|---|---|
+| `trajs` | Trajectories this step (tasks × `num_chains`). |
+| `reward_mean`, `reward>0` | Mean reward, and how many trajectories got a reward above 0. `reward>0` is the success count only for 0-or-N rewards (ALFWorld, WebShop); a partial-credit reward (e.g. 0.1 for a wrong answer that used a tool) also counts. |
+| `turns`, `tool_calls` | Average model turns and tool calls per trajectory, with totals per tool. |
+| `groups(...)` | Share of tasks whose attempts all pass (reward ≥ 1), all fail, or differ. GRPO learns only from mixed groups. Shown when tasks have several attempts. |
+| `finish` | Why trajectories ended: `tool_end` / `tool_control_end` (a tool ended it, e.g. an answer tool or an environment reporting the episode done), `max_turns`, `no_tool_calls` (a turn without a tool call), `max_model_len` (context full), `terminal` (the model's reply asked to stop), `tool_error_end` / `invalid_end` (a failed or malformed tool call ended it). |
+| `capped_turns` | Turns cut off at `max_tokens`. Many means `max_new_tokens_per_turn` is too small. |
+| `no_tool_call_turns`, `nudges` | Only with `on_no_tool_call: continue`: turns without a tool call that didn't end the trajectory, and the reminders sent after them. Shown when non-zero. |
+| `time(s)` | Average and longest trajectory time. |
+
+The `training batch` line counts the training rows (`+N pad` are masked padding rows); step
+rollouts also print rows per trajectory and `valid_frac`. With the
+[token drift](../features/training_consistency.md) check turned on, it also shows `token_drift={...}`. verl's line holds the optimizer, timing and length metrics, and each
+extra key your reward returns as `reward_extra/rm_<key>/mean|max|min`.
+
+### Metrics to watch
+
+wandb shows verl's metrics plus AgentFly's rollout metrics (`agent/rollout/*`, the same numbers
+as the `[Rollout]` line). The ones to watch first:
 
 | Metric | Meaning |
 |---|---|

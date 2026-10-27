@@ -1,4 +1,4 @@
-# chess_reward.py
+# chess_rewards.py
 """
 Chess puzzle reward functions for AgentFly.
 

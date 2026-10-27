@@ -392,9 +392,9 @@ def test_to_dataproto_splices_token_ids_and_reports_drift(monkeypatch, entrypoin
     agent = _FakeAgent(tokenizer=tok, processor=None, template=HF_TMPL, max_model_len=4096)
     result = RunResult(trajectories=[traj], rollout="step")
     if entrypoint == "agent":
-        BaseAgent.to_verl_dataproto(agent, result)
+        BaseAgent.to_verl_dataproto(agent, result, log_token_drift=True)
     else:
-        conversion.step_to_dataproto(agent, result)
+        conversion.step_to_dataproto(agent, result, log_token_drift=True)
 
     inputs, meta = captured["inputs"], captured["meta_info"]
     for r in range(2):
@@ -419,7 +419,7 @@ def test_to_dataproto_without_token_ids_reports_none_and_is_text_path(monkeypatc
     content = "<think>x</think><action>go</action>"
     traj = _traj("t", 0, 0.0, [_ids_step(0, content)])
     agent = _FakeAgent(tokenizer=tok, processor=None, template=HF_TMPL, max_model_len=4096)
-    BaseAgent.to_verl_dataproto(agent, RunResult(trajectories=[traj], rollout="step"))
+    BaseAgent.to_verl_dataproto(agent, RunResult(trajectories=[traj], rollout="step"), log_token_drift=True)
 
     drift = captured["meta_info"]["token_drift"]
     assert drift == {"token_drift/frac_rows_with_ids": 0.0}

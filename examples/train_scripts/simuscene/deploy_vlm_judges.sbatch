@@ -14,7 +14,7 @@
 # =============================================================================
 # Serve the three SimuScene VLM judges, one model per node, all on port 8000.
 #
-# simuscene_reward.py calls http://<VLM_SERVER_IPS[i]>:8000/v1 with
+# simuscene_rewards.py calls http://<VLM_SERVER_IPS[i]>:8000/v1 with
 # model=<VLM_MODELS[i]> and passes the rendered video as a file:// path, so:
 #   * every server listens on port 8000 and is served under its HF id;
 #   * every server may read local media under the shared filesystem;

@@ -25,7 +25,8 @@
 # Rollout: StepRollout (one training row per env step) + FlatWebshopPromptBuilder (verl-agent's
 # WEBSHOP_TEMPLATE, byte-identical) + always-step projection; is_action_valid is the FORMAT
 # check (<think> + <action>). Sampling prompts are rendered with the training tokenizer and
-# executed as ids by verl (prompt_check must report identical rows).
+# executed as ids by verl (verify with +agent.init_config.backend_config.check_prompt_consistency=true:
+# prompt_check should report identical rows).
 # ============================================================================
 
 arm=${1:-gigpo}
@@ -82,7 +83,7 @@ kl_coef=0.01
 kl_loss_type=low_var_kl
 
 tools="[webshop_browser_action]"
-reward_name="webshop_episode_reward"  # 10 x success (score == 1.0); task_score = dense score
+reward_name="webshop_reward"  # 10 x success (score == 1.0); task_score = dense score
 agent_type=action
 template=null                       # native Qwen chat template (stock system message)
 system_prompt=null                  # the flat prompt carries the instruction

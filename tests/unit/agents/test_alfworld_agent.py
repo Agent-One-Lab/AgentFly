@@ -1,7 +1,7 @@
 """End-to-end ALFWorld agent rollout, WITHOUT the verl trainer.
 
 This exercises exactly the rollout path the trainer drives — ActionAgent +
-alfworld_step tool + ALFWorld env + alfworld_episode_reward, on a real async
+alfworld_step tool + ALFWorld env + alfworld_reward, on a real async
 vLLM backend — but from a plain `agent.run(...)` call. It is an isolation probe:
 if training hangs at validation but this test completes, the hang is in the
 trainer/validation glue, not in the agent/tool/env/reward code. If this test
@@ -26,7 +26,7 @@ import pytest
 
 from agentfly.agents.specialized.action_agent import ActionAgent
 from agentfly.tools import alfworld_step
-from agentfly.rewards import alfworld_episode_reward
+from agentfly.rewards import alfworld_reward
 
 
 # --- config mirrored from train_alfworld_ray.sh -----------------------------
@@ -100,7 +100,7 @@ async def test_alfworld_agent_rollout():
     agent = ActionAgent(
         MODEL,
         tools=[alfworld_step],
-        reward_fn=alfworld_episode_reward,
+        reward_fn=alfworld_reward,
         template=TEMPLATE,
         system_prompt=SYSTEM_PROMPT,
         max_model_len=MAX_MODEL_LEN,

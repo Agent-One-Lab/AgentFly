@@ -6,7 +6,7 @@ Tool calling are becoming stardards for LM agents. We use *tool* as an abstracti
 
 1. Parallelism: To ensure efficiency, during the rollout we need to have multiple interactions in parallel. This requires the tool can be called in parallel. In AgentFly (and many other frameworks), this is achieved through *asynchronous pipeline*: All of **generation, tool calling, and reward calculation are designed to be asynchronous**.
 
-2. Isolation: Some environments need to be isolated during the interaction (e.g. writing files in an os). We mainly achieve this through running **multiple docker containers**.
+2. Isolation: Some environments need to be isolated during the interaction (e.g. writing files in an os). We mainly achieve this by running each rollout's environment in its **own container** (enroot by default; Docker or Daytona if configured).
 
 ### Definition
 
@@ -42,14 +42,16 @@ from agentfly.tools import BaseTool
 
 
 3. A specialized tool that can be directly defined as the method of the agent. This is recommended for specialized agent.
+   The method must also be listed in the agent's `tools`: decorating it alone does not give it to
+   the model. See [Tool for Class Methods](tool_for_class_method.md).
 ```python
-from agentfly.agents import BaseAgent
+from agentfly.agents import HFAgent
 from agentfly.tools import tool
 
-class CustomAgent(BaseAgent):
+class CustomAgent(HFAgent):
     def __init__(self, special_api_key, **kwargs):
         self.special_api_key = special_api_key
-        super().__init__(**kwargs)
+        super().__init__(tools=[self.specialized_tool], **kwargs)
 
     def processing_query(self, query):
         return query

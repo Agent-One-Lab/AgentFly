@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from agentfly.core import Context
-from agentfly.rewards.vlm_as_judge import simuscene_reward as sr
+from agentfly.rewards.vlm_as_judge import simuscene_rewards as sr
 
 # Fill these values manually before running this integration test.
 VLM_MODELS = ["Qwen/Qwen2.5-VL-72B-Instruct"]

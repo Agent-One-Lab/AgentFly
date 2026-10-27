@@ -26,7 +26,7 @@ The environment resets automatically on first use to the episode's task
 
 ```python
 from agentfly.tools import alfworld_step
-from agentfly.rewards import alfworld_episode_reward
+from agentfly.rewards import alfworld_reward
 
 tools = [alfworld_step]
 
@@ -38,7 +38,7 @@ system_prompt = (
 )
 ```
 
-The reward (`alfworld_episode_reward`) reads the episode's terminal `won` flag
+The reward (`alfworld_reward`) reads the episode's terminal `won` flag
 from the same acquired resource and returns `10 * won`.
 
 ## Tool Configuration

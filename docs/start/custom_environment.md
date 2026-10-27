@@ -21,7 +21,8 @@ examples/custom_env/
 
 ## 1. The environment
 
-Subclass `BaseEnv` and implement its lifecycle methods. The engine calls `start` once when it
+Subclass `BaseEnv` and implement its four lifecycle methods: `start`, `reset`, `step` and
+`aclose`. The engine calls `start` once when it
 creates an instance and `aclose` when it destroys it; tools call `reset` and `step`.
 
 ```python
@@ -92,9 +93,10 @@ target=81 reward=0.0 guesses=1
 
 ## 4. Training
 
-Training loads the tool, the reward and the env by import path, in the Ray workers as well, so
-`my_task` must be importable there. The example script puts it on `PYTHONPATH` and refers to the
-tool and reward as `my_task.tools:guess` and `my_task.tools:guess_reward`:
+Training loads the tool, the reward and the env by import path in the trainer's Ray workers,
+which start in the folder you launched `agentfly train` from. So run it from the folder that
+contains `my_task`: the example script changes into its own folder first, and refers to the tool
+and reward as `my_task.tools:guess` and `my_task.tools:guess_reward`:
 
 ```bash
 python examples/custom_env/make_data.py      # writes examples/custom_env/data/guess_{train,val}.json

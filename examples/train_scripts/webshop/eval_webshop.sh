@@ -37,7 +37,7 @@ val_batch_size=512
 max_turns=15
 max_response_length=512
 tools="[webshop_browser_action]"
-reward_name="webshop_episode_reward"
+reward_name="webshop_reward"
 project_name="Open"
 
 # The two arms differ exactly as their training scripts do: the step arm renders verl-agent's flat

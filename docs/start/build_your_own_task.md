@@ -123,8 +123,8 @@ async def test_my_task_smoke():
         "answer": "4",
     }
     result = await agent.run(messages=sample, max_turns=3, num_chains=1)
-    print(result.trajectories)
-    print(result.rewards)
+    for traj in result.trajectories:
+        print(agent.extract_final_response(traj.segments[-1].messages), traj.reward)
 ```
 
 Things to verify here:
@@ -137,7 +137,7 @@ If the reward never sees a tool call or always returns the same value, fix that 
 
 ## Step 6: Wire Up a Training Script
 
-Copy an existing training script (e.g. [`examples/train_scripts/webshop/train_webshop_chain.sh`](https://github.com/Agent-One-Lab/AgentFly/blob/main/examples/train_scripts/webshop/train_webshop_chain.sh)) and change the parts specific to your task:
+Copy [`examples/custom_env/train.sh`](https://github.com/Agent-One-Lab/AgentFly/blob/main/examples/custom_env/train.sh), which trains a task whose tool, reward and environment live in your own module (see [Build a Custom Environment](custom_environment.md)), and change the parts specific to your task. The example scripts are in the repository (`git clone https://github.com/Agent-One-Lab/AgentFly`), not in the pip package.
 
 | Override | What to set it to |
 |---|---|
@@ -146,9 +146,14 @@ Copy an existing training script (e.g. [`examples/train_scripts/webshop/train_we
 | `agent.init_config.agent_type` | `hf`, `react`, `code`, `action`, etc. |
 | `agent.init_config.tools` | List literal of tool names or import paths, e.g. `"[calculator,my_task.tools:my_tool]"`. |
 | `agent.init_config.reward_name` | A reward name or import path, e.g. `my_task.rewards:my_reward`. |
-| `agent.init_config.template` | Chat template matching your model. |
+| `agent.init_config.template` | Optional: a chat template name. Leave it unset to use the model's own chat template. |
 | `agent.init_config.model_name_or_path` | Base model. |
 | `trainer.experiment_name` | Unique name for WandB logging. |
+
+Run `agentfly train` from the folder that contains your module: references like
+`my_task.tools:my_tool` are imported in the trainer's Ray workers, which start in that folder, so
+no `PYTHONPATH` is needed. File paths (`/path/to/tools.py:my_tool`) work from any folder. On a
+multi-node cluster, the folder must be at the same path on every node (e.g. a shared filesystem).
 
 The rest of the script (advantage estimator, KL coefficient, batch sizes, FSDP/vLLM flags, learning rate, etc.) typically stays the same as the template you copy from. The full key reference is in **[Hydra Config](hydra_config.md)**; the end-to-end flow is in **[First Training](first_training.md)**.
 
@@ -175,6 +180,6 @@ Each piece is independent: you can change one without touching the others. That'
 
 ## Where to Go From Here
 
-- **[Predefined Training Examples](../examples/predefined_training_examples.md)** — table of all shipped tasks (math, search, webshop, scienceworld, alfworld, GUI, VLM QA) with their tools, rewards, and dataset paths. Copy from the closest one.
+- **[Predefined Training Examples](../examples/predefined_training_examples.md)** — tasks AgentFly has been trained on, with training reports. Their scripts are under `examples/train_scripts/`; copy the closest one. **[Predefined Rewards](../api_references/rewards/predefined_rewards.md)** lists every built-in reward.
 - **[Image Agent Example](../examples/image_agent.md)** — multi-modal walkthrough.
 - **[Tool System](../features/tool_system.md)**, **[Reward System](../features/reward_system.md)**, **[Resources](../features/resources.md)** — for stateful tools and rewards, container management, and the full Tool/Reward contract.

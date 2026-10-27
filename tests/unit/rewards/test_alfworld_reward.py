@@ -1,4 +1,4 @@
-"""Unit tests for alfworld_episode_reward.
+"""Unit tests for alfworld_reward.
 
 The reward reads the terminal ``won`` flag from the rollout env, coerces it to
 {0.0, 1.0}, and returns ``10 * won`` as the reward (verl-agent scale) plus ``won``
@@ -7,7 +7,7 @@ tested without standing up the ALFWorld Docker environment.
 """
 import pytest
 
-from agentfly.rewards import alfworld_episode_reward
+from agentfly.rewards import alfworld_reward
 
 
 class _FakeEnv:
@@ -44,7 +44,7 @@ class _FakeContext:
 @pytest.mark.asyncio(loop_scope="session")
 async def test_alfworld_reward_binary(info, won):
     ctx = _FakeContext(info)
-    result = await alfworld_episode_reward(context=ctx)
+    result = await alfworld_reward(context=ctx)
 
     assert result == {"reward": 10.0 * won, "trajectory/accuracy": won}
     # Values must be plain floats (not numpy scalars / lists).
@@ -55,7 +55,7 @@ async def test_alfworld_reward_binary(info, won):
 @pytest.mark.asyncio(loop_scope="session")
 async def test_alfworld_reward_uses_global_local_resource():
     ctx = _FakeContext({"won": True})
-    await alfworld_episode_reward(context=ctx)
+    await alfworld_reward(context=ctx)
 
     # Reward must read the shared rollout env (same one the tools use).
     assert len(ctx.acquire_calls) == 1

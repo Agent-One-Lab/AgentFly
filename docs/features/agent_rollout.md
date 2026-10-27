@@ -332,7 +332,7 @@ async def alfworld_step(action: str, context: "Context"):
 
 ## Training on What Was Sampled
 
-The rollout carries the **token ids the model actually generated** on each assistant message (`token_ids`), so `agent.to_verl_dataproto(result)` trains on the sampled sequence instead of re-tokenizing decoded text (which drifts — e.g. `<think>` re-encodes differently on Qwen2.5). It also takes the tool schemas rendered into the prompt from one agent-owned source (`agent.prompt_tools()`) for both generation and training, so the prompt the model was conditioned on is the prompt it is trained under. Both come with per-batch diagnostics (`token_drift`, `prompt_check`). See [Training / Inference Consistency](training_consistency.md).
+The rollout carries the **token ids the model actually generated** on each assistant message (`token_ids`), so `agent.to_verl_dataproto(result)` trains on the sampled sequence instead of re-tokenizing decoded text (which drifts — e.g. `<think>` re-encodes differently on Qwen2.5). It also takes the tool schemas rendered into the prompt from one agent-owned source (`agent.prompt_tools()`) for both generation and training, so the prompt the model was conditioned on is the prompt it is trained under. Both have optional diagnostics (`token_drift`, `prompt_check`, `splice_check`; off by default). See [Training / Inference Consistency](training_consistency.md).
 
 
 ## Asynchronous Implementation

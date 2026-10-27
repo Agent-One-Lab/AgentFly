@@ -151,7 +151,18 @@ python -m agentfly.cli swebench \
 
 Before a full evaluation or training run, check the whole chain (model, container, tools,
 grading) on a single task with `agentfly swebench --limit 1`. This runs Qwen3-8B on the
-first SWE-bench Verified task with a local vLLM engine on one GPU:
+first SWE-bench Verified task with a local vLLM engine on one GPU.
+
+First get that task's image. `--limit 1` pulls only the image of the task `agentfly swebench
+--limit 1` will run (about 2 GB instead of the full set), and also downloads the task file if it
+is missing; `agentfly swebench` itself doesn't download it:
+
+```bash
+agentfly pull-images data/rlhf/os/swe-bench-verified.json --registry ghcr.io --limit 1 \
+    --to /some/big/disk/enroot/images/swe-bench-verified
+```
+
+Then run the task:
 
 ```bash
 agentfly swebench \
@@ -173,7 +184,7 @@ and no template is needed.
 `results/swe/one-task/` then holds `run_summary.json` and one JSON per task with the reward and
 the full trajectory (`trajectory.segments[-1].messages`, `finish_reason`, `tool_call_counts`).
 A reward of 0.0 with `finish_reason: max_turns` just means the model didn't solve the task;
-an exception means the setup is broken. `--seed N` picks a random task instead of the first.
+an exception means the setup is broken. `--seed N` picks a random task instead of the first; pass the same `--seed` to `pull-images`.
 
 ## 6. Smoke test
 

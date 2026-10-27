@@ -61,12 +61,12 @@ def em_score(prediction, ground_truth):
 
 # --8<-- [start:qa_f1_reward_example]
 @reward(name="qa_f1_reward")
-def qa_f1_reward(final_response: str, answer: str, trajectory: List[str]) -> float:
+def qa_f1_reward(final_response: str, answer: str, trajectory: List[str]) -> dict:
     """
     Calculate the reward for the agent's response based on the F1 score.
 
     Args:
-        prediction (str): The agent's predicted answer
+        final_response (str): The agent's final answer
         answer (str): The correct answer
         trajectory (List[str]): The agent's conversation trajectory
 
@@ -95,15 +95,15 @@ def qa_f1_reward(final_response: str, answer: str, trajectory: List[str]) -> flo
 
 
 @reward(name="qa_f1_reward_tool")
-def qa_f1_reward_tool(final_response: str, answer: str, trajectory: List[str]) -> float:
+def qa_f1_reward_tool(final_response: str, answer: str, trajectory: List[str]) -> dict:
     """
-    Calculate the reward for the agent's response based on the F1 score and EM score.
-    - 0.0 if no tool used
-    - 0.1 if tool used but answer incorrect
-    - 1.0 if tool used and answer correct
+    Calculate the reward for the agent's response based on the F1 score, gated on tool use.
+
+    The reward is the F1 score if the trajectory has at least two tool results (the last tool
+    call is usually the answer), else 0.0 for every metric.
 
     Args:
-        prediction (str): The agent's predicted answer
+        final_response (str): The agent's final answer
         answer (str): The correct answer
         trajectory (List[str]): The agent's conversation trajectory
 
@@ -212,7 +212,7 @@ def _format_ok(final_response: str, trajectory: List) -> tuple:
 
 
 @reward(name="qa_em_format_reward")
-def qa_em_format_reward(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
+def qa_em_format_reward(final_response: str, golden_answers: List[str], trajectory: List[str]) -> dict:
     """
     Calculate the reward for the agent's response based on the EM score.
 
@@ -227,14 +227,13 @@ def qa_em_format_reward(final_response: str, golden_answers: List[str], trajecto
         max_em = max(em_score(predicted, g) for g in golden_answers)
         max_f1 = max(f1_score(predicted, g)[0] for g in golden_answers)
     format_dict = _format_ok(final_response, trajectory)
+    # The format is correct when the answer is in <answer> tags, the agent called a tool,
+    # and every earlier assistant turn has <think> (see _format_ok).
+    format_ok = format_dict["has_answer_tags"] and format_dict["has_tool_calling"] and format_dict["has_think"]
 
     reward = 0.0
-    if format_dict["format"] and max_em:
-        reward = 1.0
-    elif format_dict["format"] and not max_em:
-        reward = 0.1
-    elif max_em and not format_dict["format"]:
-        reward = 0.0
+    if format_ok:
+        reward = 1.0 if max_em else 0.1
 
     return {
         "reward": reward,
@@ -254,13 +253,13 @@ def qa_em_format_reward(final_response: str, golden_answers: List[str], trajecto
 
 
 @reward(name="qa_em_reward")
-def qa_em_reward(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
+def qa_em_reward(final_response: str, golden_answers: List[str], trajectory: List[str]) -> dict:
     """
     Calculate the reward for the agent's response based on the EM score.
 
-    - 1.0 if the format is correct, and the em is true
-    - 0.1 if the format is correct, but the em is wrong
-    - 0.0 if the format is incorrect
+    The reward is the best exact match (1.0 or 0.0) of the ``<answer>`` content (or the whole
+    response) against ``golden_answers``. The format checks (``fmt*``) are logged as metrics
+    but do not change the reward; ``qa_em_format_reward`` gates the reward on them.
     """
     predicted = _extract_answer_tag(final_response)
     if not golden_answers:
@@ -284,7 +283,7 @@ def qa_em_reward(final_response: str, golden_answers: List[str], trajectory: Lis
 
 
 @reward(name="qa_em_reward_tool_call")
-def qa_em_reward_tool_call(final_response: str, golden_answers: List[str], trajectory: List[str]) -> float:
+def qa_em_reward_tool_call(final_response: str, golden_answers: List[str], trajectory: List[str]) -> dict:
     """
     Calculate the reward for the agent's response based on the EM score.
 
@@ -320,9 +319,7 @@ def qa_em_reward_tool_call(final_response: str, golden_answers: List[str], traje
 @reward(name="ok_vqa_reward")
 def ok_vqa_reward(final_response: str, answers: List[str], trajectory: List[str]) -> float:
     """
-    Calculate the reward for the agent's response based on the F1 score and EM score.
-    The reward is 0.0 if the agent has not called any tool.
-    The reward is the F1 score if the agent has called a tool.
+    Calculate the reward as the best F1 score of the response against any of ``answers``.
     """
     f1_scores = []
     for answer in answers:
@@ -339,6 +336,10 @@ def infoseek_reward(
     answer_eval: List[str | Dict],
     trajectory: List[str],
 ) -> float:
+    """
+    InfoSeek reward: ``0.8 * best F1`` against ``answer`` (plus ``answer_eval`` strings), plus
+    ``0.2`` if the trajectory has at least two tool results.
+    """
     # format reward
     call_tool_count = 0
     for msg in trajectory:

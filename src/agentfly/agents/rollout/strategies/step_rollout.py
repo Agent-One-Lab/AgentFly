@@ -39,6 +39,7 @@ from ..base import Rollout
 from ..events import FinishReason
 from ..loop.generation import generate_response
 from ..loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
+from ..loop.progress import progress_bar
 from ..structures import Step
 from .prompt_builders import resolve_prompt_builder
 
@@ -106,6 +107,7 @@ class StepRollout(Rollout):
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
         use_token_ids: bool = True,
+        show_progress: bool = True,
         **kwargs,
     ) -> RunResult:
         """Roll out ``num_chains`` trajectories per task, async-concurrently.
@@ -115,7 +117,7 @@ class StepRollout(Rollout):
         the corresponding environment signals. Trajectories come back in
         ``(group_idx, chain_idx)`` order (the spec order). ``global_step`` sets the
         metrics x-axis (see ``Rollout.resolve_global_step``). ``use_token_ids`` see
-        ``Rollout.run``.
+        ``Rollout.run``. ``show_progress`` renders a progress bar over finished trajectories.
         """
         self.validate_run_args(max_turns, num_chains, max_concurrent_chains)
         self.agent = agent
@@ -139,7 +141,16 @@ class StepRollout(Rollout):
 
         sem = asyncio.Semaphore(int(max_concurrent_chains)) if max_concurrent_chains is not None else None
 
+        pbar = progress_bar(total=len(specs)) if show_progress else None
+
         async def drive(spec) -> Trajectory:
+            try:
+                return await run_one(spec)
+            finally:
+                if pbar is not None:
+                    pbar.update(1)
+
+        async def run_one(spec) -> Trajectory:
             traj_uid, uid, group_idx, chain_idx, task_messages, meta = spec
             if sem is not None:
                 async with sem:
@@ -168,7 +179,11 @@ class StepRollout(Rollout):
                 context_config,
             )
 
-        results = await asyncio.gather(*(drive(s) for s in specs), return_exceptions=True)
+        try:
+            results = await asyncio.gather(*(drive(s) for s in specs), return_exceptions=True)
+        finally:
+            if pbar is not None:
+                pbar.close()
         errors = [r for r in results if isinstance(r, BaseException)]
         if errors:
             raise errors[0]

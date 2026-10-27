@@ -81,8 +81,6 @@ dependencies = [
     "multiprocess",
     "requests",
     "PyYAML",
-    "timeout-decorator",
-    "redis",
     "docker",
     # Pin ray to the version the reference (conda) env trained on. ray 2.57.x
     # hangs verl's agent-loop generation (workers wait forever on the vLLM

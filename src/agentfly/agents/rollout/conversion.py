@@ -6,7 +6,6 @@ the agent's last-run caches or constructs a rollout strategy.
 """
 
 import logging
-from collections import Counter
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -26,7 +25,7 @@ def result_to_dataproto(
     train_on_last_turn: bool = False,
     world_size: int = 1,
     pad_to_multiple_of: Optional[int] = None,
-    log_token_drift: bool = True,
+    log_token_drift: bool = False,
 ):
     """Convert an explicit in-memory result using its producer identifier.
 
@@ -164,6 +163,27 @@ def build_segment_batch(
     return inputs, row_indices, repeat_times, pad_size
 
 
+def mark_reward_extras(inputs: Dict[str, Any]) -> List[str]:
+    """The ``rm_<key>`` reward-metric columns verl should log as ``reward_extra/<key>``.
+
+    verl logs a reward extra only when its column is named in ``meta_info["reward_extra_keys"]``
+    and holds numbers. Columns of plain numbers stored as ``object`` are converted to float so
+    they qualify; columns holding other values (e.g. text) are left out.
+    """
+    keys = []
+    for key, column in inputs.items():
+        if not key.startswith("rm_") or key == "rm_scores" or not isinstance(column, np.ndarray):
+            continue
+        if column.dtype == object:
+            values = column.tolist()
+            if not all(isinstance(v, (bool, int, float, np.number)) for v in values):
+                continue
+            column = inputs[key] = np.asarray(values, dtype=np.float64)
+        if np.issubdtype(column.dtype, np.number) or column.dtype == bool:
+            keys.append(key)
+    return keys
+
+
 def chain_to_dataproto(
     agent,
     run_result: RunResult,
@@ -172,7 +192,7 @@ def chain_to_dataproto(
     world_size: int = 1,
     pad_to_multiple_of: Optional[int] = None,
     tokenize: Optional[Callable] = None,
-    log_token_drift: bool = True,
+    log_token_drift: bool = False,
 ):
     """Convert ``run_result``'s trajectories into a verl ``DataProto`` (one row per
     trainable **segment**; context-only/empty views remain in the result).
@@ -276,8 +296,6 @@ def chain_to_dataproto(
         mm_inputs = inputs.pop("mm_inputs")
         inputs["multi_modal_inputs"] = np.array(mm_inputs, dtype=object)
     try:
-        won = sum(1 for t in trajectories if (t.reward or 0.0) > 0)
-        finishes = Counter(t.finish_reason for t in trajectories)
         drift_str = ""
         if drift:
             drift_str = (
@@ -294,15 +312,18 @@ def chain_to_dataproto(
             _meta_sum("no_tool_call_turns"),
             _meta_sum("no_tool_call_nudges"),
         )
-        logger.info(
-            f"[ChainRollout] batch: rows={n_real} (+{pad_size} pad) trajs={len(trajectories)} "
-            f"won={won}/{len(trajectories)} finish={dict(finishes)} "
-            f"capped_turns={capped} no_tool_call_turns={no_tool} nudges={nudges}{drift_str}"
-        )
+        # Trajectory outcomes (rewards, finish reasons, turn counters) are in the [Rollout]
+        # summary line; this line covers the training batch built from them.
+        logger.info(f"[ChainRollout] training batch: rows={n_real} (+{pad_size} pad){drift_str}")
         rollout_stats = {"capped_turns": capped, "no_tool_call_turns": no_tool, "no_tool_call_nudges": nudges}
     except Exception as e:  # noqa: BLE001 — debug print must never break the run
         logger.warning(f"[ChainRollout] batch summary failed: {e}")
-    meta_info = {"use_agent": True, "layout": "per_segment", "repeat_times": repeat_times}
+    meta_info = {
+        "use_agent": True,
+        "layout": "per_segment",
+        "repeat_times": repeat_times,
+        "reward_extra_keys": mark_reward_extras(inputs),
+    }
     if drift:
         meta_info["token_drift"] = drift
     try:
@@ -321,7 +342,7 @@ def step_to_dataproto(
     world_size: int = 1,
     pad_to_multiple_of: Optional[int] = None,
     tokenize: Optional[Callable] = None,
-    log_token_drift: bool = True,
+    log_token_drift: bool = False,
     token_drift: Optional[Callable] = None,
 ):
     """Flatten ``run_result.trajectories`` into a verl ``DataProto`` — ONE ROW PER STEP.
@@ -422,14 +443,10 @@ def step_to_dataproto(
     # would otherwise corrupt the trajectory/anchor groups).
     inputs["active_masks"] = np.array([1.0] * n_real + [0.0] * pad_size, dtype=np.float32)
 
-    # --- debug: per-step batch summary (rows, trajectories, outcomes, lengths) ---
+    # --- per-step training-batch summary (rows, rows per trajectory) ---
     try:
-        from collections import Counter
-
         trajs = run_result.trajectories
         n_traj = len(trajs)
-        won = sum(1 for t in trajs if (t.reward or 0.0) > 0)
-        finishes = Counter(t.finish_reason for t in trajs)
         lens = [0] * n_traj
         for batch_idx, _ in row_indices[:n_real]:
             lens[batch_idx] += 1
@@ -440,18 +457,21 @@ def step_to_dataproto(
             )
         # Format-valid fraction over real rows (verl-agent's ``valid_action_ratio``).
         valid_frac = float(np.mean(inputs["is_action_valid"][:n_real])) if n_real else 0.0
+        # Trajectory outcomes are in the [Rollout] summary line; this one covers the batch.
         logger.info(
-            f"[StepRollout] per_step batch: rows={n_real} (+{pad_size} pad) "
-            f"trajs={n_traj} training_rows/traj[min/mean/max]="
-            f"{min(lens)}/{sum(lens) / max(1, n_traj):.1f}/{max(lens)} "
-            f"won={won}/{n_traj} ({100.0 * won / max(1, n_traj):.1f}%) "
-            f"valid_frac={valid_frac:.3f} finish={dict(finishes)}"
-            f"{drift_str}"
+            f"[StepRollout] training batch: rows={n_real} (+{pad_size} pad) "
+            f"training_rows/traj[min/mean/max]={min(lens)}/{sum(lens) / max(1, n_traj):.1f}/{max(lens)} "
+            f"valid_frac={valid_frac:.3f}{drift_str}"
         )
     except Exception as e:  # noqa: BLE001 — debug print must never break the run
         logger.warning(f"[StepRollout] batch summary failed: {e}")
 
-    meta_info = {"use_agent": True, "layout": "per_step", "repeat_times": repeat_times}
+    meta_info = {
+        "use_agent": True,
+        "layout": "per_step",
+        "repeat_times": repeat_times,
+        "reward_extra_keys": mark_reward_extras(inputs),
+    }
     if drift:
         meta_info["token_drift"] = drift
     return DataProto.from_single_dict(inputs, meta_info=meta_info)

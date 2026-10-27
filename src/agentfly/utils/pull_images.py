@@ -16,11 +16,12 @@ pull never leaves a truncated image behind.
 import argparse
 import json
 import os
+import random
 import shutil
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 
 def image_file_name(image: str) -> str:
@@ -28,19 +29,39 @@ def image_file_name(image: str) -> str:
     return image.replace("/", "+").replace(":", "+") + ".sqsh"
 
 
-def read_images(paths: Iterable[str], field: str) -> List[str]:
-    """Distinct values of ``field`` across the records of JSON (list) or JSONL datasets, in first-seen order."""
-    images = {}
+def read_records(paths: Iterable[str]) -> List[dict]:
+    """All records of JSON (a list, or an object with a ``data`` / ``instances`` list) or JSONL datasets."""
+    records = []
     for path in paths:
         with open(path) as f:
             if path.endswith(".jsonl"):
-                records = (json.loads(line) for line in f if line.strip())
-            else:
-                records = json.load(f)
-            for record in records:
-                image = record.get(field)
-                if image:
-                    images.setdefault(image, None)
+                records.extend(json.loads(line) for line in f if line.strip())
+                continue
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            raw = raw.get("data", raw.get("instances", [raw]))
+        records.extend(raw)
+    return records
+
+
+def select_records(records: List[dict], limit: Optional[int] = None, seed: Optional[int] = None) -> List[dict]:
+    """The records ``agentfly swebench`` runs with the same ``--limit`` / ``--seed``: shuffled with
+    ``seed`` if given, then the first ``limit``."""
+    if seed is not None:
+        records = list(records)
+        random.Random(seed).shuffle(records)
+    if limit is not None:
+        records = records[: max(0, limit)]
+    return records
+
+
+def read_images(paths: Iterable[str], field: str, limit: Optional[int] = None, seed: Optional[int] = None) -> List[str]:
+    """Distinct values of ``field`` across the (selected) records of the datasets, in first-seen order."""
+    images = {}
+    for record in select_records(read_records(paths), limit, seed):
+        image = record.get(field)
+        if image:
+            images.setdefault(image, None)
     return list(images)
 
 
@@ -91,6 +112,16 @@ def main(argv=None):
     parser.add_argument("-j", "--jobs", type=int, default=4, help="Parallel pulls (default: 4).")
     parser.add_argument("--retries", type=int, default=3, help="Attempts per image (default: 3).")
     parser.add_argument("--dry-run", action="store_true", help="Only report how many images are missing.")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Only the images of the first N tasks (after --seed's shuffle): the tasks "
+        "`agentfly swebench --limit N` runs.",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="Shuffle the tasks with this seed first, as `agentfly swebench --seed`."
+    )
     args = parser.parse_args(argv)
 
     if args.to:
@@ -110,10 +141,10 @@ def main(argv=None):
     if missing_files:
         print(f"Dataset file(s) not found: {', '.join(missing_files)}", file=sys.stderr)
         return 1
-    images = read_images(args.datasets, args.field)
+    images = read_images(args.datasets, args.field, args.limit, args.seed)
     missing = [im for im in images if not os.path.exists(os.path.join(directory, image_file_name(im)))]
     print(
-        f"{len(images)} images in the dataset(s); {len(images) - len(missing)} already in {directory}; "
+        f"{len(images)} images in the {'selected tasks' if args.limit is not None else 'dataset(s)'}; {len(images) - len(missing)} already in {directory}; "
         f"{len(missing)} to pull."
     )
     failed_list = os.path.join(directory, "failed_pulls.txt")

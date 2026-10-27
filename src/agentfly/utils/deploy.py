@@ -138,3 +138,7 @@ def main(
         os.execv(command[0], command)
     except FileNotFoundError:
         sys.exit("vllm is not installed in this environment (it comes with agentfly-rl's dependencies).")
+
+
+if __name__ == "__main__":
+    main()

@@ -91,10 +91,7 @@ approval prompt; set AF_ASSUME_YES=1 to accept non-interactively. Needs the `sea
 
 
 def main():
-    """
-    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH}"
-    python -m agentfly.tools.src.search.retriever_server
-    """
+    """Start the retriever server: ``agentfly search`` (configured by the ``RETRIEVER_*`` env vars)."""
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
         print(HELP)
         return

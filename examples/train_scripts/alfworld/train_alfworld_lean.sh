@@ -15,7 +15,7 @@
 #     bash train_alfworld_lean.sh gigpo    # multi-turn GiGPO
 #
 # Faithful-to-verl-agent knobs matched here: lean generic prompt (no category hints),
-# Qwen2.5-1.5B-Instruct, max_turns=50, lr=1e-6, KL 0.01 low_var_kl, group=8, and the
+# Qwen2.5-3B-Instruct (verl-agent used 1.5B), max_turns=50, lr=1e-6, KL 0.01 low_var_kl, group=8, and the
 # -0.1 invalid-action penalty (already applied inside the alfworld_step tool's
 # step_reward). Documented DELTAS we do NOT match (kept for infra simplicity; identical
 # across both arms so they don't affect the internal GRPO-vs-GiGPO comparison):
@@ -66,7 +66,7 @@ kl_loss_type=low_var_kl             # verl-agent kl_loss_type=low_var_kl
 train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
 eval_dataset="./data/rlhf/alfworld/alfworld_valid_unseen_tasks.json"
 tools="[alfworld_step]"
-reward_name="alfworld_episode_reward"
+reward_name="alfworld_reward"
 # gamma discounts the per-turn step return-to-go (GiGPO step level). GRPO ignores it,
 # so this only affects the gigpo arm. verl-agent uses 0.95.
 gamma=0.95

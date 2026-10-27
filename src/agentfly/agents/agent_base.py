@@ -217,9 +217,10 @@ class BaseAgent(ABC):
                 "backend_config must be a dict with at least a 'backend' key (e.g. {'backend': 'async_vllm'})."
             )
         backend = backend_config["backend"]
-        if backend == "client":
-            assert template is None, (
-                "For client backend, we do not support chat template. Set the template when deploying the model."
+        if backend == "client" and template is not None:
+            raise ValueError(
+                "The client backend does not take a chat template: the server applies its own. Pass the "
+                "template to the server instead (e.g. agentfly deploy --template ...), and leave template unset here."
             )
 
         if tool_parser is not None and tool_parser_name is not None:
@@ -364,7 +365,8 @@ class BaseAgent(ABC):
     def _initialize_monitor(self, monitors: List[str]) -> None:
         for monitor in monitors:
             if monitor == "local":
-                assert self.local_cache_dir is not None, "local_cache_dir must be set when using local monitor."
+                if self.local_cache_dir is None:
+                    raise ValueError("monitors=['local'] needs local_cache_dir.")
                 self.local_run_cache_dir = f"{os.path.join(self.local_cache_dir, os.path.basename(self.model_name_or_path), datetime.now().strftime('%Y%m%d_%H%M%S'))}"
                 Monitor.add_sink("jsonl", JsonlSink(f"{self.local_run_cache_dir}/"))
             elif monitor == "wandb":
@@ -450,7 +452,8 @@ class BaseAgent(ABC):
         return run_result
 
     def set_llm_engine(self, llm_engine: Any, tokenizer: Any, processor: Any):
-        assert self.backend == "async_verl", "Only async verl backend is supported for now"
+        if self.backend != "async_verl":
+            raise RuntimeError("set_llm_engine is only supported with the async_verl backend.")
 
         self.llm_engine.llm_engine = llm_engine
         self.tokenizer = tokenizer
@@ -828,7 +831,7 @@ class BaseAgent(ABC):
         train_on_last_turn: bool = False,
         world_size: int = 1,
         pad_to_multiple_of: Optional[int] = None,
-        log_token_drift: bool = True,
+        log_token_drift: bool = False,
     ):
         """Convert an explicit ``RunResult`` into a verl ``DataProto``.
 
@@ -900,7 +903,7 @@ class BaseAgent(ABC):
             world_size: data-parallel world size.
             pad_to_multiple_of: pad the batch dimension to a multiple of this
                 (extra rows repeat the last row) so it shards evenly.
-            log_token_drift: Include the token-drift diagnostic (spliced vs re-tokenized ids) in the batch log and meta_info.
+            log_token_drift: Include the token-drift diagnostic (spliced vs re-tokenized ids) in the batch log and meta_info. Off by default.
         """
         return result_to_dataproto(
             agent=self,

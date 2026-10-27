@@ -23,10 +23,6 @@ class EnvA(BaseEnv):
     async def aclose(self):
         pass
 
-    @staticmethod
-    async def acquire():
-        return EnvA()
-
 
 class EnvB(EnvA):
     name = "B"

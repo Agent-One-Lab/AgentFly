@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
     from vllm import AsyncEngineArgs
@@ -59,11 +59,11 @@ class AsyncVerlConfig:
             call, then every 200 calls; prints ``[AsyncVerlBackend] prompt_check: ...``,
             warns with a decoded diff on mismatch), and that every sampled turn reappears
             in later prompts as exactly its prompt followed by its sampled ids
-            (``splice_check``). On by default; disable with
-            ``agent.init_config.backend_config.check_prompt_consistency=false``.
+            (``splice_check``). ``"strict"`` raises on a mismatch. Off by default; enable
+            with ``+agent.init_config.backend_config.check_prompt_consistency=true``.
     """
 
-    check_prompt_consistency: bool = True
+    check_prompt_consistency: Union[bool, str] = False
 
 
 @dataclass

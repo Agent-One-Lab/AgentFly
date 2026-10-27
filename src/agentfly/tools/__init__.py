@@ -18,9 +18,8 @@ from .types import ToolResult, ToolReturn
 
 if TYPE_CHECKING:
     # Static tooling cannot discover exports through __getattr__. Keep these
-    # declarations in sync with the valid lazy public exports in __all__;
-    # google_search_serper is still unavailable in impls. This block does not
-    # load implementations at runtime.
+    # declarations in sync with the lazy public exports in __all__. This block
+    # does not load implementations at runtime.
     from .impls import (
         CodeInterpreterTool,
         Skill,

@@ -192,10 +192,13 @@ class BaseReward:
             self._func_sig = None
 
     def _filter_kwargs(self, kwargs: dict) -> dict:
-        """Filter kwargs to only include parameters that the function accepts."""
+        """Keep only the arguments the function accepts; all of them if it takes ``**kwargs``."""
         if self._func_sig is None:
             return kwargs
-        return {k: v for k, v in kwargs.items() if k in self._func_sig.parameters}
+        params = self._func_sig.parameters
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return kwargs
+        return {k: v for k, v in kwargs.items() if k in params}
 
     # ========== Execution ==========
     def _check_function_set(self):
@@ -430,8 +433,3 @@ def list_available_rewards() -> List[str]:
     global REWARD_REGISTRY
     ensure_builtins_loaded()
     return list(REWARD_REGISTRY.keys())
-
-
-@reward(name="fake_reward")
-def fake_reward(final_response: str, **kwargs) -> float:
-    return 0.0

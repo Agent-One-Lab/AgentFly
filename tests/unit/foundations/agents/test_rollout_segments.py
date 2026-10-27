@@ -101,7 +101,8 @@ def isolated_runtime(monkeypatch):
         monkeypatch.setattr(module, "calculate_reward", fake_reward)
     monkeypatch.setattr(rollout_base, "observation_token_length", lambda *a, **k: 1)
     monkeypatch.setattr(rollout_base, "estimate_chat_prompt_tokens", lambda *a, **k: 10)
-    monkeypatch.setattr(chain_rollout, "tqdm", lambda *a, **k: None)
+    for module in (chain_rollout, step_rollout):
+        monkeypatch.setattr(module, "progress_bar", lambda *a, **k: None)
     monkeypatch.setattr(chain_rollout.Monitor, "ensure_started", lambda: None)
     # Exercise real metric aggregation, but do not write to monitor sinks.
     events = []
@@ -386,7 +387,7 @@ async def test_chain_conversion_broadcasts_folded_rewards_and_preserves_padding(
     assert batch.meta_info["repeat_times"] == [row_count]
     # Chain batches now carry the same token-drift diagnostic as step batches.
     assert batch.meta_info["layout"] == "per_segment"
-    assert set(batch.meta_info) <= {"use_agent", "layout", "repeat_times", "token_drift", "rollout_stats"}
+    assert set(batch.meta_info) <= {"use_agent", "layout", "repeat_times", "token_drift", "rollout_stats", "reward_extra_keys"}
     assert result[0].reward == reward
     assert result[0].num_segments == 2
 

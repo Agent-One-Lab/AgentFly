@@ -78,7 +78,7 @@ train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
 eval_dataset="./data/rlhf/alfworld/alfworld_valid_seen_tasks.json"
 
 tools="[alfworld_step]"
-reward_name="alfworld_episode_reward"   # 10 * won
+reward_name="alfworld_reward"   # 10 * won
 agent_type=action
 # Native Qwen chat template (same as the step arm). The ActionAgent renders NO tools
 # block (agent.prompt_tools), and its history keeps the FULL generated text so what the

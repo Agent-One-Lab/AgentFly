@@ -280,6 +280,14 @@ def test_preprocess_messages_and_args_openai():
     assert processed_kwargs.get("tool_choice") == "auto"
 
 
+def test_preprocess_drops_empty_tools():
+    """An empty tools list (e.g. ReactAgent, which renders tools in the prompt) is not sent:
+    OpenAI-compatible servers reject ``tools: []``."""
+    backend = ClientBackend(model_name_or_path="test-model")
+    _, kwargs = backend._preprocess_messages_and_args([[{"role": "user", "content": "Hello"}]], tools=[])
+    assert "tools" not in kwargs and "tool_choice" not in kwargs
+
+
 @pytest.mark.asyncio
 async def test_rate_limiting():
     """Test that rate limiting is applied"""

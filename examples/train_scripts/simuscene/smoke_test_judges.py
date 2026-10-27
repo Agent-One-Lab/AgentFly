@@ -17,7 +17,7 @@ import sys
 os.environ.setdefault("VLM_SHARED_VIDEO_DIR", os.path.abspath("./tmp/vlm_judge/smoke"))
 
 from agentfly.core import Context  # noqa: E402
-from agentfly.rewards.vlm_as_judge import simuscene_reward as sr  # noqa: E402
+from agentfly.rewards.vlm_as_judge import simuscene_rewards as sr  # noqa: E402
 
 FINAL_RESPONSE = """<think>draw a square</think>
 ```python

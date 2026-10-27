@@ -73,6 +73,7 @@ async def test_default_end_policy_is_unchanged(isolated_runtime):
     result = await run(chain_rollout.ChainRollout(), FakeAgent([[]]))
     assert result[0].finish_reason == FinishReason.NO_TOOL_CALLS
     assert roles(result[0].segments[0]) == ["system", "user", "assistant"]
+    assert "no_tool_call_streak" not in result[0].metadata  # loop state, not metadata
 
 
 @pytest.mark.asyncio
@@ -87,7 +88,7 @@ async def test_continue_nudges_then_recovers(isolated_runtime):
     assert traj.num_turns == 2  # the nudge is not a model turn
     assert traj.metadata["no_tool_call_nudges"] == 1
     assert traj.metadata["no_tool_call_turns"] == 1
-    assert traj.metadata["no_tool_call_streak"] == 0  # reset by the tool turn
+    assert "no_tool_call_streak" not in traj.metadata
 
 
 @pytest.mark.asyncio
@@ -99,7 +100,6 @@ async def test_three_consecutive_misses_end_the_chain(isolated_runtime):
     assert traj.num_turns == 3
     # Two nudges: the third miss ends the chain before another nudge.
     assert traj.metadata["no_tool_call_nudges"] == 2
-    assert traj.metadata["no_tool_call_streak"] == 3
     assert roles(traj.segments[-1]) == [
         "system", "user", "assistant", "user", "assistant", "user", "assistant",
     ]

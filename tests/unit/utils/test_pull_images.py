@@ -84,3 +84,27 @@ def test_registry_is_passed_through_and_names_are_unchanged(tmp_path, fake_enroo
     assert pull_images.main([path, "--to", str(out), "--registry", "ghcr.io"]) == 0
     assert fake_enroot == ["ghcr.io#epoch-research/swe-bench.eval.x86_64.a__b-1"]
     assert (out / "epoch-research+swe-bench.eval.x86_64.a__b-1.sqsh").exists()
+
+
+def test_limit_pulls_only_the_first_tasks_images(tmp_path, fake_enroot):
+    path = write_dataset(tmp_path, ["a/x:1", "b/y:2", "c/z:3"])
+    assert pull_images.main([path, "--to", str(tmp_path / "images"), "--limit", "1"]) == 0
+    assert fake_enroot == ["a/x:1"]
+
+
+def test_limit_and_seed_select_the_same_tasks_as_swebench():
+    """`pull-images --limit/--seed` must pull exactly the images `agentfly swebench` will run."""
+    import random
+
+    records = [{"image_id": f"img/{i}:t"} for i in range(50)]
+    rows = list(records)
+    random.Random(7).shuffle(rows)  # what utils/swebench.py does with --seed 7 ...
+    expected = rows[:5]  # ... and --limit 5
+    assert pull_images.select_records(records, limit=5, seed=7) == expected
+    assert pull_images.select_records(records, limit=2) == records[:2]
+
+
+def test_reads_object_with_data_list(tmp_path):
+    path = tmp_path / "d.json"
+    path.write_text(json.dumps({"data": [{"image_id": "a/x:1"}, {"image_id": "b/y:2"}]}))
+    assert pull_images.read_images([str(path)], "image_id") == ["a/x:1", "b/y:2"]

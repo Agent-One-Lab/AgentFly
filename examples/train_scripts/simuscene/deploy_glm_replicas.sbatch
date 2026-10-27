@@ -15,7 +15,7 @@
 # Extra GLM-4.6V replicas (one per node, port 8000) to add throughput for the slowest judge.
 # Copy of deploy_vlm_judges.sbatch restricted to GLM; see that file for details.
 #
-# simuscene_reward.py calls http://<VLM_SERVER_IPS[i]>:8000/v1 with
+# simuscene_rewards.py calls http://<VLM_SERVER_IPS[i]>:8000/v1 with
 # model=<VLM_MODELS[i]> and passes the rendered video as a file:// path, so:
 #   * every server listens on port 8000 and is served under its HF id;
 #   * every server may read local media under the shared filesystem;

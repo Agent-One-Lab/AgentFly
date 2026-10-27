@@ -5,7 +5,6 @@ overridable with an environment variable of the same name:
 
 - ``AF_HOME`` (``~/.agentfly``): the root of AgentFly's state.
 - ``AF_CACHE_DIR`` / ``AF_DATA_DIR``: downloaded tool data and datasets.
-- ``AF_CONFIG_DIR``: user-editable config, seeded from the packaged defaults on first run.
 - ``AF_CONTAINER_HOME``: AgentFly's directory inside task containers (skills and tool helpers).
 
 The public API lives in the subpackages: :mod:`agentfly.agents`, :mod:`agentfly.tools`,
@@ -15,7 +14,6 @@ The public API lives in the subpackages: :mod:`agentfly.agents`, :mod:`agentfly.
 
 import logging
 import os
-import shutil
 import sys
 
 __version__ = "0.2.0"
@@ -58,32 +56,6 @@ AF_HOME = os.getenv("AF_HOME", os.path.expanduser("~/.agentfly"))
 AF_CACHE_DIR = os.getenv("AF_CACHE_DIR", os.path.join(AF_HOME, "cache"))
 
 AF_DATA_DIR = os.getenv("AF_DATA_DIR", os.path.join(AF_HOME, "data"))
-
-# User-editable config (search.yaml API keys, redis.conf, ...). Lives under
-# AF_HOME so users edit ~/.agentfly/config/* instead of files inside the
-# installed package. Packaged defaults are seeded here on first run (below).
-AF_CONFIG_DIR = os.getenv("AF_CONFIG_DIR", os.path.join(AF_HOME, "config"))
-
-# Default config files shipped in the wheel; seeded into AF_CONFIG_DIR when a
-# file is missing (never overwriting a user's edits).
-_PACKAGED_CONFIG_DIR = os.path.join(os.path.dirname(__file__), "configs")
-
-
-def _seed_config_dir() -> None:
-    if not os.path.isdir(_PACKAGED_CONFIG_DIR):
-        return
-    for root, _dirs, files in os.walk(_PACKAGED_CONFIG_DIR):
-        rel = os.path.relpath(root, _PACKAGED_CONFIG_DIR)
-        dest_dir = AF_CONFIG_DIR if rel == "." else os.path.join(AF_CONFIG_DIR, rel)
-        for name in files:
-            dest = os.path.join(dest_dir, name)
-            if not os.path.exists(dest):
-                os.makedirs(dest_dir, exist_ok=True)
-                shutil.copy2(os.path.join(root, name), dest)
-
-
-_seed_config_dir()
-
 
 # Container-side agentfly home: where skills + tool helpers are placed INSIDE the
 # task container (the in-container analogue of ~/.agentfly). Defaults to the

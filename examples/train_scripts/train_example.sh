@@ -46,7 +46,6 @@ adv_estimator=grpo
 agent_type=hf
 tools="[calculator]"
 reward_name="math_equal_reward_tool"
-# reward_name="llm_as_judge_math_reward"
 entropy_coeff=0.001
 kl_loss_type=mse
 # Turns per episode: the model calls the calculator, sees the result, then answers. Leave room

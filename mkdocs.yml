@@ -133,6 +133,9 @@ nav:
       - api_references/rewards/index.md
       - api_references/rewards/reward.md
       - api_references/rewards/predefined_rewards.md
+      - api_references/rewards/math_reward.md
+      - api_references/rewards/qa_reward.md
+      - api_references/rewards/alfworld_reward.md
     - Resources:
       - api_references/resources/index.md
       - api_references/resources/resources.md

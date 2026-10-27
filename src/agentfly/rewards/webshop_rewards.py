@@ -1,8 +1,8 @@
 """WebShop rewards from the environment's purchase score.
 
-``webshop_episode_reward`` is verl-agent's scale (10 when the purchase fully matches the goal,
-otherwise 0); ``webshop_reward`` returns the dense score in [0, 1] for the ``task_id`` goal, with
-success (score 1) logged as ``trajectory/accuracy``.
+``webshop_reward`` is verl-agent's scale: 10 when the purchase fully matches the goal, otherwise 0.
+``webshop_score_reward`` returns the dense score in [0, 1] for the ``task_id`` goal instead. Both
+log success (score 1) as ``trajectory/accuracy``.
 """
 
 from ..core import Context
@@ -12,53 +12,22 @@ from .reward_base import reward
 
 # --8<-- [start:webshop_reward_example]
 @reward(name="webshop_reward")
-async def webshop_reward(final_response: str, context: Context, task_id: int) -> dict:
-    """
-    Calculates the reward for the WebShop environment based on the environment state.
-    Uses the same rollout resource as the webshop tools (context.acquire_resource).
-
-    Args:
-        final_response (str): The agent's final response. Not used in this reward function.
-        context (Context): Injected rollout context; used to acquire the WebShop resource.
-        task_id (int): The identifier for the current task. Used to match with golden answer.
-
-    Returns:
-        dict: A dictionary containing the reward (float) and output (str) from the environment step.
-    """
-    try:
-        env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
-        result = await env.step("get_reward", task_id)
-        score = float(result["reward"])
-        return {
-            # The dense WebShop score in [0, 1] is the training signal (verl-agent uses it
-            # unchanged). ``trajectory/accuracy`` is verl-agent's *success* (score == 1.0),
-            # the number their WebShop results report; aggregated per trajectory.
-            "reward": score,
-            "trajectory/accuracy": float(score == 1.0),
-            "output": result["observation"],
-        }
-    except Exception as e:
-        return {
-            "reward": 0.0,
-            "output": f"Error webshop reward function: {e}",
-        }
-
-
-# --8<-- [end:webshop_reward_example]
-
-
-@reward(name="webshop_episode_reward")
-async def webshop_episode_reward(context: Context, task_id: int) -> dict:
+async def webshop_reward(context: Context, task_id: int) -> dict:
     """WebShop episode reward on verl-agent's scale: ``10`` if the purchase fully satisfies the
     goal (dense score == 1.0), else ``0``.
 
+    Reads the score from the same WebShop environment the tools used (``context.acquire_resource``).
     This is the reward behind verl-agent's reported WebShop success rates
     (``envs.WebshopWorker.step`` binarizes the env score the same way), so it pairs with the
-    ``webshop_browser_action`` tool's per-step reward for GiGPO. ``webshop_reward`` keeps the
-    dense score as the training signal instead.
+    ``webshop_browser_action`` tool's per-step reward for GiGPO.
 
-    Returns ``reward`` (0 / 10), ``trajectory/accuracy`` (0 / 1 success, aggregated per
-    trajectory) and ``task_score`` (the dense score in [0, 1], a diagnostic).
+    Args:
+        context (Context): Injected rollout context; used to acquire the WebShop resource.
+        task_id (int): The task's goal (from the data row).
+
+    Returns:
+        dict: ``reward`` (0 / 10), ``trajectory/accuracy`` (0 / 1 success, aggregated per
+        trajectory) and ``task_score`` (the dense score in [0, 1], a diagnostic).
     """
     from ..tools.src.webshop.tools import WEBSHOP_WON_REWARD
 
@@ -74,3 +43,37 @@ async def webshop_episode_reward(context: Context, task_id: int) -> dict:
         "trajectory/accuracy": won,
         "task_score": score,
     }
+
+
+# --8<-- [end:webshop_reward_example]
+
+
+@reward(name="webshop_score_reward")
+async def webshop_score_reward(context: Context, task_id: int) -> dict:
+    """WebShop dense reward: the environment's purchase score in [0, 1] for the ``task_id`` goal.
+
+    Args:
+        context (Context): Injected rollout context; used to acquire the WebShop resource.
+        task_id (int): The task's goal (from the data row).
+
+    Returns:
+        dict: ``reward`` (the score in [0, 1]), ``trajectory/accuracy`` (1 if the score is 1, else 0)
+        and ``output`` (the environment's message). An environment error gives reward 0.
+    """
+    try:
+        env = await context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")
+        result = await env.step("get_reward", task_id)
+        score = float(result["reward"])
+        return {
+            # The dense score is the training signal (verl-agent uses it unchanged).
+            # ``trajectory/accuracy`` is verl-agent's *success* (score == 1.0), the number
+            # their WebShop results report; aggregated per trajectory.
+            "reward": score,
+            "trajectory/accuracy": float(score == 1.0),
+            "output": result["observation"],
+        }
+    except Exception as e:
+        return {
+            "reward": 0.0,
+            "output": f"Error webshop reward function: {e}",
+        }

@@ -40,7 +40,7 @@ The tool itself is just a regular method decorated with `@tool`. Because the fir
 - Bound to class instances
 - Have access to `self` and instance state
 - Can call other instance methods
-- Automatically set up with the correct instance during agent initialization
+- Listed in the agent's `tools` in `__init__`; bound to the right instance during agent initialization
 - Maintain instance context across tool calls
 
 ## Key Differences
@@ -50,7 +50,7 @@ The tool itself is just a regular method decorated with `@tool`. Because the fir
 | **Context** | No instance context | Bound to class instance |
 | **State Access** | No access to instance variables | Full access to instance state |
 | **Method Calls** | Cannot call instance methods | Can call other instance methods |
-| **Initialization** | No setup required | Automatically bound during agent init |
+| **Initialization** | No setup required | List it in `tools`; bound during agent init |
 | **Use Case** | Stateless operations | Stateful operations with instance data |
 | **Registration** | Global tool registry | Instance-specific tool list |
 
@@ -66,7 +66,7 @@ The tool itself is just a regular method decorated with `@tool`. Because the fir
        self.is_method = True
    ```
 
-2. **Instance Binding**: `@tool` on a method creates one tool class shared by every instance of the agent class. During agent initialization (`BaseAgent._bind_method_tools`), each agent creates its **own** tool instance for every method tool of its class, binds it to itself, sets it as an instance attribute (so `self.my_tool` is this agent's tool), and uses it in place of the shared class in its `tools` list. Two agents of the same class therefore never share a tool's `self`. When the model calls a tool, the agent runs its own tool objects (`submit_tool_call(..., tools=...)`), falling back to the global registry only for names it does not hold.
+2. **Instance Binding**: `@tool` on a method creates one tool class shared by every instance of the agent class. During agent initialization (`BaseAgent._bind_method_tools`), each agent creates its **own** tool instance for every method tool of its class, binds it to itself, sets it as an instance attribute (so `self.my_tool` is this agent's tool), and uses it in place of the shared class in its `tools` list. Only the method tools you list in `tools` (e.g. `super().__init__(tools=[self.my_tool], ...)`) are offered to the model; a decorated method that is not listed is bound but never used. Two agents of the same class therefore never share a tool's `self`. When the model calls a tool, the agent runs its own tool objects (`submit_tool_call(..., tools=...)`), falling back to the global registry only for names it does not hold.
 
 3. **Execution**: When a method tool is called, it's executed with the bound instance:
    ```python

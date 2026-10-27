@@ -27,7 +27,7 @@ These keys have special meaning to the rollout layer:
 
 Training and `agent.run()` turn rows into prompts the same way (`agentfly.agents.utils.messages.row_to_messages`), so you can pass the rows of a training file straight to `agent.run(messages=rows)` to smoke-test it.
 
-Everything else is freeform: any field you add to the dict is kept as the rollout's metadata. Rewards receive it by **parameter name**, and tools read it from `context.metadata` (see *Additional Fields* below). Common conventional names like `answer` are not built-in — they work only because the reward functions in `agentfly.rewards` happen to declare matching parameter names.
+Everything else is freeform: any field you add to the dict is kept as the rollout's metadata. Rewards receive it by **parameter name** (except `id`, which is the rollout's id), and tools read it from `context.metadata` (see *Additional Fields* below). Common conventional names like `answer` are not built-in — they work only because the reward functions in `agentfly.rewards` happen to declare matching parameter names.
 
 ## Additional Fields
 
@@ -109,7 +109,7 @@ Used with `math_equal_reward_tool`, which reads `final_response` and `answer`.
 }
 ```
 
-`task_id` is consumed by `alfworld_episode_reward` and the alfworld tools through context-based resource sharing.
+`task_id` is consumed by `alfworld_reward` and the alfworld tools through context-based resource sharing.
 
 ### ScienceWorld
 

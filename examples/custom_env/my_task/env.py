@@ -33,12 +33,6 @@ class GuessNumberEnv(BaseEnv):
     async def aclose(self) -> None:
         """Called when the instance is destroyed (stop processes, close clients...)."""
 
-    @staticmethod
-    async def acquire():
-        env = GuessNumberEnv()
-        await env.start()
-        return env
-
 
 # How the engine creates the env: an importable dotted path, its constructor arguments,
 # and the most instances alive at once (concurrent rollouts wait for a free one).

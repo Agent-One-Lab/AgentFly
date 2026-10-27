@@ -4,11 +4,10 @@
 #   bash examples/custom_env/train.sh [extra Hydra overrides...]
 # GPUs: all visible ones (restrict with CUDA_VISIBLE_DEVICES).
 set -e
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # The tool, reward and env are loaded by import path ("my_task.tools:guess",
-# "my_task.env.GuessNumberEnv"), here and in the Ray workers, so put my_task on the path.
-export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+# "my_task.env.GuessNumberEnv") in the Ray workers, which start in the launch folder:
+# run from the folder that contains my_task.
+cd "$(dirname "${BASH_SOURCE[0]}")"
 # A private Ray cluster that ends with the run (never touches other Ray clusters on the node).
 export RAY_ADDRESS=${RAY_ADDRESS:-local}
 
@@ -19,8 +18,8 @@ num_chains=8
 
 agentfly train \
     algorithm.adv_estimator=grpo \
-    data.train_files="$HERE/data/guess_train.json" \
-    data.val_files="$HERE/data/guess_val.json" \
+    data.train_files="./data/guess_train.json" \
+    data.val_files="./data/guess_val.json" \
     data.train_batch_size=$train_batch_size \
     agent.use_agent=True \
     agent.init_config.agent_type=hf \
@@ -38,6 +37,7 @@ agentfly train \
     actor_rollout_ref.actor.use_kl_loss=True \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \

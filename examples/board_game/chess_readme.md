@@ -209,7 +209,7 @@ AgentFly/
 ├── agentfly/
 │   ├── envs/chess_env.py           # Chess puzzle environment
 │   ├── tools/src/chess/tools.py    # Agent tools
-│   ├── rewards/chess_reward.py     # Reward functions
+│   ├── rewards/chess_rewards.py     # Reward functions
 │   └── utils/chess_puzzles.py      # Data loading utilities
 ├── scripts/
 │   ├── train_chess.sh              # Training script

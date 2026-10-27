@@ -13,7 +13,7 @@ from ...decorator import tool
 
 # verl-agent's ALFWorld reward: 10 * won (agent_system/.../alfworld/envs.py:compute_reward).
 # The raw TextWorld env reward is ignored; the per-step reward is 10 on the winning
-# transition, 0 otherwise. The episode reward (alfworld_episode_reward) is the same 10 * won.
+# transition, 0 otherwise. The episode reward (alfworld_reward) is the same 10 * won.
 ALFWORLD_WON_REWARD = 10.0
 
 

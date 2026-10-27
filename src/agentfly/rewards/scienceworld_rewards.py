@@ -8,7 +8,7 @@ from .reward_base import reward
 @reward(name="scienceworld_reward")
 async def scienceworld_reward(final_response: str, context: Context) -> dict:
     """
-    Computes the reward for a given prediction in the ScienceWorld environment.
+    ScienceWorld episode reward: 10 if the task is completed (environment score >= 1), else 0.
     Uses the same rollout resource as the scienceworld tools (context.acquire_resource).
 
     Args:
@@ -16,7 +16,9 @@ async def scienceworld_reward(final_response: str, context: Context) -> dict:
         context (Context): Injected rollout context; used to acquire the ScienceWorld resource.
 
     Returns:
-        dict: A dictionary containing the reward and the observation output after taking the 'get_reward' step.
+        dict: ``reward`` (0 or 10), ``acc`` (0 or 1), ``score`` (the environment's score) and
+        ``output`` (the environment's message). Trajectories with fewer than 4 messages get 0
+        without querying the environment.
     """
     trajectory = context.trajectory
     # With context folding, the trajectory is a list of segments (each a list of

@@ -130,25 +130,15 @@ Notes:
 - The tool takes `context: Context` as its second parameter; AgentFly injects this automatically during rollouts.
 - Same `(spec, scope)` pair within the same rollout returns the **same** resource instance. (For `code_interpreter` this means the same container, but each call still runs in a fresh Python process, so variables don't carry over between calls.)
 
-### Reward: sharing the rollout's sandbox
+### Reward: sharing the tools' environment
 
-A reward can acquire the same resource a tool uses, by passing the same `spec` and `scope`. `code_reward_test` re-runs the agent's prediction in the same sandbox the agent already used:
-
-```python
---8<-- "src/agentfly/rewards/code_reward.py:code_reward_test_example"
-```
-
-Both `code_interpreter` (tool) and `code_reward_test` (reward) call `context.acquire_resource(spec=PythonSandboxSpec, scope="global", backend="local")`. Because the spec and scope match, the engine hands them the **same** running container. No explicit handle is passed between them.
-
-### Reward: acquiring an environment container
-
-`webshop_reward` queries the WebShop environment's reward via the same resource the WebShop tools use:
+A reward can acquire the same resource a tool uses, by passing the same `spec` and `scope`. `webshop_reward` reads the purchase score from the WebShop environment the agent shopped in:
 
 ```python
 --8<-- "src/agentfly/rewards/webshop_rewards.py:webshop_reward_example"
 ```
 
-Same pattern: `acquire_resource(spec=WebShopSpec, ...)` → `await env.step(...)`. The reward never needs to know how the tools acquired or set up the env.
+Both the WebShop tool and `webshop_reward` call `context.acquire_resource(spec=WebShopSpec, scope="global", backend="local")`. Because the spec and scope match, the engine hands them the **same** running container. No explicit handle is passed between them, and the reward never needs to know how the tools set up the environment.
 
 ### Tool: dynamic image (built at call time)
 

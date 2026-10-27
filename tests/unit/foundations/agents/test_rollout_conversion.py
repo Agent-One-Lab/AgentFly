@@ -128,8 +128,15 @@ def test_exporter_batch_contract(strategy_cls, multiple, entrypoint, fake_verl, 
         "text": ["ok", "ok", missing], "other": [missing, missing, False],
         "empty_only": [missing] * 3,
     }
+    marked = []
     for key, values in columns.items():
         expected = np.array([values[i] for i in rows], dtype=object if is_step else None)
+        # Columns of plain numbers are logged by verl as reward extras: object ones are
+        # converted to float so they qualify (see mark_reward_extras).
+        if expected.dtype == object and all(isinstance(v, (bool, int, float)) for v in expected.tolist()):
+            expected = expected.astype(np.float64)
+        if expected.dtype != object:
+            marked.append(f"rm_{key}")
         np.testing.assert_array_equal(inputs[f"rm_{key}"], expected)
         assert inputs[f"rm_{key}"].dtype == expected.dtype
 
@@ -161,6 +168,7 @@ def test_exporter_batch_contract(strategy_cls, multiple, entrypoint, fake_verl, 
         "use_agent": True,
         "repeat_times": [2, 0, len(rows) - 2],
         "layout": "per_step" if is_step else "per_segment",
+        "reward_extra_keys": sorted(marked),
     }
     # Chain batches also carry the loop-policy counters (capped/tool-less/nudged
     # turns); compare the contract keys only.
@@ -295,7 +303,7 @@ def test_step_diagnostics_count_only_real_rows(fake_verl, monkeypatch):
 
     monkeypatch.setattr(conversion, "token_drift_stats", drift)
     batch = BaseAgent.to_verl_dataproto(types.SimpleNamespace(tokenizer=None, processor=None), result,
-                                pad_to_multiple_of=4)
+                                pad_to_multiple_of=4, log_token_drift=True)
     assert seen == [s.messages for t in result for s in t.segments]
     assert batch.meta_info["token_drift"] == {"token_drift/n_sampled": 3.0}
 
@@ -311,7 +319,7 @@ def test_step_diagnostic_failure_does_not_break_conversion(fake_verl, monkeypatc
     result = make_result()
     result.rollout = "step"
     batch = BaseAgent.to_verl_dataproto(types.SimpleNamespace(tokenizer=None, processor=None), result,
-                                pad_to_multiple_of=4)
+                                pad_to_multiple_of=4, log_token_drift=True)
     assert "token_drift" not in batch.meta_info
     assert batch.inputs["rm_scores"].sum(dim=-1).tolist() == [0.75, 0.75, -0.25, -0.25]
 
@@ -513,7 +521,7 @@ def test_conversion_selects_training_rows_without_mutating_result(
     for _ in range(2):  # Repeated conversion must not accumulate filtering/padding.
         seen.clear()
         diagnostic_rows.clear()
-        batch = BaseAgent.to_verl_dataproto(agent, result, pad_to_multiple_of=multiple)
+        batch = BaseAgent.to_verl_dataproto(agent, result, pad_to_multiple_of=multiple, log_token_drift=True)
         assert seen == candidates
         selected = [0, 2, 2] if multiple else [0, 2]
         n_rows = len(selected)
@@ -638,3 +646,28 @@ def test_real_tokenization_skips_context_and_truncated_responses(fake_verl):
     assert batch.inputs["action_mask"][1].sum().item() == 0
     assert batch.inputs["rm_scores"].sum(dim=-1).tolist() == [0.5, 0.5]
     assert result.model_dump() == before
+
+
+def test_consistency_diagnostics_are_off_by_default(fake_verl, monkeypatch):
+    """token_drift and the backend prompt/splice checks are opt-in."""
+    import inspect
+
+    from agentfly.utils.llm_backends.backend_configs import AsyncVerlConfig
+    from agentfly.utils.llm_backends.llm_backends import AsyncVerlBackend
+
+    assert AsyncVerlConfig().check_prompt_consistency is False
+    default = inspect.signature(AsyncVerlBackend.__init__).parameters["check_prompt_consistency"].default
+    assert default is False
+
+    result = make_result()
+    result.rollout = "step"
+    monkeypatch.setattr(conversion, "tokenize_trajectories",
+                        lambda agent, messages_list, **kw: fake_inputs(len(messages_list)))
+
+    def drift(*args, **kwargs):
+        raise AssertionError("token_drift ran without being enabled")
+
+    monkeypatch.setattr(conversion, "token_drift_stats", drift)
+    batch = BaseAgent.to_verl_dataproto(types.SimpleNamespace(tokenizer=None, processor=None), result,
+                                        pad_to_multiple_of=4)
+    assert "token_drift" not in batch.meta_info

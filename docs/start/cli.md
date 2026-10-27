@@ -182,8 +182,7 @@ Endpoints:
 Typical invocation:
 
 ```bash
-export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH}"
-python -m agentfly.cli search
+agentfly search
 ```
 
 It needs FAISS from the `search` extra (`uv pip install "agentfly-rl[search]"`, or `uv sync --extra search` from source). The corpus and FAISS index are downloaded into `$AF_CACHE_DIR/data/search/` by `agentfly.utils.download.ensure_tool_data("async_dense_retrieve")` if they're not already present, after an approval prompt that shows their size (set `AF_ASSUME_YES=1` to accept non-interactively).
@@ -202,13 +201,15 @@ agentfly pull-images data/rlhf/os/r2e-gym-lite.json -j 4
 
 | Flag | Default | Description |
 |---|---|---|
-| `datasets` (positional) | — | One or more dataset files (`.json` list or `.jsonl`). |
+| `datasets` (positional) | — | One or more dataset files (`.json` list or `.jsonl`). A missing file hosted on Agent-One/AgentFly-Train is downloaded first. |
 | `--to` | `$ENROOT_IMAGES_PATH`, else `~/.cache/enroot/images` | Directory to save images in. Training must use the same directory via `ENROOT_IMAGES_PATH`. |
 | `--field` | `image_id` | Record field holding the image reference. |
 | `--registry` | Docker Hub | Registry to pull from, e.g. `ghcr.io` for SWE-bench Verified. File names don't include it, so training finds the images either way. |
 | `-j`, `--jobs` | `4` | Parallel pulls. |
 | `--retries` | `3` | Attempts per image, with backoff. |
 | `--dry-run` | off | Only report how many images are missing. |
+| `--limit` | all | Only the images of the first N tasks (after `--seed`'s shuffle): exactly the tasks `agentfly swebench --limit N` runs. |
+| `--seed` | none | Shuffle the tasks with this seed first, as `agentfly swebench --seed` does. |
 
 Images already in the directory are skipped, so rerunning the same command resumes an interrupted run or retries failures (listed in `failed_pulls.txt`). Each pull writes to a `.partial/` subfolder first, so an interrupted pull never leaves a truncated image behind. The exit code is 1 if any image failed.
 

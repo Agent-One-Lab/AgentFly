@@ -1,46 +1,29 @@
-# ALFWorld Episode Reward
+# ALFWorld Reward
 
-::: agentfly.rewards.alfworld_reward.alfworld_episode_reward
+::: agentfly.rewards.alfworld_rewards.alfworld_reward
     options:
       show_source: true
 
 ## Description
 
-Evaluates agent performance in ALFWorld tasks by checking the episode completion status and reward from the environment state. Returns a dict with `reward` (the environment's current reward value).
+The outcome reward for ALFWorld episodes, registered as `"alfworld_reward"`. It reads the
+episode's stored `won` flag from the ALFWorld environment the tools used, without taking another
+step, and returns:
 
-**Decorator Configuration:**
-- **name**: `"alfworld_episode_reward"`
-- **resource_spec**: `ALFWorldSpec`
-- **backend**: `"local"`
+- `reward`: `10.0` if the task was completed, else `0.0` (`10 * won`, verl-agent's scale).
+- `trajectory/accuracy`: `1.0` or `0.0`, logged as the per-trajectory success rate.
 
-## Technical Details
-
-**Implementation:**
-- Steps environment with empty action to get current state
-- Extracts reward value from environment response
-- Handles None reward values by defaulting to 0.0
-- Provides debug output for reward values
-
-**Use Cases:**
-- Evaluating task completion in household environments
-- Training agents on multi-step instruction following
-- Measuring progress in text-based interactive environments
+The 0.1 invalid-action penalty is applied separately by the GiGPO estimator, not by this reward.
 
 **Example Usage:**
 
 ```python
-from agentfly.core import Context
-from agentfly.rewards.alfworld_reward import alfworld_episode_reward
+from agentfly.rewards import alfworld_reward
 
-# Inside a rollout, `context` is injected and passed through to rewards.
-result = await alfworld_episode_reward(
-    prediction="take apple",
-    context=context,
-)
-print(result)  # {"reward": 0.0} or {"reward": 1.0} if task completed
+# The agent calls the reward after each episode with the episode's context.
+result = await alfworld_reward(context=context)
+print(result)  # {"reward": 0.0, "trajectory/accuracy": 0.0}, or 10.0 / 1.0 if the task was completed
 ```
 
-**Environment Integration:**
-- Requires active ALFWorld environment instance
-- Uses environment's internal reward mechanism
-- Suitable for episodic task evaluation
+See [ALFWorld Rewards](../resources/alfworld/rewards.md) for how it fits with the `alfworld_step`
+tool and a training script.

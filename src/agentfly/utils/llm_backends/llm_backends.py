@@ -342,7 +342,7 @@ class AsyncVerlBackend(LLMBackend):
         llm_engine,
         model_name_or_path: str,
         template: str,
-        check_prompt_consistency: Union[bool, str] = True,
+        check_prompt_consistency: Union[bool, str] = False,
     ):
         """Initialize AsyncVerlBackend.
 
@@ -352,9 +352,9 @@ class AsyncVerlBackend(LLMBackend):
             template (str): Chat template to use for formatting messages.
             check_prompt_consistency (bool | "strict"): Periodically verify that the prompt
                 verl sampled from equals the ids this backend rendered with the training
-                tokenizer call (see :meth:`_check_prompt_consistency`). ``True`` (default)
-                reports a mismatch on stdout; ``"strict"`` raises on it; ``False`` disables
-                it. Set via ``agent.init_config.backend_config.check_prompt_consistency``.
+                tokenizer call (see :meth:`_check_prompt_consistency`). ``True`` logs
+                the result; ``"strict"`` raises on a mismatch; ``False`` (default) disables
+                it. Set via ``+agent.init_config.backend_config.check_prompt_consistency=...``.
         """
         from transformers import AutoTokenizer  # lazy: heavy import
 
@@ -431,9 +431,9 @@ class AsyncVerlBackend(LLMBackend):
         ``prompts`` verl returns — it catches verl ignoring or re-rendering the ids. Rows
         that were not pre-tokenized (vision fallback) are re-rendered with chat-bricks
         instead. Runs on the first call and every ``_PROMPT_CHECK_EVERY`` calls, a few rows
-        each time, and reports through ``print`` (visible in the Ray log; a plain
-        ``logger.warning`` is not). ``check_prompt_consistency="strict"`` raises on a
-        mismatch; ``False`` disables the check.
+        each time, and reports through the ``agentfly`` logger.
+        ``check_prompt_consistency="strict"`` raises on a mismatch; ``False`` (default)
+        disables the check.
         """
         if not self.check_prompt_consistency:
             return
@@ -472,7 +472,6 @@ class AsyncVerlBackend(LLMBackend):
                 if self.check_prompt_consistency == "strict":
                     raise RuntimeError(msg)
             else:
-                # print (not logger.info) so it is greppable next to the [StepRollout] batch line
                 logger.info(
                     f"[AsyncVerlBackend] prompt_check: {n}/{n} rows identical "
                     f"(sampling == training render; assistant turns={depths})"
@@ -480,7 +479,6 @@ class AsyncVerlBackend(LLMBackend):
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001 — a diagnostic must never break generation
-            logger.warning(f"[AsyncVerlBackend] prompt consistency check failed: {e}")
             logger.warning("[AsyncVerlBackend] prompt consistency check failed: %s", e)
 
     def preprocess(self):
@@ -1166,6 +1164,9 @@ class ClientBackend(LLMBackend):
                 for messages in messages_list
             ]
 
+        if "tools" in kwargs and not kwargs["tools"]:
+            # OpenAI-compatible servers reject an empty tools list ("tools must not be an empty array").
+            kwargs.pop("tools")
         if "tools" in kwargs:
             if self.is_gemini:
                 # Gemini handles tools differently - convert to function declarations

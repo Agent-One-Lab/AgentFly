@@ -105,8 +105,8 @@ async def main():
         num_chains=1,
     )
 
-    print(result.trajectories)
-    print(result.rewards)
+    for traj in result.trajectories:
+        print(agent.extract_final_response(traj.segments[-1].messages), traj.reward)
 
 if __name__ == "__main__":  # required: vLLM starts worker processes that re-import this file
     asyncio.run(main())

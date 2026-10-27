@@ -62,7 +62,7 @@ kl_coef=0.001
 train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
 eval_dataset="./data/rlhf/alfworld/alfworld_valid_unseen_tasks.json"
 tools="[alfworld_step]"
-reward_name="alfworld_episode_reward"
+reward_name="alfworld_reward"
 adv_estimator=gigpo
 gamma=0.95                          # GiGPO step-return discount (GRPO ignores gamma)
 

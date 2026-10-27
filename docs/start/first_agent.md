@@ -56,7 +56,7 @@ per (task, chain), grouped by task. `result.rewards` lists their rewards (`None`
 | `segments[-1].messages` | The conversation of this attempt (see below). Usually there is one segment; context folding and step rollouts record several. |
 | `group_idx`, `chain_idx` | Which task (position in the batch) and which of its `num_chains` attempts. |
 | `reward`, `metrics` | The reward and any extra values the reward function returned. |
-| `finish_reason` | Why it stopped: `no_tool_calls` (the model answered without calling a tool), `max_turns`, `terminal` (a finishing tool), `max_model_len`, ... |
+| `finish_reason` | Why it stopped: `no_tool_calls` (the model answered without calling a tool), `max_turns`, `tool_end` (a finishing tool), `terminal` (the model's reply asked to stop), `max_model_len`, ... |
 | `num_turns`, `tool_call_counts` | Model generations, and tool calls per tool. |
 | `metadata` | The task's extra fields (e.g. `answer`). |
 

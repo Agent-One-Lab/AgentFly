@@ -16,8 +16,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from tqdm import tqdm
-
 from ....core import Context, ContextConfig
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
 from ....utils.monitor import Monitor
@@ -38,6 +36,7 @@ from ..events import (
 )
 from ..loop.generation import generate_response, prepare_generation_config
 from ..loop.metrics import RolloutMetrics
+from ..loop.progress import progress_bar
 from ..loop.tokens import estimate_chat_prompt_tokens, observation_token_length
 from ..structures import Chain, Step
 
@@ -257,7 +256,7 @@ class ChainRollout(Rollout):
 
         closer = asyncio.create_task(_close())
 
-        pbar = tqdm(total=len(tasks), file=sys.stdout) if show_progress else None
+        pbar = progress_bar(total=len(tasks)) if show_progress else None
         try:
             while True:
                 ev = await q.get()
@@ -352,6 +351,8 @@ class ChainRollout(Rollout):
 
         if "finish_reason" not in chain.info:
             chain.info["finish_reason"] = FinishReason.MAX_TURNS
+        # Loop-only state; chain.info becomes the trajectory's metadata.
+        chain.info.pop("no_tool_call_streak", None)
 
         # Finalize chain (reward + cleanup) — shared L2.
         await self.finalize_chain(self.agent, chain_id, chain, current_step, depth, context)

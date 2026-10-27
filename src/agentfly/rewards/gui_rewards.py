@@ -311,7 +311,7 @@ def gui_accuracy_score(predict_str: str, gt_action: str, gt_bbox: list, gt_input
 
 @reward(name="gui_reward")
 async def gui_reward(
-    prediction: str,
+    final_response: str,
     trajectory: List[Dict] = None,
     gt_action: str = "",
     gt_bbox: list = None,
@@ -319,16 +319,17 @@ async def gui_reward(
     **kwargs,
 ) -> Dict[str, float]:
     """
-    Calculate GUI reward based on prediction accuracy.
+    Calculate GUI reward based on the accuracy of the final response.
 
     Args:
-        prediction: Model prediction string
+        final_response: The agent's final response (its GUI action)
         trajectory: Conversation trajectory (optional)
         **kwargs: Additional parameters including ground truth
 
     Returns:
         Dictionary with reward scores
     """
+    prediction = final_response
     logger.debug(f"[gui_reward] Called with prediction: {prediction[:200] if prediction else 'None'}")
     logger.debug(f"[gui_reward] kwargs keys: {list(kwargs.keys())}")
 

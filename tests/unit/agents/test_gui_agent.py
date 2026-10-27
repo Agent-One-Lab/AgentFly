@@ -106,7 +106,7 @@ class TestGUIReward:
         prediction = "Thought: I need to click on the button.\nAction: click(start_box='<|box_start|>(100,200)<|box_end|>')"
 
         result = await gui_reward(
-            prediction=prediction,
+            final_response=prediction,
             gt_action="click",
             # gt_bbox is normalized 0-1 (same contract the scorer applies to the
             # predicted coord): the click at (100,200) → (100/1920, 200/1080).
@@ -127,7 +127,7 @@ class TestGUIReward:
         """Test GUI reward without ground truth data."""
         prediction = "Thought: I need to click.\nAction: click(start_box='<|box_start|>(100,200)<|box_end|>')"
 
-        result = await gui_reward(prediction=prediction)
+        result = await gui_reward(final_response=prediction)
 
         assert isinstance(result, dict)
         assert result["reward"] == 0.0  # No ground truth
@@ -136,7 +136,7 @@ class TestGUIReward:
     async def test_gui_reward_empty_prediction(self):
         """Test GUI reward with empty prediction."""
         result = await gui_reward(
-            prediction="", gt_action="click", gt_bbox=[100, 200], gt_input_text=""
+            final_response="", gt_action="click", gt_bbox=[100, 200], gt_input_text=""
         )
 
         assert isinstance(result, dict)
@@ -150,7 +150,7 @@ class TestGUIReward:
         )
 
         result = await gui_reward(
-            prediction=prediction,
+            final_response=prediction,
             gt_action="type",
             gt_bbox=[],
             gt_input_text="hello world",

@@ -52,9 +52,9 @@ def trainer_routing():
 
 @pytest.mark.parametrize("target", ["test_output_gen_batch_padded", "gen_batch_output"])
 @pytest.mark.parametrize("raw_options,expected_drift", [
-    ("missing", True),
-    (None, True),
-    ({}, True),
+    ("missing", False),  # token drift is off by default
+    (None, False),
+    ({}, False),
     ({"history_length": 2, "log_token_drift": False}, False),
     ({"history_length": 3, "log_token_drift": True}, True),
     ({"log_token_drift": None}, None),

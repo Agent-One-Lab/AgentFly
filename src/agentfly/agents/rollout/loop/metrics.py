@@ -122,6 +122,63 @@ def pass_rate_distribution(
     }
 
 
+def _fmt_counts(counts: Dict[str, int]) -> str:
+    return "{" + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])) + "}"
+
+
+def rollout_summary(
+    *,
+    global_step: Optional[int],
+    trajectories: List[Trajectory],
+    distribution: Optional[Dict[str, Any]] = None,
+    success_threshold: float = DEFAULT_SUCCESS_THRESHOLD,
+) -> str:
+    """One console line summarizing a rollout batch, from the same values sent as metrics.
+
+    ``distribution`` is :func:`pass_rate_distribution`'s output (``None`` when no task has
+    several rollouts, e.g. validation). Loop-policy counters (``no_tool_call_turns``,
+    ``nudges``) are shown only when non-zero.
+    """
+    n = len(trajectories)
+    rewards = [t.reward for t in trajectories if t.reward is not None]
+    parts = [f"[Rollout] step {global_step}: trajs={n}"]
+    if rewards:
+        positive = sum(1 for r in rewards if r > 0)
+        parts.append(f"reward_mean={sum(rewards) / len(rewards):.3f} reward>0={positive}/{len(rewards)}")
+    turns = [t.num_turns for t in trajectories if t.num_turns is not None]
+    if turns:
+        parts.append(f"turns={sum(turns) / len(turns):.1f}")
+    tool_counts = [t.tool_call_counts for t in trajectories if t.tool_call_counts is not None]
+    if tool_counts:
+        by_tool: Counter = Counter()
+        for counts in tool_counts:
+            by_tool.update(counts)
+        total = sum(by_tool.values())
+        parts.append(f"tool_calls={total / len(tool_counts):.1f}/traj {_fmt_counts(dict(by_tool))}")
+    if distribution:
+        parts.append(
+            f"| groups({distribution['num_groups']} tasks x {distribution['samples_per_task']:.0f}, "
+            f"pass=reward>={success_threshold:g}): all_pass={distribution['frac_all_pass']:.2f} "
+            f"all_fail={distribution['frac_all_fail']:.2f} mixed={distribution['frac_mixed']:.2f}"
+        )
+    finishes = Counter(t.finish_reason for t in trajectories if t.finish_reason)
+    if finishes:
+        parts.append(f"| finish={_fmt_counts(dict(finishes))}")
+
+    def meta_sum(key: str) -> int:
+        return sum(int((t.metadata or {}).get(key, 0) or 0) for t in trajectories)
+
+    parts.append(f"capped_turns={meta_sum('capped_turns')}")
+    for label, key in (("no_tool_call_turns", "no_tool_call_turns"), ("nudges", "no_tool_call_nudges")):
+        value = meta_sum(key)
+        if value:
+            parts.append(f"{label}={value}")
+    times = [t.rollout_time_sec for t in trajectories if t.rollout_time_sec is not None]
+    if times:
+        parts.append(f"| time(s) avg={sum(times) / len(times):.1f} max={max(times):.1f}")
+    return " ".join(parts)
+
+
 class RolloutMetrics:
     """Emit each report from its supplied data without accumulating chain state."""
 
@@ -185,14 +242,6 @@ class RolloutMetrics:
             min_t = min(vals)
             max_t = max(vals)
             avg_t = sum(vals) / len(vals)
-
-            logger.info(
-                "Rollout time stats (s): count=%d min=%.3f max=%.3f avg=%.3f",
-                len(vals),
-                min_t,
-                max_t,
-                avg_t,
-            )
 
             for name, value in (
                 ("agent/rollout/time/min", min_t),
@@ -317,14 +366,22 @@ class RolloutMetrics:
                 )
                 emit(evt)
 
-        self._record_pass_rate_distribution(global_step=global_step, trajectories=trajectories)
+        distribution = self._record_pass_rate_distribution(global_step=global_step, trajectories=trajectories)
+        logger.info(
+            rollout_summary(
+                global_step=global_step,
+                trajectories=trajectories,
+                distribution=distribution,
+                success_threshold=self.success_threshold,
+            )
+        )
 
     def _record_pass_rate_distribution(
         self,
         *,
         global_step: int,
         trajectories: List[Trajectory],
-    ) -> None:
+    ) -> Optional[Dict[str, Any]]:
         """Report how this batch's per-task pass rates are distributed.
 
         Emitted only when some task actually has several rollouts: with one sample per
@@ -336,21 +393,9 @@ class RolloutMetrics:
         """
         rewards_by_group = group_rewards(trajectories)
         if max((len(r) for r in rewards_by_group.values()), default=0) < 2:
-            return
+            return None
         distribution = pass_rate_distribution(rewards_by_group, success_threshold=self.success_threshold)
         pass_rates = distribution.pop("pass_rates")
-
-        logger.info(
-            "Pass-rate distribution over %d tasks (%.1f samples each): "
-            "mean=%.3f all-fail=%.3f mixed=%.3f all-pass=%.3f zero-advantage=%.3f",
-            distribution["num_groups"],
-            distribution["samples_per_task"],
-            distribution["pass_rate_mean"],
-            distribution["frac_all_fail"],
-            distribution["frac_mixed"],
-            distribution["frac_all_pass"],
-            distribution["frac_zero_advantage"],
-        )
 
         for key, value in distribution.items():
             emit(
@@ -371,3 +416,4 @@ class RolloutMetrics:
                 x_name="agent/rollout/step",
             )
         )
+        return distribution

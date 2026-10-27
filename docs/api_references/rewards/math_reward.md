@@ -46,8 +46,8 @@ Adds a structured-thinking requirement on top of `math_equal_reward_tool`: assis
 
 **Think Tag Parsing:**
 - Extracts content from `<think>...</think>` tags
-- Handles incomplete or malformed thinking patterns
-- Requires both thinking and answer components
+- Also accepts a turn that only closes the tag (`...</think>`), for templates that open `<think>` in the prompt
+- `math_equal_reward_think` requires thinking in every assistant turn; an `<answer>` tag is not required
 
 **Common Usage Patterns:**
 

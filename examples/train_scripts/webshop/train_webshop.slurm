@@ -103,7 +103,7 @@ adv_estimator=grpo
 
 agent_type=action
 tools="[webshop_browser_action]"
-reward_name="webshop_reward"
+reward_name="webshop_score_reward"
 
 entropy_coeff=0.001
 kl_loss_type=mse

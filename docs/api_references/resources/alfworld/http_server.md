@@ -2,7 +2,7 @@
 
 The ALFWorld HTTP server provides a RESTful API for interacting with ALFWorld environments. It offers language-agnostic access to the environment functionality.
 
-The server is implemented as a FastAPI application that runs inside Docker containers. The server script is located at `agentfly/dockers/alfworld_env/alfworld_http_server.py` and is designed to be executed within a containerized environment.
+The server is implemented as a FastAPI application that runs inside the ALFWorld environment container (enroot by default). The server script is located at `agentfly/dockers/alfworld_env/alfworld_http_server.py` and is designed to be executed within a containerized environment.
 
 ## API Endpoints
 

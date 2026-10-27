@@ -6,7 +6,7 @@ live in :mod:`.impls` and are imported lazily — they pull heavy deps
 (sympy/math_verify, openai, cv2, enroot, ...), so a bare ``import
 agentfly.rewards`` (and hence ``import agentfly.agents``) stays cheap. The impls
 load on first access, whether by attribute (``from agentfly.rewards import
-alfworld_episode_reward``) or by name (``get_reward_from_name`` /
+alfworld_reward``) or by name (``get_reward_from_name`` /
 ``list_available_rewards``).
 """
 
@@ -27,14 +27,21 @@ if TYPE_CHECKING:
     # declarations in sync with the lazy public exports in __all__; importing
     # them only for type checking preserves lazy loading at runtime.
     from .impls import (
-        alfworld_episode_reward,
-        code_reward_test,
+        alfworld_reward,
+        chess_puzzle_reward,
+        chess_puzzle_reward_simple,
         gui_reward,
+        infoseek_reward,
+        llm_as_judge_pass_reward_multi_model,
         math_equal_reward,
         math_equal_reward_think,
         math_equal_reward_tool,
+        math_reward_thought_with_tool,
         math_string_equal_reward_tool,
+        ok_vqa_reward,
+        qa_em_format_reward,
         qa_em_reward,
+        qa_em_reward_tool_call,
         qa_f1_reward,
         qa_f1_reward_tool,
         r2e_gym_reward,
@@ -43,8 +50,8 @@ if TYPE_CHECKING:
         vlm_as_judge_pass_reward,
         vlm_as_judge_pass_reward_multi_model,
         vlm_as_judge_ratio_reward_multi_model,
-        webshop_episode_reward,
         webshop_reward,
+        webshop_score_reward,
     )
 
 
@@ -82,22 +89,29 @@ __all__ = [
     "list_available_rewards",
     "register_reward",
     "reward",
-    "swe_reward",
-    "r2e_gym_reward",
+    "alfworld_reward",
+    "chess_puzzle_reward",
+    "chess_puzzle_reward_simple",
+    "gui_reward",
+    "infoseek_reward",
+    "llm_as_judge_pass_reward_multi_model",
+    "math_equal_reward",
+    "math_equal_reward_think",
+    "math_equal_reward_tool",
+    "math_reward_thought_with_tool",
+    "math_string_equal_reward_tool",
+    "ok_vqa_reward",
+    "qa_em_format_reward",
     "qa_em_reward",
+    "qa_em_reward_tool_call",
     "qa_f1_reward",
     "qa_f1_reward_tool",
-    "math_equal_reward",
-    "math_equal_reward_tool",
-    "math_equal_reward_think",
-    "math_string_equal_reward_tool",
-    "webshop_reward",
-    "webshop_episode_reward",
-    "alfworld_episode_reward",
+    "r2e_gym_reward",
     "scienceworld_reward",
-    "gui_reward",
-    "code_reward_test",
+    "swe_reward",
     "vlm_as_judge_pass_reward",
     "vlm_as_judge_pass_reward_multi_model",
     "vlm_as_judge_ratio_reward_multi_model",
+    "webshop_reward",
+    "webshop_score_reward",
 ]

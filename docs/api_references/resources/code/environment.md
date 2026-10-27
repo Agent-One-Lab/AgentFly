@@ -1,6 +1,6 @@
 # Code Environment
 
-The Code Environment provides a secure Python sandbox execution environment using Docker containers. It enables safe execution of untrusted Python code with strict resource limits and security controls.
+The Code Environment runs Python snippets in a container (enroot by default) with CPU, memory and time limits. It keeps model-written code off your own process and filesystem, but it is not a security boundary: see [Limits and isolation](index.md#limits-and-isolation).
 
 ## PythonSandboxEnv Class Reference
 
@@ -59,16 +59,21 @@ AgentFly handles pooling/reuse via `ResourceEngine`. Sandboxes are acquired via 
 
 ## Error Handling and Recovery
 
-The environment includes automatic error handling:
+Errors in the code don't raise: `step` returns the error text as its result, and
+`code_interpreter` passes it to the model as the tool result.
+
+- **Python error**: the traceback (stderr).
+- **Timeout** (10 s wall time): the server kills the snippet's process and returns `"Execution timed out"`.
+- **CPU or memory limit**: `"Process killed (signal N): CPU time or memory limit exceeded"`.
 
 ```python
-# Automatic container restart on timeout
-try:
-    result = await env.step("while True: pass")  # Infinite loop
-except Exception:
-    # Environment automatically restarts container
-    result = await env.step("print('Recovered!')")
+result = await env.step("while True: pass")
+# result == "Execution timed out" (no exception; the next step works normally)
 ```
+
+`step` raises only if the sandbox isn't started or the server sends an unexpected response.
+The container is not restarted by `step`. When the pool reuses a sandbox it calls `reset()`,
+which restarts the container if it doesn't answer within 20 s or the connection fails.
 
 ### No state between steps:
 

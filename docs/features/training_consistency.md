@@ -46,12 +46,12 @@ the extracted action; training sees what was sampled.
 
 ### The diagnostic — `token_drift`
 
-`agent.to_verl_dataproto(result, log_token_drift=True)` (default on) re-tokenizes
+`agent.to_verl_dataproto(result, log_token_drift=True)` (off by default) re-tokenizes
 up to 64 real rows per step batch with the ids stripped and reports how far the
 text path would have drifted. It appears on the per-batch summary line:
 
 ```
-[StepRollout] per_step batch: rows=6150 ... token_drift={frac_ids_end_with_eos=0.9980,
+[StepRollout] training batch: rows=6150 ... token_drift={frac_ids_end_with_eos=0.9980,
     frac_rows_differ=1.0000, frac_rows_with_ids=1.0000, frac_tokens_differ=0.0385, n_sampled=64}
 ```
 
@@ -59,18 +59,17 @@ text path would have drifted. It appears on the per-batch summary line:
 - `frac_rows_differ` / `frac_tokens_differ` — the drift you are *no longer* training on.
 - `frac_ids_end_with_eos` — the fraction of natural stops (the rest hit `max_tokens`).
 
-Disable with `agent.to_verl_dataproto(result, log_token_drift=False)`.
-The trainer forwards the existing `rollout_config.log_token_drift` setting to
-conversion, so `rollout_config.log_token_drift=false` still disables it in training
-and validation. It removes that setting from a copy of the rollout constructor
-options, leaving the original configuration unchanged.
+In training, turn it on with `+agent.run_config.rollout_config.log_token_drift=true`.
+The trainer forwards that setting to conversion for training and validation, and
+removes it from a copy of the rollout constructor options, leaving the original
+configuration unchanged.
 
 `StepRollout` no longer accepts `log_token_drift` or stores diagnostic state.
 For direct Python calls, pass the option to conversion, not to the rollout
 constructor or `agent.run(rollout_config=...)`. The standalone
 `rollout.conversion.token_drift_stats` calculation remains in use, and its
-statistics remain available in `batch.meta_info["token_drift"]` when diagnostics
-succeed. Chain conversion ignores this diagnostic option.
+statistics are in `batch.meta_info["token_drift"]` when the diagnostic is on and
+succeeds. Chain and step conversion both support it.
 
 ### Scope
 
@@ -140,28 +139,44 @@ prints a one-time notice), because ids and images are not threaded through toget
 
 ### The guard — `prompt_check`
 
-`AsyncVerlBackend` compares the ids it sent with the `prompts` verl actually sampled from
-(exact comparison), on the first call and every 200th, a few rows each time. It prints
+When enabled, `AsyncVerlBackend` compares the ids it sent with the `prompts` verl actually
+sampled from (exact comparison), on the first call and every 200th, a few rows each time. It logs
 
 ```
 [AsyncVerlBackend] prompt_check: 4/4 rows identical (sampling == training render; assistant turns=[0, 3, 7, 12])
 ```
 
 or a `PROMPT MISMATCH` line with the turn depths of the checked rows and a decoded diff.
-Both go to stdout on purpose: a plain `logger.warning` from the Ray TaskRunner does not
-reach the training log, which is how the mismatch above went unreported. The turn depths
-show that multi-turn rows are being checked, not only first turns. Settings via
-`agent.init_config.backend_config.check_prompt_consistency`: `true` (default, report),
-`strict` (raise on mismatch — use for smoke runs), `false` (off).
+The turn depths show that multi-turn rows are being checked, not only first turns.
+
+The same setting runs a second check, `splice_check`. For the last assistant message that
+carries `token_ids`, the current prompt must start with that turn's prompt followed by its
+sampled ids, unchanged:
+
+```
+[AsyncVerlBackend] splice_check: 4/4 rows continuous (prompt == turn prompt + sampled ids)
+```
+
+A `SPLICE DISCONTINUITY` line instead means the template inserts or re-encodes something
+around a past reply (for example a re-rendered `<think>` block), which makes updates
+off-policy. `prompt_check` cannot see this, because sampling and training share the render.
+
+Both checks are off by default. Turn them on with
+`+agent.init_config.backend_config.check_prompt_consistency=true` (log the results) or `=strict`
+(raise on a mismatch — use for smoke runs).
 
 The batch summary also reports `valid_frac`, the fraction of format-valid actions
 (verl-agent's `valid_action_ratio`), which should converge toward 1.0 within a few steps.
 
 ## What to look for on a new run
 
+With both diagnostics on (`+agent.init_config.backend_config.check_prompt_consistency=true`
+and `+agent.run_config.rollout_config.log_token_drift=true`):
+
 ```
 grep -m1 "prompt_check"     <rollout .out>   # 4/4 rows identical
-grep -m1 "per_step batch"   <rollout .out>   # frac_rows_with_ids=1.0000, valid_frac rising
+grep -m1 "splice_check"     <rollout .out>   # 4/4 rows continuous
+grep -m1 "training batch"   <rollout .out>   # frac_rows_with_ids=1.0000, valid_frac rising
 ```
 
 and on the tracker: `actor/kl_loss` holding in a narrow band with `actor/ppo_kl` ~1e-3, rather

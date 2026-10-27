@@ -39,14 +39,14 @@ bash install.sh
 
 Alternatively, you can customize the installation by following these steps:
 
-1. Clone the repository and initialize submodules:
+1. Clone the repository with its submodules:
 
     ```bash
-    git clone https://github.com/Agent-One-Lab/AgentFly
+    git clone --recurse-submodules https://github.com/Agent-One-Lab/AgentFly
     cd AgentFly
-    git submodule init
-    git submodule update
     ```
+
+    In an existing clone, fetch the submodules with `git submodule update --init`.
 
 2. Install dependencies with uv
 
@@ -74,13 +74,4 @@ Alternatively, you can customize the installation by following these steps:
     sudo dnf install -y epel-release # required on some distributions
     sudo dnf install -y https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot-3.5.0-1.el8.${arch}.rpm
     sudo dnf install -y https://github.com/NVIDIA/enroot/releases/download/v3.5.0/enroot+caps-3.5.0-1.el8.${arch}.rpm # optional
-    ```
-
-3. Optional
-
-    Search-backed tools use redis to cache results. Install a `redis-server` binary with your system package manager if you need them:
-
-    ```bash
-    # Debian/Ubuntu
-    sudo apt-get install -y redis-server
     ```

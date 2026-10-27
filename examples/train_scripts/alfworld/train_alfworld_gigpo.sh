@@ -75,7 +75,7 @@ train_dataset="./data/rlhf/alfworld/alfworld_train_tasks.json"
 eval_dataset="./data/rlhf/alfworld/alfworld_valid_seen_tasks.json"
 
 tools="[alfworld_step]"
-reward_name="alfworld_episode_reward"   # now 10 * won (verl-agent scale)
+reward_name="alfworld_reward"   # now 10 * won (verl-agent scale)
 agent_type=action
 # Use the model's NATIVE chat template: leaving this unset (null) makes chat-bricks fall
 # back to the model name -> Qwen2.5's stock HF template, which auto-renders Qwen's default
