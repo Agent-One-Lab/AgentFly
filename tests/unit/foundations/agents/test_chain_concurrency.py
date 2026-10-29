@@ -11,13 +11,12 @@ from agentfly.agents.rollout.events import EpisodeEnded
 async def test_run_respects_max_concurrent_chains(monkeypatch):
     """``ChainRollout`` fans out chains but caps concurrency at ``max_concurrent_episodes``.
 
-    Post-refactor, the rollout is a standalone strategy object that reaches agent
-    state through ``self.agent`` (the host). The concurrency loop (``stream``)
-    only needs ``host.tools`` before it hands each chain to ``run_episode`` (which we
-    monkeypatch to a fast no-op), so a minimal fake host suffices.
+    The rollout reaches the agent through the ``agent`` argument. The concurrency loop
+    (``stream``) only needs ``agent.prompt_tools()`` before it hands each chain to
+    ``run_episode`` (which we monkeypatch to a fast no-op), so a minimal fake agent suffices.
     """
     rollout = ChainRollout()
-    rollout.agent = SimpleNamespace(tools=[], prompt_tools=lambda: [])  # host surface used by stream
+    agent = SimpleNamespace(tools=[], prompt_tools=lambda: [])  # agent surface used by stream
 
     in_flight = 0
     max_in_flight = 0
@@ -25,6 +24,7 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
 
     async def fake_run_episode(
         self,
+        agent,
         episode_id,
         first_step,
         chain,
@@ -51,6 +51,7 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
     )
 
     async for _ev in rollout.stream(
+        agent,
         messages=[{"role": "user", "content": "hi"}],
         max_turns=1,
         group_size=5,

@@ -24,6 +24,7 @@ import json
 import logging
 import time
 from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ....core.context_config import ContextConfig
@@ -40,6 +41,27 @@ from ..structures import Step
 from .prompt_builders import resolve_prompt_builder
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WindowState:
+    """The turn loop's state for one episode; :meth:`StepRollout.run_loop` updates it.
+
+    ``current`` is the state the model acts on next and ``history`` the earlier
+    ``(obs, action)`` turns (oldest first); the prompt builder renders a bounded window
+    of them. ``full_messages`` is the whole conversation (for the outcome reward) and
+    ``steps`` holds one :class:`Step` per generation.
+    """
+
+    episode_id: str
+    current: Dict[str, Any]
+    task_description: str
+    full_messages: List[Dict]
+    history: List[Dict[str, Any]] = field(default_factory=list)
+    steps: List[Step] = field(default_factory=list)
+    depth: int = 0
+    have_set_resources: bool = False
+    finish_reason: Optional[FinishReason] = None
 
 
 class StepRollout(Rollout):
@@ -79,7 +101,6 @@ class StepRollout(Rollout):
         self.history_length = history_length
         self.max_prompt_length = max_prompt_length
         self.prompt_builder = resolve_prompt_builder(prompt_builder, max_prompt_length=max_prompt_length)
-        self.agent = None
         # Rollout metric reporting (mirrors ChainRollout): emit agent/rollout/* to the
         # monitor once the whole rollout is drained.
         self.metrics = RolloutMetrics()
@@ -110,7 +131,6 @@ class StepRollout(Rollout):
         ``Rollout.run``. ``show_progress`` renders a progress bar over finished trajectories.
         """
         self.validate_run_args(max_turns, group_size, max_concurrent_episodes)
-        self.agent = agent
         self.use_token_ids = bool(use_token_ids)
         Monitor.ensure_started()
         step = self.resolve_global_step(global_step)
@@ -189,17 +209,17 @@ class StepRollout(Rollout):
             or self.extract_task(str(initial_obs))  # ALFWorld: "Your task is to: …"
             or meta.get("task_description", "")
         )
-        current: Dict[str, Any] = {
-            "raw_obs": context.metadata.get("_flat_initial_obs", ""),
-            "obs": self.last_user_text(first_step.messages),
-            "admissible": context.metadata.get("_flat_initial_admissible", []),
-            "task_description": task_description,
-        }
-        history: List[Dict[str, Any]] = []
-        full_messages: List[Dict] = list(first_step.messages.messages)  # for the outcome reward
-        steps: List[Step] = []
-        finish_reason: Optional[FinishReason] = None
-        have_set_resources = False
+        state = WindowState(
+            episode_id=episode_id,
+            current={
+                "raw_obs": context.metadata.get("_flat_initial_obs", ""),
+                "obs": self.last_user_text(first_step.messages),
+                "admissible": context.metadata.get("_flat_initial_admissible", []),
+                "task_description": task_description,
+            },
+            task_description=task_description,
+            full_messages=list(first_step.messages.messages),  # for the outcome reward
+        )
         # Tool schemas, exactly as ChainRollout builds them — so per-step generation
         # goes through the *same* path (tools / tool_call_source / skills / parse with
         # trajectory_segments). StepRollout must differ from ChainRollout only in
@@ -208,124 +228,17 @@ class StepRollout(Rollout):
         # tokenize_trajectories), so generation and training render one prompt.
         tools = agent.prompt_tools()
 
-        for depth in range(max_turns):
-            prompt_messages = self.prompt_builder.build(
-                agent,
-                history=history,
-                current=current,
-                history_length=self.history_length,
-                step_index=depth,
-            )
-            # Reuse the chain generation helper (return_dict / tools / tool_call_source /
-            # skills / trajectory_segments / raw-field overlay). ``chain``/``depth``/
-            # ``episode_id`` are unused by it; pass None / depth / episode_id.
-            gen_step = Step(
-                type="Action Input",
-                messages=Messages.from_turns(prompt_messages),
-            )
-            action_msg, _ = await generate_response(
-                agent,
-                None,
-                gen_step,
-                tools,
-                depth,
-                episode_id,
-                generation_config,
-                context,
-                use_token_ids=self.use_token_ids,
-            )
-            full_messages.append(action_msg)
-
-            # Record the generation into the trajectory the moment it is produced — the same
-            # way ChainRollout adds every generated message as a step before it decides whether
-            # to run a tool. ``messages`` = the bounded prompt this turn ending in the action;
-            # ``tool_result`` is attached below only if an action actually executes. A terminal
-            # / no-action turn keeps ``tool_result=None`` (a generation-only step), so no part
-            # of the trajectory is ever lost and every trajectory has >=1 step.
-            gen_step.messages = Messages.from_turns(list(prompt_messages) + [action_msg])
-            steps.append(gen_step)
-
-            # Control decisions run through the SAME base machinery as ChainRollout.
-            tool_calls = action_msg.get("tool_calls") or []
-            if not tool_calls and self.project_actions:
-                # verl-agent projection: no ``<action>`` block was extracted → step the env
-                # anyway with the last-30-chars garbage fallback (see Rollout.projected_tool_call).
-                # The turn is format-invalid (recorded via is_action_valid); we do NOT end here.
-                projected = self.projected_tool_call(agent, action_msg)
-                if projected is not None:
-                    tool_calls = [projected]
-            if not tool_calls:
-                # #1 no tool call at all → the run's on_no_tool_call policy.
-                control = self.on_no_tool_call
-                if control == CONTROL_RAISE:
-                    raise RuntimeError(
-                        f"Model produced no tool call and on_no_tool_call='raise': {message_text(action_msg)!r}"
-                    )
-                if control == CONTROL_END:
-                    finish_reason = FinishReason.NO_TOOL_CALLS
-                    break
-                # 'continue': no tool ran this turn (no observation to advance on); loop
-                # to the next generation. The generation is already recorded as a step.
-                continue
-            if not self.project_actions and self.message_ends_episode(action_msg):
-                # Explicit model end (sentinel / parser status) on a turn that carried a
-                # tool call — end without executing it (mirrors ChainRollout). Under
-                # ``project_actions`` verl-agent has no such sentinel: it always steps and
-                # ends only on env done / max_turns, so this early end is skipped.
-                finish_reason = FinishReason.TERMINAL
-                break
-
-            tool_call = tool_calls[0]
-            result = await agent.execute_tool_call(
-                context,
-                tool_call,
-                Messages.from_turns(prompt_messages),
-                None,
-                episode_id,
-                depth,
-                have_set_resources,
-            )
-            have_set_resources = True
-
-            # Attach the env signals (obs / anchor / step_reward / invalid) to the step that
-            # already holds this turn's generation. The pre-action grouping anchor is derived
-            # by right-shifting these anchors during training conversion.
-            gen_step.tool_result = result
-
-            obs_text = result.observation or ""
-            full_messages.append({"role": "tool", "content": obs_text})
-
-            # Resolve the tool result to a control: the tool's explicit ``control`` wins
-            # (e.g. an env tool that reached a terminal state writes ``control="end"``),
-            # else the ``status`` diagnosis routes to on_invalid_tool_call / on_tool_error,
-            # else a clean result continues. The action ran and its observation is recorded,
-            # so this terminal step keeps its ``tool_result``.
-            control = self.resolve_tool_control(result)
-            if control == CONTROL_RAISE:
-                self.raise_for_result(result)
-            if control == CONTROL_END:
-                finish_reason = self.tool_finish_reason(result)
-                break
-
-            # Record the just-acted step into history (pre-action obs + the action taken),
-            # then advance ``current`` to the resulting state.
-            history.append(
-                {
-                    "raw_obs": current["raw_obs"],
-                    "obs": current["obs"],
-                    "response": message_text(action_msg),  # full text (chat window)
-                    "action": self.extract_action(tool_call),  # clean action (flat builder)
-                    "admissible": current["admissible"],
-                }
-            )
-            current = {
-                "raw_obs": result.anchor if result.anchor is not None else obs_text,
-                "obs": obs_text,
-                "admissible": (result.metrics or {}).get("admissible_actions", []),
-                "task_description": task_description,
-            }
-        else:
-            finish_reason = FinishReason.MAX_TURNS
+        await self.run_loop(
+            agent=agent,
+            context=context,
+            state=state,
+            tools=tools,
+            max_turns=max_turns,
+            generation_config=generation_config,
+        )
+        steps = state.steps
+        finish_reason = state.finish_reason
+        full_messages = state.full_messages
 
         # Episode outcome on the full (unwindowed) conversation.
         reward = await self.compute_reward(
@@ -357,6 +270,145 @@ class StepRollout(Rollout):
             tool_call_counts=count_tool_calls(s.tool_result for s in steps),
             steps=steps,
         )
+
+
+    async def run_loop(
+        self,
+        *,
+        agent,
+        context,
+        state: WindowState,
+        tools: List[Dict],
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]],
+    ) -> None:
+        """Run up to ``max_turns`` turns of ``agent`` on ``state``.
+
+        Only the turns: no context set-up, first-step hook, reward or resource release.
+        ``state`` is updated in place and ``state.finish_reason`` is set when the loop
+        stops (``max_turns`` unless a turn ended it). A bounded-window episode is not
+        meant to be continued, so there is no resume support.
+        """
+        for _ in range(max_turns):
+            depth = state.depth
+            state.depth += 1
+            prompt_messages = self.prompt_builder.build(
+                agent,
+                history=state.history,
+                current=state.current,
+                history_length=self.history_length,
+                step_index=depth,
+            )
+            # Reuse the chain generation helper (return_dict / tools / tool_call_source /
+            # skills / trajectory_segments / raw-field overlay). ``chain``/``depth``/
+            # ``episode_id`` are unused by it; pass None / depth / episode_id.
+            gen_step = Step(
+                type="Action Input",
+                messages=Messages.from_turns(prompt_messages),
+            )
+            action_msg, _ = await generate_response(
+                agent,
+                None,
+                gen_step,
+                tools,
+                depth,
+                state.episode_id,
+                generation_config,
+                context,
+                use_token_ids=self.use_token_ids,
+            )
+            state.full_messages.append(action_msg)
+
+            # Record the generation into the trajectory the moment it is produced — the same
+            # way ChainRollout adds every generated message as a step before it decides whether
+            # to run a tool. ``messages`` = the bounded prompt this turn ending in the action;
+            # ``tool_result`` is attached below only if an action actually executes. A terminal
+            # / no-action turn keeps ``tool_result=None`` (a generation-only step), so no part
+            # of the trajectory is ever lost and every trajectory has >=1 step.
+            gen_step.messages = Messages.from_turns(list(prompt_messages) + [action_msg])
+            state.steps.append(gen_step)
+
+            # Control decisions run through the SAME base machinery as ChainRollout.
+            tool_calls = action_msg.get("tool_calls") or []
+            if not tool_calls and self.project_actions:
+                # verl-agent projection: no ``<action>`` block was extracted → step the env
+                # anyway with the last-30-chars garbage fallback (see Rollout.projected_tool_call).
+                # The turn is format-invalid (recorded via is_action_valid); we do NOT end here.
+                projected = self.projected_tool_call(agent, action_msg)
+                if projected is not None:
+                    tool_calls = [projected]
+            if not tool_calls:
+                # #1 no tool call at all → the run's on_no_tool_call policy.
+                control = self.on_no_tool_call
+                if control == CONTROL_RAISE:
+                    raise RuntimeError(
+                        f"Model produced no tool call and on_no_tool_call='raise': {message_text(action_msg)!r}"
+                    )
+                if control == CONTROL_END:
+                    state.finish_reason = FinishReason.NO_TOOL_CALLS
+                    break
+                # 'continue': no tool ran this turn (no observation to advance on); loop
+                # to the next generation. The generation is already recorded as a step.
+                continue
+            if not self.project_actions and self.message_ends_episode(action_msg):
+                # Explicit model end (sentinel / parser status) on a turn that carried a
+                # tool call — end without executing it (mirrors ChainRollout). Under
+                # ``project_actions`` verl-agent has no such sentinel: it always steps and
+                # ends only on env done / max_turns, so this early end is skipped.
+                state.finish_reason = FinishReason.TERMINAL
+                break
+
+            tool_call = tool_calls[0]
+            result = await agent.execute_tool_call(
+                context,
+                tool_call,
+                Messages.from_turns(prompt_messages),
+                None,
+                state.episode_id,
+                depth,
+                state.have_set_resources,
+            )
+            state.have_set_resources = True
+
+            # Attach the env signals (obs / anchor / step_reward / invalid) to the step that
+            # already holds this turn's generation. The pre-action grouping anchor is derived
+            # by right-shifting these anchors during training conversion.
+            gen_step.tool_result = result
+
+            obs_text = result.observation or ""
+            state.full_messages.append({"role": "tool", "content": obs_text})
+
+            # Resolve the tool result to a control: the tool's explicit ``control`` wins
+            # (e.g. an env tool that reached a terminal state writes ``control="end"``),
+            # else the ``status`` diagnosis routes to on_invalid_tool_call / on_tool_error,
+            # else a clean result continues. The action ran and its observation is recorded,
+            # so this terminal step keeps its ``tool_result``.
+            control = self.resolve_tool_control(result)
+            if control == CONTROL_RAISE:
+                self.raise_for_result(result)
+            if control == CONTROL_END:
+                state.finish_reason = self.tool_finish_reason(result)
+                break
+
+            # Record the just-acted step into history (pre-action obs + the action taken),
+            # then advance ``current`` to the resulting state.
+            state.history.append(
+                {
+                    "raw_obs": state.current["raw_obs"],
+                    "obs": state.current["obs"],
+                    "response": message_text(action_msg),  # full text (chat window)
+                    "action": self.extract_action(tool_call),  # clean action (flat builder)
+                    "admissible": state.current["admissible"],
+                }
+            )
+            state.current = {
+                "raw_obs": result.anchor if result.anchor is not None else obs_text,
+                "obs": obs_text,
+                "admissible": (result.metrics or {}).get("admissible_actions", []),
+                "task_description": state.task_description,
+            }
+        else:
+            state.finish_reason = FinishReason.MAX_TURNS
 
     # ---- helpers ----------------------------------------------------------
     # ``message_text`` / ``action_format_valid`` (utils.action_format) and

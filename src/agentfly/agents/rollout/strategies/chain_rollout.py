@@ -98,14 +98,29 @@ class TurnResult:
     should_continue: bool
 
 
+@dataclass
+class ChainState:
+    """The turn loop's state for one conversation; :meth:`ChainRollout.run_loop` updates it.
+
+    ``depth`` counts the turns taken so far, across calls, so a conversation can be
+    continued by calling ``run_loop`` again on the same state.
+    """
+
+    episode_id: str
+    chain: Chain
+    current_step: Step
+    depth: int = 0
+    have_set_resources: bool = False
+
+
 class ChainRollout(Rollout):
     """
     Chain-based rollout strategy (L3). It starts multiple chains and runs them
     asynchronously, reusing the shared machinery on :class:`Rollout` (L2) and reaching
-    agent-specific behavior through ``agent`` (a
+    agent-specific behavior through the ``agent`` argument (a
     :class:`~agentfly.agents.rollout.agent.RolloutAgent`). The transient run-state
-    (``self.chains`` / ``self.current_steps`` / ``self.agent``) is rebuilt each
-    :meth:`run` call, so a strategy instance is reusable across runs.
+    (``self.chains`` / ``self.current_steps``) is rebuilt each :meth:`run` call, so a
+    strategy instance is reusable across runs.
     """
 
     def __init__(
@@ -158,7 +173,6 @@ class ChainRollout(Rollout):
         self.chains: Dict[str, Chain] = {}
         self.current_steps: Dict[str, Step] = {}
         self.metrics = RolloutMetrics()
-        self.agent = None
 
     def reset(self) -> None:
         self.chains = {}
@@ -199,18 +213,17 @@ class ChainRollout(Rollout):
     ) -> RunResult:
         """Drive the chain-based rollout and return its :class:`RunResult`.
 
-        ``agent`` (the agent) is stashed for the run so the internal loop can reach
-        agent state/hooks; the transient run-state is rebuilt each call.
+        The transient run-state is rebuilt each call.
         ``global_step`` sets the metrics x-axis (see ``Rollout.resolve_global_step``).
         ``use_token_ids`` see ``Rollout.run``. ``show_progress`` renders a progress bar
         over finished chains.
         """
-        self.agent = agent
         self.use_token_ids = bool(use_token_ids)
         # Drain the rollout event stream. Training ignores the events themselves; the
         # final state (``self.chains`` / ``self.current_steps``) is populated by each
         # chain as it ends. We build the RunResult from that state afterwards.
         async for _ev in self.stream(
+            agent,
             messages,
             max_turns=max_turns,
             group_size=group_size,
@@ -225,6 +238,7 @@ class ChainRollout(Rollout):
 
     async def stream(
         self,
+        agent,
         messages: List[Dict],
         max_turns: int,
         group_size: int,
@@ -256,10 +270,11 @@ class ChainRollout(Rollout):
         chains, first_steps = self.initialize_chains(specs)
         # Prompt tools come from the agent's single source of truth (also used by
         # tokenize_trajectories), so generation and training render one prompt.
-        tool_schemas = self.agent.prompt_tools()
+        tool_schemas = agent.prompt_tools()
 
         def run_episode(spec: EpisodeSpec):
             return self.run_episode(
+                agent,
                 spec.episode_id,
                 first_steps[spec.episode_id],
                 chains[spec.episode_id],
@@ -279,11 +294,12 @@ class ChainRollout(Rollout):
 
         self.metrics.record_step(
             global_step=step,
-            trajectories=self.build_trajectories(self.agent),
+            trajectories=self.build_trajectories(agent),
         )
 
     async def run_episode(
         self,
+        agent,
         episode_id: str,
         first_step: Step,
         chain: Chain,
@@ -294,11 +310,10 @@ class ChainRollout(Rollout):
     ):
         """Run a single chain as an async generator, yielding :mod:`.events`.
 
-        The per-chain analog of Claude Code's ``queryLoop``: one chain, one loop, events
-        ``yield``ed inline. Supports parallel tool calls in a turn; stops immediately when
-        a turn produces no tool call. Populates ``self.chains`` / ``self.current_steps``
-        on completion (the fan-in in :meth:`stream` reads final state from there, not
-        from the events).
+        Sets up the episode (context, first-step hook), runs the turns with
+        :meth:`run_loop`, then finalizes it (reward, release, metrics). Populates
+        ``self.chains`` / ``self.current_steps`` on completion (the fan-in in
+        :meth:`stream` reads final state from there, not from the events).
         """
         started_at = time.monotonic()
 
@@ -312,42 +327,25 @@ class ChainRollout(Rollout):
 
         yield EpisodeStarted(episode_id=episode_id, group_id=chain.info.get("group_id"))
 
-        current_step = first_step
-        depth = 0
-        have_set_resources = False
+        await self.run_first_step_hook(agent, context, first_step, episode_id)
 
-        await self.run_first_step_hook(self.agent, context, current_step, episode_id)
+        state = ChainState(episode_id=episode_id, chain=chain, current_step=first_step)
+        async for event in self.run_loop(
+            agent=agent,
+            context=context,
+            state=state,
+            tools=tools,
+            max_turns=max_turns,
+            generation_config=generation_config,
+        ):
+            yield event
+        current_step = state.current_step
 
-        while not current_step.is_terminal and depth < max_turns:
-            turn_result: Optional[TurnResult] = None
-            async for item in self.run_turn(
-                episode_id=episode_id,
-                chain=chain,
-                current_step=current_step,
-                depth=depth,
-                tools=tools,
-                generation_config=generation_config,
-                context=context,
-                have_set_resources=have_set_resources,
-            ):
-                if isinstance(item, TurnResult):
-                    turn_result = item
-                else:
-                    yield item  # RolloutEvent — relay to consumer
-            have_set_resources = turn_result.have_set_resources
-            if not turn_result.should_continue:
-                current_step = turn_result.next_step
-                break
-            current_step = turn_result.next_step
-            depth += 1
-
-        if "finish_reason" not in chain.info:
-            chain.info["finish_reason"] = FinishReason.MAX_TURNS
         # Loop-only state; chain.info becomes the trajectory's metadata.
         chain.info.pop("no_tool_call_streak", None)
 
         # Finalize chain (reward + cleanup).
-        await self.finalize_chain(self.agent, episode_id, chain, current_step, depth, context)
+        await self.finalize_chain(agent, episode_id, chain, current_step, state.depth, context)
 
         chain.info["rollout_time_sec"] = time.monotonic() - started_at
 
@@ -363,7 +361,56 @@ class ChainRollout(Rollout):
 
         yield EpisodeEnded(episode_id=episode_id, finish_reason=chain.info.get("finish_reason"))
 
-    def generation_filled_budget(self, new_msg: Dict[str, Any], current_step: Step, tools, generation_config) -> bool:
+    async def run_loop(
+        self,
+        *,
+        agent,
+        context: Context,
+        state: ChainState,
+        tools: List[Dict],
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]],
+    ):
+        """Run up to ``max_turns`` turns of ``agent`` on ``state``; yields
+        ``MessageProduced`` / ``ToolObserved``.
+
+        Only the turns: no context set-up, first-step hook, reward, resource release or
+        metrics. ``state`` is updated in place (current step, depth, resources flag) and
+        ``state.chain.info["finish_reason"]`` is set when the loop stops (``max_turns``
+        unless a turn ended it). ``max_turns`` counts the turns of this call; calling
+        again on the same state continues the same conversation.
+        """
+        turns = 0
+        while not state.current_step.is_terminal and turns < max_turns:
+            turn_result: Optional[TurnResult] = None
+            async for item in self.run_turn(
+                agent=agent,
+                episode_id=state.episode_id,
+                chain=state.chain,
+                current_step=state.current_step,
+                depth=state.depth,
+                tools=tools,
+                generation_config=generation_config,
+                context=context,
+                have_set_resources=state.have_set_resources,
+            ):
+                if isinstance(item, TurnResult):
+                    turn_result = item
+                else:
+                    yield item  # RolloutEvent — relay to consumer
+            state.have_set_resources = turn_result.have_set_resources
+            state.current_step = turn_result.next_step
+            if not turn_result.should_continue:
+                break
+            state.depth += 1
+            turns += 1
+
+        if "finish_reason" not in state.chain.info:
+            state.chain.info["finish_reason"] = FinishReason.MAX_TURNS
+
+    def generation_filled_budget(
+        self, agent, new_msg: Dict[str, Any], current_step: Step, tools, generation_config
+    ) -> bool:
         """True when the sampled response used its whole per-turn token budget.
 
         The training backend reports no per-turn stop reason, so a cut-off turn is
@@ -375,7 +422,7 @@ class ChainRollout(Rollout):
         if not ids:
             return False
         try:
-            budget = prepare_generation_config(self.agent, generation_config, current_step, tools=tools).get(
+            budget = prepare_generation_config(agent, generation_config, current_step, tools=tools).get(
                 "max_tokens"
             )
             budget = int(budget) if budget is not None else None
@@ -385,6 +432,8 @@ class ChainRollout(Rollout):
 
     async def run_turn(
         self,
+        *,
+        agent,
         episode_id: str,
         chain: Chain,
         current_step: Step,
@@ -400,7 +449,7 @@ class ChainRollout(Rollout):
         Async generator. Yields :mod:`.events` (``MessageProduced`` after generation,
         ``ToolObserved`` per tool result) and, as its **last** item, exactly one
         :class:`TurnResult` carrying ``(next_step, have_set_resources, should_continue)``
-        — the control value the method used to return. :meth:`run_episode` relays the
+        — the control value the method used to return. :meth:`run_loop` relays the
         events and consumes the ``TurnResult``. When ``should_continue`` is False the
         chain loop breaks and ``next_step`` is the final step for this chain.
 
@@ -408,7 +457,7 @@ class ChainRollout(Rollout):
         project actions → record/emit message → terminal check → run tool calls
         (:meth:`execute_turn_tools`) → decide outcome.
         """
-        max_model_len = getattr(self.agent, "max_model_len", None)
+        max_model_len = getattr(agent, "max_model_len", None)
 
         # --- SKILLRL_TOKEN_DEBUG: per-turn drift probe. The pre-check below trusts
         # the INCREMENTAL running estimate (running_total + obs_raw + TOOL_OBS_PREFIX
@@ -425,7 +474,7 @@ class ChainRollout(Rollout):
             if depth >= min_depth:
                 incr = current_step.total_token_length
                 try:
-                    exact = estimate_chat_prompt_tokens(self.agent, current_step, tools=tools, cap=False)
+                    exact = estimate_chat_prompt_tokens(agent, current_step, tools=tools, cap=False)
                 except Exception:  # noqa: BLE001
                     exact = -1
                 margin = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MARGIN", "6000"))
@@ -455,11 +504,11 @@ class ChainRollout(Rollout):
         # Agents may mutate current_step.messages (e.g. append a user nudge). Must run
         # before copying newest_messages so trajectories and tool folding see the same
         # history the LLM was given (generate_async reads current_step.messages).
-        self.agent.maybe_append_context_trigger_user_message(current_step)
+        agent.maybe_append_context_trigger_user_message(current_step)
         newest_messages = current_step.messages.copy()
         try:
             new_msg, total_token_length = await generate_response(
-                self.agent,
+                agent,
                 chain=chain,
                 current_step=current_step,
                 tools=tools,
@@ -497,7 +546,7 @@ class ChainRollout(Rollout):
         # execute_turn_tools reads tool_calls from the recorded thought step.
         tool_calls = new_msg.get("tool_calls") or []
         if not tool_calls and self.project_actions:
-            projected = self.projected_tool_call(self.agent, new_msg)
+            projected = self.projected_tool_call(agent, new_msg)
             if projected is not None:
                 tool_calls = [projected]
                 new_msg["tool_calls"] = tool_calls
@@ -519,7 +568,7 @@ class ChainRollout(Rollout):
         # Per-turn budget hit (mini-swe's finish_reason == "length"): counted for
         # every generation so the batch summary can report looping/runaway
         # thinking, and reused below to pick the length-aware nudge.
-        filled_budget = self.generation_filled_budget(new_msg, current_step, tools, generation_config)
+        filled_budget = self.generation_filled_budget(agent, new_msg, current_step, tools, generation_config)
         if filled_budget:
             chain.info["capped_turns"] = chain.info.get("capped_turns", 0) + 1
 
@@ -580,7 +629,7 @@ class ChainRollout(Rollout):
                 description=nudge,
             )
             nudge_step.total_token_length = (
-                thought_step.total_token_length + observation_token_length(self.agent, nudge) + TOOL_OBS_PREFIX_TOKENS
+                thought_step.total_token_length + observation_token_length(agent, nudge) + TOOL_OBS_PREFIX_TOKENS
             )
             if max_model_len is not None and nudge_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN:
                 nudge_step.is_terminal = True
@@ -594,7 +643,7 @@ class ChainRollout(Rollout):
         # call and, as its last item, a ToolLoopResult summarizing the loop.
         loop_result: Optional[ToolLoopResult] = None
         async for item in self.execute_turn_tools(
-            self.agent,
+            agent,
             episode_id=episode_id,
             chain=chain,
             depth=depth,
