@@ -6,7 +6,7 @@ import types
 import pytest
 
 from agentfly.agents.rollout import base as rollout_base
-from agentfly.agents.rollout.base import Rollout, TrajectorySpec, unwrap_reward
+from agentfly.agents.rollout.base import EpisodeSpec, Rollout, unwrap_reward
 from agentfly.agents.rollout.strategies.chain_rollout import ChainRollout
 from agentfly.agents.rollout.strategies.step_rollout import StepRollout
 from agentfly.agents.types import Segment
@@ -34,21 +34,21 @@ def test_validate_run_args_is_shared():
 
 def test_make_specs_order_ids_and_info():
     specs = Rollout.make_specs(tasks(2), num_chains=3)
-    assert [(s.group_idx, s.chain_idx) for s in specs] == [(g, c) for g in range(2) for c in range(3)]
-    assert len({s.chain_id for s in specs}) == 6
+    assert [(s.group_idx, s.episode_idx) for s in specs] == [(g, c) for g in range(2) for c in range(3)]
+    assert len({s.episode_id for s in specs}) == 6
     assert len({s.group_id for s in specs[:3]}) == 1
     assert specs[0].group_id != specs[3].group_id
     info = specs[4].info
     assert info["task_id"] == "t1" and info["answer"] == 1
     assert (info["chain_id"], info["group_id"], info["group_idx"], info["chain_idx"]) == (
-        specs[4].chain_id, specs[4].group_id, 1, 1,
+        specs[4].episode_id, specs[4].group_id, 1, 1,
     )
     info["scratch"] = 1
     assert "scratch" not in specs[4].info  # a fresh dict every time
 
 
 @pytest.mark.asyncio
-async def test_run_all_merges_events_limits_concurrency_and_counts_progress(monkeypatch):
+async def test_run_episodes_merges_events_limits_concurrency_and_counts_progress(monkeypatch):
     updates = []
     monkeypatch.setattr(
         rollout_base, "progress_bar",
@@ -57,7 +57,7 @@ async def test_run_all_merges_events_limits_concurrency_and_counts_progress(monk
     specs = Rollout.make_specs(tasks(5), num_chains=1)
     in_flight = peak = 0
 
-    async def run_one(spec):
+    async def run_episode(spec):
         nonlocal in_flight, peak
         in_flight += 1
         peak = max(peak, in_flight)
@@ -66,26 +66,26 @@ async def test_run_all_merges_events_limits_concurrency_and_counts_progress(monk
         in_flight -= 1
         yield ("end", spec.group_idx)
 
-    events = [ev async for ev in Rollout.run_all(specs, run_one, max_concurrent_chains=2)]
+    events = [ev async for ev in Rollout.run_episodes(specs, run_episode, max_concurrent_chains=2)]
     assert peak <= 2
     assert sorted(events) == sorted([(kind, i) for i in range(5) for kind in ("start", "end")])
     assert updates == [1] * 5 + ["closed"]
 
 
 @pytest.mark.asyncio
-async def test_run_all_accepts_coroutines_and_raises_first_error_after_all_finish(monkeypatch):
+async def test_run_episodes_accepts_coroutines_and_raises_first_error_after_all_finish(monkeypatch):
     monkeypatch.setattr(rollout_base, "progress_bar", lambda total: None)
     specs = Rollout.make_specs(tasks(3), num_chains=1)
     finished = []
 
-    async def run_one(spec):
+    async def run_episode(spec):
         await asyncio.sleep(0.01 * (3 - spec.group_idx))
         finished.append(spec.group_idx)
         if spec.group_idx in (0, 2):
             raise ValueError(f"fail {spec.group_idx}")
 
     with pytest.raises(ValueError, match="fail 0"):
-        async for _ in Rollout.run_all(specs, run_one, show_progress=False):
+        async for _ in Rollout.run_episodes(specs, run_episode, show_progress=False):
             pass
     assert sorted(finished) == [0, 1, 2]
 
@@ -127,7 +127,7 @@ async def test_run_first_step_hook_logs_failures(caplog):
         raise RuntimeError("boom")
 
     await Rollout.run_first_step_hook(types.SimpleNamespace(prepare_first_step=failing), context, step, "c1")
-    assert "prepare_first_step hook failed for chain c1: boom" in caplog.text
+    assert "prepare_first_step hook failed for episode c1: boom" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -139,7 +139,7 @@ async def test_compute_reward_without_reward_fn_returns_none_and_leaves_context(
     context = types.SimpleNamespace()
     agent = types.SimpleNamespace(reward_fn=None)
     reward = await Rollout.compute_reward(
-        agent, context, chain_id="c1", trajectory=[], final_messages=[], reward_args={},
+        agent, context, episode_id="c1", trajectory=[], final_messages=[], reward_args={},
     )
     assert reward is None
     assert vars(context) == {}
@@ -159,7 +159,7 @@ async def test_compute_reward_passes_trajectory_final_response_and_task_args(mon
     context = types.SimpleNamespace()
     trajectory = [[{"role": "user", "content": "Q"}], final_messages]
     reward = await Rollout.compute_reward(
-        agent, context, chain_id="c1", trajectory=trajectory, final_messages=final_messages,
+        agent, context, episode_id="c1", trajectory=trajectory, final_messages=final_messages,
         reward_args={"answer": 3, "final_response": "x", "trajectory": "x", "id": "x"},
     )
     assert reward.reward == 1.0
@@ -198,7 +198,7 @@ def test_make_trajectory_merges_tool_metrics_last_and_keeps_task_metadata():
     assert trajectory.reward == 0.5
     assert trajectory.metrics == {"score": 1, "tool/act/x": 2.0}
     assert (trajectory.chain_id, trajectory.group_id, trajectory.group_idx, trajectory.chain_idx) == (
-        spec.chain_id, spec.group_id, 0, 0,
+        spec.episode_id, spec.group_id, 0, 0,
     )
     assert trajectory.finish_reason == "max_turns"
     assert trajectory.metadata == {"task_id": "t0", "answer": 0, "capped_turns": 2}
@@ -212,4 +212,4 @@ def test_chain_only_machinery_lives_on_chain_rollout():
         assert not hasattr(Rollout, name), name
         assert hasattr(ChainRollout, name), name
     assert not hasattr(StepRollout(), "max_consecutive_no_tool_calls")
-    assert isinstance(TrajectorySpec, type)
+    assert isinstance(EpisodeSpec, type)

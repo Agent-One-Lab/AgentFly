@@ -1,7 +1,7 @@
 """Typed events yielded by the rollout generator.
 
-The per-chain loop (:meth:`ChainRollout._run_chain`) is an async generator that
-``yield``s these events; :meth:`ChainRollout._run_chains` merges the per-chain streams
+The per-chain loop (:meth:`ChainRollout.run_episode`) is an async generator that
+``yield``s these events; :meth:`ChainRollout.stream` merges the per-chain streams
 into one. Following Claude Code's ``queryLoop`` (which yields a discriminated union of
 typed event/message classes rather than one struct with a ``type`` flag), each event is
 its own small frozen dataclass and consumers ``isinstance``-dispatch.

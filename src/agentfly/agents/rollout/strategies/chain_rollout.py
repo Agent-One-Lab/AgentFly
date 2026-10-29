@@ -22,7 +22,7 @@ from ....utils.monitor import Monitor
 from ....utils.vision import image_to_data_uri
 from ...types import RunResult, Segment, Trajectory
 from ...utils.messages import Messages
-from ..base import Rollout, TrajectorySpec
+from ..base import EpisodeSpec, Rollout
 from ..events import (
     ChainEnded,
     ChainStarted,
@@ -89,9 +89,9 @@ MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT = (
 
 @dataclass(frozen=True)
 class TurnResult:
-    """Internal control value yielded by :meth:`ChainRollout._run_turn` as its last
+    """Internal control value yielded by :meth:`ChainRollout.run_turn` as its last
     item — carries the loop-control outcome that the old method returned. Not a
-    ``RolloutEvent``; :meth:`_run_chain` consumes it and does not relay it."""
+    ``RolloutEvent``; :meth:`ChainRollout.run_episode` consumes it and does not relay it."""
 
     next_step: Step
     have_set_resources: bool
@@ -171,16 +171,16 @@ class ChainRollout(Rollout):
             "chains": [c.to_json() for c in chains_list],
         }
 
-    def initialize_chains(self, specs: List[TrajectorySpec]) -> Tuple[Dict[str, Chain], Dict[str, Step]]:
+    def initialize_chains(self, specs: List[EpisodeSpec]) -> Tuple[Dict[str, Chain], Dict[str, Step]]:
         """A :class:`Chain` (whose ``info`` is the spec's task metadata and ids) and its
-        root step for each spec, keyed by ``chain_id``."""
+        root step for each spec, keyed by ``episode_id`` (the chain id)."""
         chains = {}
         start_steps = {}
         for spec in specs:
             ch = Chain(spec.info)
             root = ch.add_step(type="Action Input", messages=deepcopy(spec.messages.messages))
-            chains[spec.chain_id] = ch
-            start_steps[spec.chain_id] = root
+            chains[spec.episode_id] = ch
+            start_steps[spec.episode_id] = root
         return chains, start_steps
 
     async def run(
@@ -210,7 +210,7 @@ class ChainRollout(Rollout):
         # Drain the rollout event stream. Training ignores the events themselves; the
         # final state (``self.chains`` / ``self.current_steps``) is populated by each
         # chain as it ends. We build the RunResult from that state afterwards.
-        async for _ev in self._run_chains(
+        async for _ev in self.stream(
             messages,
             max_turns=max_turns,
             num_chains=num_chains,
@@ -223,7 +223,7 @@ class ChainRollout(Rollout):
             pass
         return RunResult(trajectories=self.build_trajectories(agent), rollout="chain")
 
-    async def _run_chains(
+    async def stream(
         self,
         messages: List[Dict],
         max_turns: int,
@@ -236,8 +236,8 @@ class ChainRollout(Rollout):
     ):
         """Run all chains concurrently and yield their merged :mod:`.events` stream.
 
-        This is the single shared rollout path: the per-chain generator :meth:`_run_chain` is the loop,
-        and :meth:`Rollout.run_all` fans the per-chain event streams into one ``chain_id``-tagged
+        This is the single shared rollout path: the per-chain generator :meth:`run_episode` is the loop,
+        and :meth:`Rollout.run_episodes` fans the per-chain event streams into one ``chain_id``-tagged
         stream. Each chain populates ``self.chains`` / ``self.current_steps``
         as it ends; this method just relays events and, when drained, emits step metrics.
         The metrics x is resolved before any chain starts so per-chain records and the
@@ -258,20 +258,20 @@ class ChainRollout(Rollout):
         # tokenize_trajectories), so generation and training render one prompt.
         tool_schemas = self.agent.prompt_tools()
 
-        def run_one(spec: TrajectorySpec):
-            return self._run_chain(
-                spec.chain_id,
-                first_steps[spec.chain_id],
-                chains[spec.chain_id],
+        def run_episode(spec: EpisodeSpec):
+            return self.run_episode(
+                spec.episode_id,
+                first_steps[spec.episode_id],
+                chains[spec.episode_id],
                 tool_schemas,
                 max_turns,
                 generation_config,
                 context_config,
             )
 
-        async for ev in self.run_all(
+        async for ev in self.run_episodes(
             specs,
-            run_one,
+            run_episode,
             max_concurrent_chains=max_concurrent_chains,
             show_progress=show_progress,
         ):
@@ -282,7 +282,7 @@ class ChainRollout(Rollout):
             trajectories=self.build_trajectories(self.agent),
         )
 
-    async def _run_chain(
+    async def run_episode(
         self,
         chain_id: str,
         first_step: Step,
@@ -297,14 +297,14 @@ class ChainRollout(Rollout):
         The per-chain analog of Claude Code's ``queryLoop``: one chain, one loop, events
         ``yield``ed inline. Supports parallel tool calls in a turn; stops immediately when
         a turn produces no tool call. Populates ``self.chains`` / ``self.current_steps``
-        on completion (the fan-in in :meth:`_run_chains` reads final state from there, not
+        on completion (the fan-in in :meth:`stream` reads final state from there, not
         from the events).
         """
-        chain_started_at = time.monotonic()
+        started_at = time.monotonic()
 
         # Build Context from rollout data for tools that need it
-        context = self.new_context(
-            chain_id=chain_id,
+        context = self.make_context(
+            episode_id=chain_id,
             group_id=chain.info.get("group_id"),
             metadata=chain.info,
             context_config=context_config,
@@ -320,7 +320,7 @@ class ChainRollout(Rollout):
 
         while not current_step.is_terminal and depth < max_turns:
             turn_result: Optional[TurnResult] = None
-            async for item in self._run_turn(
+            async for item in self.run_turn(
                 chain_id=chain_id,
                 chain=chain,
                 current_step=current_step,
@@ -349,10 +349,9 @@ class ChainRollout(Rollout):
         # Finalize chain (reward + cleanup).
         await self.finalize_chain(self.agent, chain_id, chain, current_step, depth, context)
 
-        chain_elapsed = time.monotonic() - chain_started_at
-        chain.info["rollout_time_sec"] = chain_elapsed
+        chain.info["rollout_time_sec"] = time.monotonic() - started_at
 
-        # This chain owns its final state; _run_chains reads from here, not from events.
+        # This chain owns its final state; stream reads from here, not from events.
         self.chains[chain_id] = chain
         self.current_steps[chain_id] = current_step
 
@@ -364,7 +363,7 @@ class ChainRollout(Rollout):
 
         yield ChainEnded(chain_id=chain_id, finish_reason=chain.info.get("finish_reason"))
 
-    def _generation_filled_budget(self, new_msg: Dict[str, Any], current_step: Step, tools, generation_config) -> bool:
+    def generation_filled_budget(self, new_msg: Dict[str, Any], current_step: Step, tools, generation_config) -> bool:
         """True when the sampled response used its whole per-turn token budget.
 
         The training backend reports no per-turn stop reason, so a cut-off turn is
@@ -384,7 +383,7 @@ class ChainRollout(Rollout):
             budget = None
         return budget is not None and len(ids) >= budget
 
-    async def _run_turn(
+    async def run_turn(
         self,
         chain_id: str,
         chain: Chain,
@@ -401,7 +400,7 @@ class ChainRollout(Rollout):
         Async generator. Yields :mod:`.events` (``MessageProduced`` after generation,
         ``ToolObserved`` per tool result) and, as its **last** item, exactly one
         :class:`TurnResult` carrying ``(next_step, have_set_resources, should_continue)``
-        — the control value the method used to return. :meth:`_run_chain` relays the
+        — the control value the method used to return. :meth:`run_episode` relays the
         events and consumes the ``TurnResult``. When ``should_continue`` is False the
         chain loop breaks and ``next_step`` is the final step for this chain.
 
@@ -422,27 +421,27 @@ class ChainRollout(Rollout):
         # print(flush) — agentfly's rollout logger is not captured in the job
         # stdout, but verl's step prints are, so print is what actually surfaces.
         if os.environ.get("SKILLRL_TOKEN_DEBUG") and max_model_len is not None:
-            _min_depth = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MINDEPTH", "6"))
-            if depth >= _min_depth:
-                _incr = current_step.total_token_length
+            min_depth = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MINDEPTH", "6"))
+            if depth >= min_depth:
+                incr = current_step.total_token_length
                 try:
-                    _exact = estimate_chat_prompt_tokens(self.agent, current_step, tools=tools, cap=False)
+                    exact = estimate_chat_prompt_tokens(self.agent, current_step, tools=tools, cap=False)
                 except Exception:  # noqa: BLE001
-                    _exact = -1
-                _margin = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MARGIN", "6000"))
+                    exact = -1
+                margin = int(os.environ.get("SKILLRL_TOKEN_DEBUG_MARGIN", "6000"))
                 # Only surface turns that matter: near/over the ceiling by EITHER
                 # measure, or a large incremental-vs-exact divergence.
                 if (
-                    _exact >= max_model_len - _margin
-                    or _incr >= max_model_len - _margin
-                    or (_exact >= 0 and abs(_exact - _incr) > 100)
+                    exact >= max_model_len - margin
+                    or incr >= max_model_len - margin
+                    or (exact >= 0 and abs(exact - incr) > 100)
                 ):
                     logger.info(
-                        f"[TOKDBG] chain={chain_id} depth={depth} incr={_incr} "
-                        f"exact={_exact} drift={(_exact - _incr) if _exact >= 0 else 'NA'} "
-                        f"max={max_model_len} guard_fires={_incr >= max_model_len} "
-                        f"exact_over={(_exact > max_model_len) if _exact >= 0 else 'NA'} "
-                        f"slips_through={_exact >= 0 and _exact > max_model_len and _incr < max_model_len}"
+                        f"[TOKDBG] chain={chain_id} depth={depth} incr={incr} "
+                        f"exact={exact} drift={(exact - incr) if exact >= 0 else 'NA'} "
+                        f"max={max_model_len} guard_fires={incr >= max_model_len} "
+                        f"exact_over={(exact > max_model_len) if exact >= 0 else 'NA'} "
+                        f"slips_through={exact >= 0 and exact > max_model_len and incr < max_model_len}"
                     )
 
         # 1. Pre-check: stop before generating if already at/over the context limit.
@@ -477,12 +476,16 @@ class ChainRollout(Rollout):
             # 0"), and unhandled that kills the entire run. The TOKEN_SAFETY_MARGIN
             # guard should prevent ever getting here, but if a residual drift slips
             # through, abort THIS chain gracefully instead of propagating.
-            _m = str(e)
-            if "maximum context length" in _m or "Prompt length" in _m or "max_tokens must be at least 1" in _m:
+            error_text = str(e)
+            if (
+                "maximum context length" in error_text
+                or "Prompt length" in error_text
+                or "max_tokens must be at least 1" in error_text
+            ):
                 logger.warning(
                     f"[TOKDBG] OVER-LENGTH at generation (chain={chain_id} "
                     f"depth={depth}) — aborting chain, not raising. incr="
-                    f"{current_step.total_token_length} max={max_model_len} :: {_m[:180]}"
+                    f"{current_step.total_token_length} max={max_model_len} :: {error_text[:180]}"
                 )
                 current_step.is_terminal = True
                 chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
@@ -494,7 +497,7 @@ class ChainRollout(Rollout):
         # execute_turn_tools reads tool_calls from the recorded thought step.
         tool_calls = new_msg.get("tool_calls") or []
         if not tool_calls and self.project_actions:
-            projected = self._projected_tool_call(self.agent, new_msg)
+            projected = self.projected_tool_call(self.agent, new_msg)
             if projected is not None:
                 tool_calls = [projected]
                 new_msg["tool_calls"] = tool_calls
@@ -516,7 +519,7 @@ class ChainRollout(Rollout):
         # Per-turn budget hit (mini-swe's finish_reason == "length"): counted for
         # every generation so the batch summary can report looping/runaway
         # thinking, and reused below to pick the length-aware nudge.
-        filled_budget = self._generation_filled_budget(new_msg, current_step, tools, generation_config)
+        filled_budget = self.generation_filled_budget(new_msg, current_step, tools, generation_config)
         if filled_budget:
             chain.info["capped_turns"] = chain.info.get("capped_turns", 0) + 1
 
@@ -815,7 +818,7 @@ class ChainRollout(Rollout):
         chain.info["reward"] = await self.compute_reward(
             agent,
             context,
-            chain_id=chain_id,
+            episode_id=chain_id,
             trajectory=chain.histories[0] if context.trajectory_format == "flat" else chain.histories,
             final_messages=full_trajectory,
             reward_args=chain.info,

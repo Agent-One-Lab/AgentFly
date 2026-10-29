@@ -30,8 +30,9 @@ from ....core.context_config import ContextConfig
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
 from ....utils.monitor import Monitor
 from ...types import RunResult, Segment, Trajectory
+from ...utils.action_format import message_text
 from ...utils.messages import Messages
-from ..base import Rollout, TrajectorySpec
+from ..base import EpisodeSpec, Rollout
 from ..events import FinishReason
 from ..loop.generation import generate_response
 from ..loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
@@ -117,8 +118,8 @@ class StepRollout(Rollout):
         specs = self.make_specs(messages, num_chains)
         results: Dict[str, Trajectory] = {}
 
-        async def run_one(spec: TrajectorySpec) -> None:
-            results[spec.chain_id] = await self._run_trajectory(
+        async def run_episode(spec: EpisodeSpec) -> None:
+            results[spec.episode_id] = await self.run_episode(
                 agent,
                 spec,
                 max_turns=max_turns,
@@ -126,15 +127,15 @@ class StepRollout(Rollout):
                 context_config=context_config,
             )
 
-        async for _ev in self.run_all(
+        async for _ev in self.run_episodes(
             specs,
-            run_one,
+            run_episode,
             max_concurrent_chains=max_concurrent_chains,
             show_progress=show_progress,
         ):
             pass
 
-        trajectories = [results[spec.chain_id] for spec in specs]
+        trajectories = [results[spec.episode_id] for spec in specs]
         # Shared end-of-rollout reporting reads the completed trajectories, including
         # episode durations for timing summaries and slowest-trajectory logging.
         self.metrics.record_step(
@@ -143,26 +144,26 @@ class StepRollout(Rollout):
         )
         return RunResult(trajectories=trajectories, rollout="step")
 
-    async def _run_trajectory(
+    async def run_episode(
         self,
         agent,
-        spec: TrajectorySpec,
+        spec: EpisodeSpec,
         *,
         max_turns: int,
         generation_config: Optional[Dict[str, Any]],
         context_config: Optional[ContextConfig],
     ) -> Trajectory:
-        """One trajectory's async step-loop. Emits one :class:`Step` per env step and
+        """One episode's async step-loop. Emits one :class:`Step` per env step and
         returns the per-rollout :class:`Trajectory` (reward = episode outcome)."""
         # Match chain timing: setup through cleanup, excluding semaphore queueing.
-        rollout_started_at = time.monotonic()
-        traj_uid = spec.chain_id
+        started_at = time.monotonic()
+        episode_id = spec.episode_id
         task_messages = spec.messages
         # Task metadata and the group ids; the chain id is not passed to the context
         # metadata or the reward function (unlike ChainRollout).
         meta = {k: v for k, v in spec.info.items() if k != "chain_id"}
-        context = self.new_context(
-            chain_id=traj_uid,
+        context = self.make_context(
+            episode_id=episode_id,
             group_id=spec.group_id,
             metadata=meta,
             context_config=context_config,
@@ -175,7 +176,7 @@ class StepRollout(Rollout):
             type="Action Input",
             messages=Messages.from_turns(deepcopy(task_messages.messages)),
         )
-        await self.run_first_step_hook(agent, context, first_step, traj_uid)
+        await self.run_first_step_hook(agent, context, first_step, episode_id)
         # Structured pre-action context for the prompt builder. ``current`` is the step the
         # model is about to act on; ``history`` is the prior steps (oldest first). Both carry
         # raw + bundled obs so either builder (chat window / flat verl-agent) can render.
@@ -185,12 +186,12 @@ class StepRollout(Rollout):
         initial_obs = context.metadata.get("_flat_initial_obs", "")
         task_description = (
             context.metadata.get("_flat_task_description")  # set by the env hook (WebShop)
-            or self._extract_task(str(initial_obs))  # ALFWorld: "Your task is to: …"
+            or self.extract_task(str(initial_obs))  # ALFWorld: "Your task is to: …"
             or meta.get("task_description", "")
         )
         current: Dict[str, Any] = {
             "raw_obs": context.metadata.get("_flat_initial_obs", ""),
-            "obs": self._last_user_text(first_step.messages),
+            "obs": self.last_user_text(first_step.messages),
             "admissible": context.metadata.get("_flat_initial_admissible", []),
             "task_description": task_description,
         }
@@ -207,17 +208,17 @@ class StepRollout(Rollout):
         # tokenize_trajectories), so generation and training render one prompt.
         tools = agent.prompt_tools()
 
-        for step in range(max_turns):
+        for depth in range(max_turns):
             prompt_messages = self.prompt_builder.build(
                 agent,
                 history=history,
                 current=current,
                 history_length=self.history_length,
-                step_index=step,
+                step_index=depth,
             )
             # Reuse the chain generation helper (return_dict / tools / tool_call_source /
             # skills / trajectory_segments / raw-field overlay). ``chain``/``depth``/
-            # ``chain_id`` are unused by it; pass None / step / traj_uid.
+            # ``chain_id`` are unused by it; pass None / depth / episode_id.
             gen_step = Step(
                 type="Action Input",
                 messages=Messages.from_turns(prompt_messages),
@@ -227,8 +228,8 @@ class StepRollout(Rollout):
                 None,
                 gen_step,
                 tools,
-                step,
-                traj_uid,
+                depth,
+                episode_id,
                 generation_config,
                 context,
                 use_token_ids=self.use_token_ids,
@@ -248,9 +249,9 @@ class StepRollout(Rollout):
             tool_calls = action_msg.get("tool_calls") or []
             if not tool_calls and self.project_actions:
                 # verl-agent projection: no ``<action>`` block was extracted → step the env
-                # anyway with the last-30-chars garbage fallback (see Rollout._projected_tool_call).
+                # anyway with the last-30-chars garbage fallback (see Rollout.projected_tool_call).
                 # The turn is format-invalid (recorded via is_action_valid); we do NOT end here.
-                projected = self._projected_tool_call(agent, action_msg)
+                projected = self.projected_tool_call(agent, action_msg)
                 if projected is not None:
                     tool_calls = [projected]
             if not tool_calls:
@@ -258,7 +259,7 @@ class StepRollout(Rollout):
                 control = self.on_no_tool_call
                 if control == CONTROL_RAISE:
                     raise RuntimeError(
-                        f"Model produced no tool call and on_no_tool_call='raise': {self._message_text(action_msg)!r}"
+                        f"Model produced no tool call and on_no_tool_call='raise': {message_text(action_msg)!r}"
                     )
                 if control == CONTROL_END:
                     finish_reason = FinishReason.NO_TOOL_CALLS
@@ -280,8 +281,8 @@ class StepRollout(Rollout):
                 tool_call,
                 Messages.from_turns(prompt_messages),
                 None,
-                traj_uid,
-                step,
+                episode_id,
+                depth,
                 have_set_resources,
             )
             have_set_resources = True
@@ -312,8 +313,8 @@ class StepRollout(Rollout):
                 {
                     "raw_obs": current["raw_obs"],
                     "obs": current["obs"],
-                    "response": self._message_text(action_msg),  # full text (chat window)
-                    "action": self._extract_action(tool_call),  # clean action (flat builder)
+                    "response": message_text(action_msg),  # full text (chat window)
+                    "action": self.extract_action(tool_call),  # clean action (flat builder)
                     "admissible": current["admissible"],
                 }
             )
@@ -330,7 +331,7 @@ class StepRollout(Rollout):
         reward = await self.compute_reward(
             agent,
             context,
-            chain_id=traj_uid,
+            episode_id=episode_id,
             trajectory=full_messages,
             final_messages=full_messages,
             reward_args=meta,
@@ -338,7 +339,7 @@ class StepRollout(Rollout):
         tool_metrics = aggregate_tool_metrics(step.tool_result for step in steps)
 
         await self.release_resources(context)
-        rollout_time_sec = time.monotonic() - rollout_started_at
+        rollout_time_sec = time.monotonic() - started_at
 
         # One segment PER GENERATION (each the bounded prompt + response) — so
         # inspection of segments shows the per-step
@@ -358,12 +359,12 @@ class StepRollout(Rollout):
         )
 
     # ---- helpers ----------------------------------------------------------
-    # ``_message_text`` / ``_action_format_valid`` / ``_projected_tool_call`` live on the
-    # base ``Rollout`` so StepRollout and ChainRollout share one definition of validity
-    # and projection.
+    # ``message_text`` / ``action_format_valid`` (utils.action_format) and
+    # ``Rollout.projected_tool_call`` give StepRollout and ChainRollout one definition of
+    # validity and projection.
 
     @staticmethod
-    def _extract_task(obs: str) -> str:
+    def extract_task(obs: str) -> str:
         """The env's templated goal — verl-agent's ``extract_task``: the text after
         ``"Your task is to: "`` in the (initial) observation. Empty if not present (a
         non-ALFWorld env), so the caller falls back to the dataset task_description.
@@ -373,7 +374,7 @@ class StepRollout(Rollout):
         return obs[i + len(marker) :].strip() if i != -1 else ""
 
     @staticmethod
-    def _extract_action(tool_call) -> str:
+    def extract_action(tool_call) -> str:
         """The clean action string the tool was invoked with (the ``<action>`` body).
 
         For env action tools the arguments are ``{"action": "<cmd>"}``; used to render the
@@ -390,10 +391,10 @@ class StepRollout(Rollout):
         except Exception:  # noqa: BLE001
             return ""
 
-    def _last_user_text(self, messages) -> str:
+    def last_user_text(self, messages) -> str:
         turns = messages.messages if hasattr(messages, "messages") else list(messages)
         for msg in reversed(turns):
             if msg.get("role") == "user":
-                return self._message_text(msg)
+                return message_text(msg)
         # fall back to the last message's text
-        return self._message_text(turns[-1]) if turns else ""
+        return message_text(turns[-1]) if turns else ""

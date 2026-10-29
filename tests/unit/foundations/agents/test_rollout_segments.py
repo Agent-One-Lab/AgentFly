@@ -814,7 +814,7 @@ async def test_chain_projects_before_recording_and_emitting_messages(
 
     monkeypatch.setattr(agent, "execute_tool_call", execute)
     strategy = chain_rollout.ChainRollout(project_actions=True)
-    original_run_turn = strategy._run_turn
+    original_run_turn = strategy.run_turn
 
     async def capture_turn(**kwargs):
         async for event in original_run_turn(**kwargs):
@@ -823,7 +823,7 @@ async def test_chain_projects_before_recording_and_emitting_messages(
                 emitted_messages.append(deepcopy(event.message))
             yield event
 
-    monkeypatch.setattr(strategy, "_run_turn", capture_turn)
+    monkeypatch.setattr(strategy, "run_turn", capture_turn)
     result = await run(strategy, agent)
 
     expected_call = {
@@ -862,7 +862,7 @@ async def test_chain_projection_preserves_existing_calls_and_model_stop_policy(
     def unexpected_projection(*args):
         pytest.fail("An existing tool call must not be projected")
 
-    monkeypatch.setattr(strategy, "_projected_tool_call", unexpected_projection)
+    monkeypatch.setattr(strategy, "projected_tool_call", unexpected_projection)
     agent = FakeAgent([["act"]], terminal_after=1)
     result = await run(strategy, agent)
     should_execute = project_actions or model_status == "continue"

@@ -12,18 +12,18 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
     """``ChainRollout`` fans out chains but caps concurrency at ``max_concurrent_chains``.
 
     Post-refactor, the rollout is a standalone strategy object that reaches agent
-    state through ``self.agent`` (the host). The concurrency loop (``_run_chains``)
-    only needs ``host.tools`` before it hands each chain to ``_run_chain`` (which we
+    state through ``self.agent`` (the host). The concurrency loop (``stream``)
+    only needs ``host.tools`` before it hands each chain to ``run_episode`` (which we
     monkeypatch to a fast no-op), so a minimal fake host suffices.
     """
     rollout = ChainRollout()
-    rollout.agent = SimpleNamespace(tools=[], prompt_tools=lambda: [])  # host surface used by _run_chains
+    rollout.agent = SimpleNamespace(tools=[], prompt_tools=lambda: [])  # host surface used by stream
 
     in_flight = 0
     max_in_flight = 0
     lock = asyncio.Lock()
 
-    async def _fake_run_chain(
+    async def fake_run_episode(
         self,
         chain_id,
         first_step,
@@ -39,7 +39,7 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
             max_in_flight = max(max_in_flight, in_flight)
         await asyncio.sleep(0.05)
         first_step.is_terminal = True
-        # _run_chains reads final state from here, not from the events.
+        # stream reads final state from here, not from the events.
         self.chains[chain_id] = chain
         self.current_steps[chain_id] = first_step
         async with lock:
@@ -47,10 +47,10 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
         yield ChainEnded(chain_id=chain_id)
 
     monkeypatch.setattr(
-        rollout, "_run_chain", _fake_run_chain.__get__(rollout, ChainRollout)
+        rollout, "run_episode", fake_run_episode.__get__(rollout, ChainRollout)
     )
 
-    async for _ev in rollout._run_chains(
+    async for _ev in rollout.stream(
         messages=[{"role": "user", "content": "hi"}],
         max_turns=1,
         num_chains=5,

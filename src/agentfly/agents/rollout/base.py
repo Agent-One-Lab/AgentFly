@@ -10,10 +10,13 @@ Layering:
   the agent and are reached via ``agent``.
 - **L2** shared machinery (this class, concrete), used by every strategy:
   - loop-control policy: ``resolve_tool_control``, ``tool_finish_reason``, …;
-  - one trajectory's lifecycle: ``new_context`` → ``run_first_step_hook`` → (the
+  - one episode's lifecycle: ``make_context`` → ``run_first_step_hook`` → (the
     strategy's turn loop) → ``compute_reward`` → ``release_resources`` →
     ``make_trajectory``;
-  - running many trajectories: ``validate_run_args``, ``make_specs``, ``run_all``.
+  - running many episodes: ``validate_run_args``, ``make_specs``, ``run_episodes``.
+
+An *episode* is one attempt at one task; the attempts at one task form a *group*
+(``group_id``).
 - **L3** the thin strategy (a subclass): ``run`` and its turn loop, returning a
   ``RunResult``. Training conversion and tokenization live outside the rollout
   interface; inference-only rollouts need no training methods.
@@ -25,7 +28,7 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple, Union
 
 from ...core import Context
 from ...rewards.reward_base import calculate_reward
@@ -33,7 +36,7 @@ from ...rewards.types import RewardResult
 from ...tools.tool_base import InvalidToolCallError
 from ...tools.types import CONTROL, CONTROL_CONTINUE, CONTROL_END, ToolResult
 from ..types import RunResult, Segment, Trajectory
-from ..utils.action_format import action_format_valid, message_text
+from ..utils.action_format import message_text
 from ..utils.messages import Messages, MessagesList
 from .events import FinishReason
 from .loop.progress import progress_bar
@@ -42,28 +45,32 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class TrajectorySpec:
-    """One trajectory to roll out: a task's messages and the trajectory's ids.
+class EpisodeSpec:
+    """One episode to roll out: a task's messages and the episode's ids.
 
-    ``chain_idx`` is the trajectory's index among the ``num_chains`` samples of its
-    task; ``group_idx`` is the task's index in the batch. Trajectories of one task
-    share ``group_id``.
+    ``episode_idx`` is the episode's index among the ``num_chains`` attempts at its
+    task; ``group_idx`` is the task's index in the batch. Episodes of one task share
+    ``group_id``.
     """
 
-    chain_id: str
+    episode_id: str
     group_id: str
     group_idx: int
-    chain_idx: int
+    episode_idx: int
     messages: Messages
 
     @property
     def info(self) -> Dict[str, Any]:
-        """A fresh dict: the task's metadata plus this trajectory's ids."""
+        """A fresh dict: the task's metadata plus this episode's ids.
+
+        The ids use the public ``Trajectory`` / reward-function names (``chain_id`` /
+        ``chain_idx`` for ``episode_id`` / ``episode_idx``).
+        """
         return self.messages.meta | {
-            "chain_id": self.chain_id,
+            "chain_id": self.episode_id,
             "group_id": self.group_id,
             "group_idx": self.group_idx,
-            "chain_idx": self.chain_idx,
+            "chain_idx": self.episode_idx,
         }
 
 
@@ -93,7 +100,7 @@ class Rollout(ABC):
 
     # Runtime-owned keys, excluded from task metadata. Execution counts are
     # derived from records, never trusted from incoming task metadata.
-    _RESERVED_INFO_KEYS = frozenset(
+    RESERVED_INFO_KEYS = frozenset(
         {
             "chain_id",
             "group_id",
@@ -207,15 +214,12 @@ class Rollout(ABC):
 
     # ---- shared helpers (used by StepRollout and ChainRollout) ------------------------
 
-    _message_text = staticmethod(message_text)
-    _action_format_valid = staticmethod(action_format_valid)
-
     @classmethod
-    def _projected_tool_call(cls, agent, msg: Dict) -> Optional[Dict]:
+    def projected_tool_call(cls, agent, msg: Dict) -> Optional[Dict]:
         """verl-agent's always-step projection: a turn with no extractable ``<action>``
         still steps the env, with the last 30 characters of the (lowercased) raw output as
         a garbage fallback action (the env answers "nothing happens"; the episode goes on).
-        The turn stays format-invalid via ``_action_format_valid``. Returns None if the
+        The turn stays format-invalid via ``action_format_valid``. Returns None if the
         agent has no action tool to project onto.
         """
         import json
@@ -225,7 +229,7 @@ class Rollout(ABC):
         )
         if tool_name is None:
             return None
-        fallback = cls._message_text(msg).lower()[-30:]
+        fallback = message_text(msg).lower()[-30:]
         return {
             "id": "call_projected",
             "type": "function",
@@ -247,7 +251,7 @@ class Rollout(ABC):
             raise InvalidToolCallError(result.observation)
         raise RuntimeError(f"Tool {result.name!r} error: {result.observation}")
 
-    # ---- L2: running many trajectories ----
+    # ---- L2: running many episodes ----
 
     @staticmethod
     def validate_run_args(max_turns: int, num_chains: int, max_concurrent_chains: Optional[int]) -> None:
@@ -257,56 +261,56 @@ class Rollout(ABC):
             assert max_concurrent_chains >= 1, "max_concurrent_chains must be at least 1 when set."
 
     @staticmethod
-    def make_specs(messages: Any, num_chains: int) -> List[TrajectorySpec]:
-        """One :class:`TrajectorySpec` per (task, sample), in ``(group_idx, chain_idx)``
-        order. Samples of one task share a ``group_id``; every trajectory gets its own
-        ``chain_id``."""
-        specs: List[TrajectorySpec] = []
+    def make_specs(messages: Any, num_chains: int) -> List[EpisodeSpec]:
+        """One :class:`EpisodeSpec` per (task, attempt), in ``(group_idx, episode_idx)``
+        order. Attempts at one task share a ``group_id``; every episode gets its own
+        ``episode_id``."""
+        specs: List[EpisodeSpec] = []
         for group_idx, task_messages in enumerate(MessagesList.from_data(messages)):
             group_id = str(uuid.uuid4())
-            for chain_idx in range(num_chains):
+            for episode_idx in range(num_chains):
                 specs.append(
-                    TrajectorySpec(
-                        chain_id=str(uuid.uuid4()),
+                    EpisodeSpec(
+                        episode_id=str(uuid.uuid4()),
                         group_id=group_id,
                         group_idx=group_idx,
-                        chain_idx=chain_idx,
+                        episode_idx=episode_idx,
                         messages=task_messages,
                     )
                 )
         return specs
 
     @staticmethod
-    async def run_all(
-        specs: List[TrajectorySpec],
-        run_one: Callable[[TrajectorySpec], Union[AsyncIterator[Any], Any]],
+    async def run_episodes(
+        specs: List[EpisodeSpec],
+        run_episode: Callable[[EpisodeSpec], Union[AsyncIterator[Any], Any]],
         *,
         max_concurrent_chains: Optional[int] = None,
         show_progress: bool = True,
     ) -> AsyncIterator[Any]:
-        """Run ``run_one(spec)`` for every spec concurrently and yield their events.
+        """Run ``run_episode(spec)`` for every spec concurrently and yield their events.
 
-        ``run_one(spec)`` is either an async generator, whose items are yielded here as
-        one merged stream, or a coroutine (no events). Results are kept by the strategy,
-        not returned here. At most ``max_concurrent_chains`` run at once (no limit when
-        ``None``). The progress bar counts finished trajectories. Every trajectory runs
-        to the end even if another fails; the first error (in spec order) is raised once
-        the stream is drained.
+        ``run_episode(spec)`` is either an async generator, whose items are yielded here
+        as one merged stream, or a coroutine (no events). Results are kept by the
+        strategy, not returned here. At most ``max_concurrent_chains`` run at once (no
+        limit when ``None``). The progress bar counts finished episodes. Every episode
+        runs to the end even if another fails; the first error (in spec order) is raised
+        once the stream is drained.
         """
         queue: asyncio.Queue = asyncio.Queue()
         sem = asyncio.Semaphore(int(max_concurrent_chains)) if max_concurrent_chains is not None else None
-        finished = object()  # one per trajectory, for the progress bar
-        done = object()  # once every trajectory has settled
+        finished = object()  # one per episode, for the progress bar
+        done = object()  # once every episode has settled
 
-        async def run_spec(spec: TrajectorySpec) -> None:
-            result = run_one(spec)
+        async def run_spec(spec: EpisodeSpec) -> None:
+            result = run_episode(spec)
             if inspect.isasyncgen(result):
                 async for event in result:
                     await queue.put(event)
             else:
                 await result
 
-        async def drive(spec: TrajectorySpec) -> None:
+        async def drive(spec: EpisodeSpec) -> None:
             try:
                 if sem is None:
                     await run_spec(spec)
@@ -319,7 +323,7 @@ class Rollout(ABC):
         tasks = [asyncio.create_task(drive(spec)) for spec in specs]
 
         async def close() -> List[Any]:
-            # return_exceptions so one failing trajectory doesn't prevent the sentinel;
+            # return_exceptions so one failing episode doesn't prevent the sentinel;
             # the exceptions are re-raised below after the queue is fully drained.
             results = await asyncio.gather(*tasks, return_exceptions=True)
             await queue.put(done)
@@ -344,30 +348,30 @@ class Rollout(ABC):
         results = await closer
         errors = [r for r in results if isinstance(r, BaseException)]
         if errors:
-            # Fail loud: surface the first trajectory error rather than silently
-            # dropping trajectories.
+            # Fail loud: surface the first episode error rather than silently
+            # dropping episodes.
             raise errors[0]
 
-    # ---- L2: one trajectory's lifecycle ----
+    # ---- L2: one episode's lifecycle ----
 
     @staticmethod
-    def new_context(
+    def make_context(
         *,
-        chain_id: str,
+        episode_id: str,
         group_id: Optional[str],
         metadata: Dict[str, Any],
         context_config: Optional[Any] = None,
     ) -> Context:
-        """The per-trajectory :class:`Context` (resources and metadata for tools)."""
+        """The per-episode :class:`Context` (resources and metadata for tools)."""
         return Context(
-            rollout_id=chain_id,
+            rollout_id=episode_id,
             group_id=group_id,
             metadata=metadata,
             context_config=context_config,
         )
 
     @staticmethod
-    async def run_first_step_hook(agent, context: Context, first_step, chain_id: str) -> None:
+    async def run_first_step_hook(agent, context: Context, first_step, episode_id: str) -> None:
         """Run the agent's optional ``prepare_first_step(context, first_step)`` hook.
 
         Env-source-of-truth agents (e.g. WebShop) use it to reset the env and inject the
@@ -380,14 +384,14 @@ class Rollout(ABC):
         try:
             await hook(context, first_step)
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"prepare_first_step hook failed for chain {chain_id}: {e}")
+            logger.warning(f"prepare_first_step hook failed for episode {episode_id}: {e}")
 
     @staticmethod
     async def compute_reward(
         agent,
         context: Context,
         *,
-        chain_id: str,
+        episode_id: str,
         trajectory: Any,
         final_messages: List[Dict],
         reward_args: Dict[str, Any],
@@ -410,7 +414,7 @@ class Rollout(ABC):
             final_response=final_response,
             **extra,
             trajectory=trajectory,
-            id=chain_id,
+            id=episode_id,
             context=context,
         )
 
@@ -434,7 +438,7 @@ class Rollout(ABC):
         tool_call_counts: Dict[str, int],
         steps: List[Any],
     ) -> Trajectory:
-        """Build the :class:`Trajectory` for one finished rollout.
+        """Build the :class:`Trajectory` for one finished episode.
 
         - ``reward`` (as stored by :meth:`compute_reward`) → ``Trajectory.reward`` and
           ``Trajectory.metrics``; ``tool_metrics`` are merged into the metrics after it.
@@ -456,7 +460,7 @@ class Rollout(ABC):
             group_id=info.get("group_id"),
             chain_idx=info.get("chain_idx"),
             group_idx=info.get("group_idx"),
-            metadata={k: v for k, v in info.items() if k not in self._RESERVED_INFO_KEYS},
+            metadata={k: v for k, v in info.items() if k not in self.RESERVED_INFO_KEYS},
             steps=steps,
         )
 
