@@ -8,7 +8,6 @@ Reuses the isolated runtime (fake generation / context / reward) from
 """
 import pytest
 
-from agentfly.agents.rollout import base as rollout_base
 from agentfly.agents.rollout.strategies import chain_rollout
 from agentfly.agents.rollout.events import FinishReason
 
@@ -41,11 +40,11 @@ def user_texts(segment):
 def test_defaults_match_miniswe():
     r = chain_rollout.ChainRollout()
     assert r.max_consecutive_no_tool_calls == 3
-    assert r.no_tool_call_message == rollout_base.NO_TOOL_CALL_MESSAGE_MINISWE
-    assert r.render_no_tool_call_message() == rollout_base.MINISWE_NO_TOOL_CALL_TEXT
+    assert r.no_tool_call_message == chain_rollout.NO_TOOL_CALL_MESSAGE_MINISWE
+    assert r.render_no_tool_call_message() == chain_rollout.MINISWE_NO_TOOL_CALL_TEXT
     assert (
         r.render_no_tool_call_message(truncated=True)
-        == rollout_base.MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT
+        == chain_rollout.MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT
     )
 
 
@@ -83,7 +82,7 @@ async def test_continue_nudges_then_recovers(isolated_runtime):
     traj = result[0]
     segment = traj.segments[0]
     assert roles(segment) == ["system", "user", "assistant", "user", "assistant", "tool"]
-    assert user_texts(segment)[1] == rollout_base.MINISWE_NO_TOOL_CALL_TEXT
+    assert user_texts(segment)[1] == chain_rollout.MINISWE_NO_TOOL_CALL_TEXT
     assert traj.finish_reason == FinishReason.MAX_TURNS
     assert traj.num_turns == 2  # the nudge is not a model turn
     assert traj.metadata["no_tool_call_nudges"] == 1
@@ -140,7 +139,7 @@ async def test_budget_filling_turn_gets_length_variant(isolated_runtime):
     result = await run(
         strategy, FakeAgent([[], ["t"]]), generation_config={"max_tokens": 2},
     )
-    assert user_texts(result[0].segments[0])[1] == rollout_base.MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT
+    assert user_texts(result[0].segments[0])[1] == chain_rollout.MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT
     # Both turns filled the two-token budget, so both count as capped.
     assert result[0].metadata["capped_turns"] == 2
 
@@ -151,7 +150,7 @@ async def test_larger_budget_gets_generic_variant(isolated_runtime):
     result = await run(
         strategy, FakeAgent([[], ["t"]]), generation_config={"max_tokens": 64},
     )
-    assert user_texts(result[0].segments[0])[1] == rollout_base.MINISWE_NO_TOOL_CALL_TEXT
+    assert user_texts(result[0].segments[0])[1] == chain_rollout.MINISWE_NO_TOOL_CALL_TEXT
     assert "capped_turns" not in result[0].metadata
 
 

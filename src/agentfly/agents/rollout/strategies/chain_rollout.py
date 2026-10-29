@@ -6,41 +6,85 @@ trained on all of its turns in one sequence. Loop control (when a chain continue
 raises) follows the rollout's run policy.
 """
 
-import asyncio
 import logging
 import os
 import sys
 import time
-import uuid
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from agentfly.tools.src.context.tools import fold_messages_with_summarize
+
 from ....core import Context, ContextConfig
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
 from ....utils.monitor import Monitor
-from ...types import RunResult
-from ...utils.messages import MessagesList
-from ..base import (
-    NO_TOOL_CALL_MESSAGE_MINISWE,
-    TOKEN_SAFETY_MARGIN,
-    TOOL_OBS_PREFIX_TOKENS,
-    Rollout,
-    ToolLoopResult,
-)
+from ....utils.vision import image_to_data_uri
+from ...types import RunResult, Segment, Trajectory
+from ...utils.messages import Messages
+from ..base import Rollout, TrajectorySpec
 from ..events import (
     ChainEnded,
     ChainStarted,
     FinishReason,
     MessageProduced,
+    ToolObserved,
 )
 from ..loop.generation import generate_response, prepare_generation_config
-from ..loop.metrics import RolloutMetrics
-from ..loop.progress import progress_bar
+from ..loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
 from ..loop.tokens import estimate_chat_prompt_tokens, observation_token_length
 from ..structures import Chain, Step
 
+# Extra tokens charged per tool observation for the chat-template prefix that wraps it
+# (e.g. ``<|im_start|>user<tool_response>`` ... ``</tool_response><|im_end|>``). Approximate;
+# used only for the max_model_len budget check, not for the actual prompt rendering.
+TOOL_OBS_PREFIX_TOKENS = 15
+# Headroom reserved below max_model_len for the context guard. The incremental
+# per-turn token estimate has a small residual drift (a few tokens: single-render
+# wrapper markers + generation suffix vs the flat TOOL_OBS_PREFIX_TOKENS), which
+# at the exact ceiling can let an over-length prompt slip to vLLM — which RAISES
+# and kills the whole run. Clipping the guard this far below max_model_len absorbs
+# that drift. Env-overridable.
+TOKEN_SAFETY_MARGIN = int(os.environ.get("AGENTFLY_TOKEN_SAFETY_MARGIN", "512"))
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ToolLoopResult:
+    """Internal control value yielded by :meth:`Rollout.execute_turn_tools` as its
+    last item — summarizes the tool-call loop's outcome for the strategy's turn loop.
+    Not a ``RolloutEvent``.
+
+    ``last_step`` is the final ``Action Input`` step (None if no valid tool ran).
+    ``terminated`` is True when the loop stopped early on ``max_model_len`` (finish_reason
+    is already set); the caller then ends the chain on ``last_step``.
+    """
+
+    last_step: Optional[Step]
+    num_tool_calls: int
+    have_set_resources: bool
+    terminated: bool
+
+
+# ---- mini-swe-agent format-error nudges (``config/mini.yaml`` ``format_error_template``,
+# mini-swe-agent 2.4.6, rendered for the "no tool calls" case). The same text appears in
+# the miniswe SFT trajectories, so it is on-distribution for models trained on them. ----
+NO_TOOL_CALL_MESSAGE_MINISWE = "miniswe"
+MINISWE_NO_TOOL_CALL_TEXT = (
+    "Tool call error:\n\n<error>\nNo tool calls found in the response. Every response "
+    "MUST include at least one tool call.\n</error>\n\nHere is general guidance on how "
+    "to submit correct toolcalls:\n\nEvery response needs to use the 'bash' tool at "
+    "least once to execute commands.\n\nCall the bash tool with your command as the "
+    'argument:\n- Tool: bash\n- Arguments: {"command": "your_command_here"}\n\nIf '
+    "you want to end the task, please issue the following command: `echo "
+    "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`\nwithout any other command."
+)
+MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT = (
+    "Your previous response reached the output token limit (finish_reason=length) "
+    "before you produced a tool call, so it was cut off. Respond more concisely and "
+    "finish with exactly one bash tool call. If you need to think more, do so briefly."
+)
 
 
 @dataclass(frozen=True)
@@ -74,13 +118,36 @@ class ChainRollout(Rollout):
         no_tool_call_message: Optional[str] = NO_TOOL_CALL_MESSAGE_MINISWE,
         project_actions: bool = False,
     ):
+        """See :meth:`Rollout.__init__` for the loop-control policy.
+
+        Under ``on_no_tool_call="continue"`` the loop mirrors mini-swe-agent's format-error
+        handling: a tool-less turn gets a corrective **user** message (the nudge) and the
+        model is queried again; ``max_consecutive_no_tool_calls`` tool-less turns in a row
+        end the chain (``0`` = unlimited), and any turn that carries a tool call resets
+        the streak. ``no_tool_call_message`` selects the nudge text: ``"miniswe"``
+        renders mini-swe-agent's own ``format_error_template`` (length-aware: a turn cut
+        off at the per-turn token cap gets the "reached the output token limit" variant),
+        any other string is used verbatim, and ``None`` continues silently (no nudge).
+        """
         super().__init__(
             on_no_tool_call=on_no_tool_call,
             on_invalid_tool_call=on_invalid_tool_call,
             on_tool_error=on_tool_error,
-            max_consecutive_no_tool_calls=max_consecutive_no_tool_calls,
-            no_tool_call_message=no_tool_call_message,
         )
+        try:
+            max_consecutive_no_tool_calls = int(max_consecutive_no_tool_calls)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"max_consecutive_no_tool_calls must be a non-negative int, got {max_consecutive_no_tool_calls!r}"
+            )
+        if max_consecutive_no_tool_calls < 0:
+            raise ValueError(
+                f"max_consecutive_no_tool_calls must be a non-negative int, got {max_consecutive_no_tool_calls!r}"
+            )
+        if no_tool_call_message is not None and not isinstance(no_tool_call_message, str):
+            raise ValueError(f"no_tool_call_message must be a str or None, got {no_tool_call_message!r}")
+        self.max_consecutive_no_tool_calls = max_consecutive_no_tool_calls
+        self.no_tool_call_message = no_tool_call_message or None
         # verl-agent-faithful ALWAYS-STEP rollout (same semantics as StepRollout): a turn
         # with no extractable ``<action>`` steps the env with the last-30-chars garbage
         # fallback (format-invalid, penalized) instead of ending, and the episode ends
@@ -104,43 +171,17 @@ class ChainRollout(Rollout):
             "chains": [c.to_json() for c in chains_list],
         }
 
-    def initialize_chains(
-        self, messages_list: MessagesList, num_chains: int
-    ) -> Tuple[Dict[str, Chain], Dict[str, Step]]:
+    def initialize_chains(self, specs: List[TrajectorySpec]) -> Tuple[Dict[str, Chain], Dict[str, Step]]:
+        """A :class:`Chain` (whose ``info`` is the spec's task metadata and ids) and its
+        root step for each spec, keyed by ``chain_id``."""
         chains = {}
         start_steps = {}
-        group_ids = [str(uuid.uuid4()) for _ in range(len(messages_list))]
-
-        for group_idx, messages in enumerate(messages_list):
-            group_id = group_ids[group_idx]
-            for j in range(num_chains):
-                cid = str(uuid.uuid4())
-                ch = Chain(
-                    messages.meta
-                    | {
-                        "chain_id": cid,
-                        "group_id": group_id,
-                        "group_idx": group_idx,
-                        "chain_idx": j,
-                    }
-                )
-                root = ch.add_step(type="Action Input", messages=deepcopy(messages.messages))
-
-                chains[cid] = ch
-                start_steps[cid] = root
-
+        for spec in specs:
+            ch = Chain(spec.info)
+            root = ch.add_step(type="Action Input", messages=deepcopy(spec.messages.messages))
+            chains[spec.chain_id] = ch
+            start_steps[spec.chain_id] = root
         return chains, start_steps
-
-    def validate_run_args(
-        self,
-        max_turns: int,
-        num_chains: int,
-        max_concurrent_chains: Optional[int],
-    ):
-        assert max_turns >= 1, "max_turns must be at least 1."
-        assert num_chains >= 1, "num_chains must be at least 1."
-        if max_concurrent_chains is not None:
-            assert max_concurrent_chains >= 1, "max_concurrent_chains must be at least 1 when set."
 
     async def run(
         self,
@@ -153,6 +194,7 @@ class ChainRollout(Rollout):
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
         use_token_ids: bool = True,
+        show_progress: bool = True,
         **kwargs,
     ) -> RunResult:
         """Drive the chain-based rollout and return its :class:`RunResult`.
@@ -160,7 +202,8 @@ class ChainRollout(Rollout):
         ``agent`` (the agent) is stashed for the run so the internal loop can reach
         agent state/hooks; the transient run-state is rebuilt each call.
         ``global_step`` sets the metrics x-axis (see ``Rollout.resolve_global_step``).
-        ``use_token_ids`` see ``Rollout.run``.
+        ``use_token_ids`` see ``Rollout.run``. ``show_progress`` renders a progress bar
+        over finished chains.
         """
         self.agent = agent
         self.use_token_ids = bool(use_token_ids)
@@ -175,6 +218,7 @@ class ChainRollout(Rollout):
             max_concurrent_chains=max_concurrent_chains,
             context_config=context_config,
             global_step=global_step,
+            show_progress=show_progress,
         ):
             pass
         return RunResult(trajectories=self.build_trajectories(agent), rollout="chain")
@@ -193,8 +237,8 @@ class ChainRollout(Rollout):
         """Run all chains concurrently and yield their merged :mod:`.events` stream.
 
         This is the single shared rollout path: the per-chain generator :meth:`_run_chain` is the loop,
-        and this method fans the per-chain event streams into one ``chain_id``-tagged
-        stream via a queue. Each chain populates ``self.chains`` / ``self.current_steps``
+        and :meth:`Rollout.run_all` fans the per-chain event streams into one ``chain_id``-tagged
+        stream. Each chain populates ``self.chains`` / ``self.current_steps``
         as it ends; this method just relays events and, when drained, emits step metrics.
         The metrics x is resolved before any chain starts so per-chain records and the
         end-of-run summaries share one step.
@@ -208,73 +252,30 @@ class ChainRollout(Rollout):
         self.reset()
         step = self.resolve_global_step(global_step)
 
-        messages_list = MessagesList.from_data(messages)
-        chains, first_steps = self.initialize_chains(messages_list, num_chains)
+        specs = self.make_specs(messages, num_chains)
+        chains, first_steps = self.initialize_chains(specs)
         # Prompt tools come from the agent's single source of truth (also used by
         # tokenize_trajectories), so generation and training render one prompt.
         tool_schemas = self.agent.prompt_tools()
 
-        q: asyncio.Queue = asyncio.Queue()
-        sem: Optional[asyncio.Semaphore] = (
-            asyncio.Semaphore(int(max_concurrent_chains)) if max_concurrent_chains is not None else None
-        )
-        done = object()  # sentinel pushed once every chain task has settled
+        def run_one(spec: TrajectorySpec):
+            return self._run_chain(
+                spec.chain_id,
+                first_steps[spec.chain_id],
+                chains[spec.chain_id],
+                tool_schemas,
+                max_turns,
+                generation_config,
+                context_config,
+            )
 
-        async def drive(cid: str, step: Step) -> None:
-            if sem is not None:
-                async with sem:
-                    async for ev in self._run_chain(
-                        cid,
-                        step,
-                        chains[cid],
-                        tool_schemas,
-                        max_turns,
-                        generation_config,
-                        context_config,
-                    ):
-                        await q.put(ev)
-            else:
-                async for ev in self._run_chain(
-                    cid,
-                    step,
-                    chains[cid],
-                    tool_schemas,
-                    max_turns,
-                    generation_config,
-                    context_config,
-                ):
-                    await q.put(ev)
-
-        tasks = [asyncio.create_task(drive(cid, step)) for cid, step in first_steps.items()]
-
-        async def _close():
-            # return_exceptions so one failing chain doesn't prevent the sentinel;
-            # the exceptions are re-raised below after the queue is fully drained.
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            await q.put(done)
-            return results
-
-        closer = asyncio.create_task(_close())
-
-        pbar = progress_bar(total=len(tasks)) if show_progress else None
-        try:
-            while True:
-                ev = await q.get()
-                if ev is done:
-                    break
-                if pbar is not None and isinstance(ev, ChainEnded):
-                    pbar.update(1)
-                yield ev
-        finally:
-            if pbar is not None:
-                pbar.close()
-
-        results = await closer
-        errors = [r for r in results if isinstance(r, BaseException)]
-        if errors:
-            # Fail loud (as the previous gather-based path did): surface the first
-            # chain error rather than silently dropping trajectories.
-            raise errors[0]
+        async for ev in self.run_all(
+            specs,
+            run_one,
+            max_concurrent_chains=max_concurrent_chains,
+            show_progress=show_progress,
+        ):
+            yield ev
 
         self.metrics.record_step(
             global_step=step,
@@ -302,8 +303,8 @@ class ChainRollout(Rollout):
         chain_started_at = time.monotonic()
 
         # Build Context from rollout data for tools that need it
-        context = Context(
-            rollout_id=chain_id,
+        context = self.new_context(
+            chain_id=chain_id,
             group_id=chain.info.get("group_id"),
             metadata=chain.info,
             context_config=context_config,
@@ -315,16 +316,7 @@ class ChainRollout(Rollout):
         depth = 0
         have_set_resources = False
 
-        # Optional per-chain hook: env-source-of-truth agents (e.g. WebShop) may reset the
-        # env with task_id and inject the env's instruction as the first user turn before
-        # generation, so the instruction the agent reads matches the goal it is graded on.
-        # The hook self-guards (no-op unless the task actually uses that env).
-        prepare_first_step = getattr(self.agent, "prepare_first_step", None)
-        if prepare_first_step is not None:
-            try:
-                await prepare_first_step(context, current_step)
-            except Exception as e:
-                logger.warning(f"prepare_first_step hook failed for chain {chain_id}: {e}")
+        await self.run_first_step_hook(self.agent, context, current_step, chain_id)
 
         while not current_step.is_terminal and depth < max_turns:
             turn_result: Optional[TurnResult] = None
@@ -354,7 +346,7 @@ class ChainRollout(Rollout):
         # Loop-only state; chain.info becomes the trajectory's metadata.
         chain.info.pop("no_tool_call_streak", None)
 
-        # Finalize chain (reward + cleanup) — shared L2.
+        # Finalize chain (reward + cleanup).
         await self.finalize_chain(self.agent, chain_id, chain, current_step, depth, context)
 
         chain_elapsed = time.monotonic() - chain_started_at
@@ -415,7 +407,7 @@ class ChainRollout(Rollout):
 
         The turn reads as a sequence of steps: context-length pre-check → generate →
         project actions → record/emit message → terminal check → run tool calls
-        (:meth:`Rollout.execute_turn_tools`) → decide outcome.
+        (:meth:`execute_turn_tools`) → decide outcome.
         """
         max_model_len = getattr(self.agent, "max_model_len", None)
 
@@ -595,7 +587,7 @@ class ChainRollout(Rollout):
             yield TurnResult(nudge_step, have_set_resources, True)
             return
 
-        # 4. Execute tool calls (shared L2). execute_turn_tools yields ToolObserved per
+        # 4. Execute tool calls. execute_turn_tools yields ToolObserved per
         # call and, as its last item, a ToolLoopResult summarizing the loop.
         loop_result: Optional[ToolLoopResult] = None
         async for item in self.execute_turn_tools(
@@ -625,3 +617,249 @@ class ChainRollout(Rollout):
             yield TurnResult(loop_result.last_step, have_set_resources, False)
             return
         yield TurnResult(loop_result.last_step, have_set_resources, True)
+
+    # ---- moved from Rollout: used only by the chain loop ----
+
+    def render_no_tool_call_message(self, *, truncated: bool = False) -> Optional[str]:
+        """The nudge text for a tool-less turn, or ``None`` when nudging is disabled.
+
+        ``truncated`` marks a turn whose generation filled the per-turn token budget
+        (mini-swe's ``finish_reason == "length"`` case), which selects the length-aware
+        variant of the mini-swe template.
+        """
+        if self.no_tool_call_message is None:
+            return None
+        if self.no_tool_call_message != NO_TOOL_CALL_MESSAGE_MINISWE:
+            return self.no_tool_call_message
+        if truncated:
+            return MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT
+        return MINISWE_NO_TOOL_CALL_TEXT
+
+    async def execute_turn_tools(
+        self,
+        agent,
+        *,
+        chain_id: str,
+        chain: Chain,
+        depth: int,
+        tools: List[Dict],
+        context: Context,
+        thought_step: Step,
+        newest_messages: Messages,
+        have_set_resources: bool,
+    ):
+        """Execute the assistant message's tool calls (supports multiple per turn).
+
+        Async generator: yields a ``ToolObserved`` per executed call and, as its **last**
+        item, exactly one :class:`ToolLoopResult`. Owns per-tool observation-step
+        bookkeeping, token accounting, context folding, and the mid-loop ``max_model_len``
+        termination.
+
+        Each tool result is resolved to a loop control via :meth:`resolve_tool_control`
+        (the tool's explicit ``control`` wins; else the ``status`` diagnosis routes to the
+        run policy). A malformed call (``status="invalid"``) → ``on_invalid_tool_call``; a
+        tool-body exception (``status="error"``) → ``on_tool_error``; a clean result
+        continues. ``raise`` fails fast; ``end`` marks the step terminal and stops the loop.
+        """
+        max_model_len = getattr(agent, "max_model_len", None)
+        num_tool_calls = 0
+        action_input_step: Optional[Step] = None
+        running_total_token_length = thought_step.total_token_length
+
+        for tool_call in thought_step.messages[-1].get("tool_calls") or []:
+            # A malformed call comes back as a ``status="invalid"`` result (submit_tool_call
+            # no longer raises); ``resolve_tool_control`` below routes it via the run policy.
+            result = await agent.execute_tool_call(
+                context,
+                tool_call,
+                newest_messages,
+                chain,
+                chain_id,
+                depth,
+                have_set_resources,
+            )
+            num_tool_calls += 1
+            have_set_resources = True
+
+            # The per-turn tool result is carried on the Step it produced
+            # (``action_input_step.tool_result``) — the single per-turn source for
+            # metric-averaging (logging, in finalize_chain) and feature harvesting
+            # (Trajectory.steps). One Step per tool call (== one turn for action agents).
+            action_input_step = chain.add_step(
+                type="Action Input",
+                messages=newest_messages.copy(),
+                description=result.arguments,
+                tool_result=result,
+            )
+            observation = result.observation
+            yield ToolObserved(
+                chain_id=chain_id,
+                depth=depth,
+                tool_name=tool_call["function"]["name"],
+                observation=observation,
+                status=result.status,
+                image=result.image,
+            )
+            obs_token_length = observation_token_length(agent, observation)
+            action_input_step.total_token_length = (
+                running_total_token_length + obs_token_length + TOOL_OBS_PREFIX_TOKENS
+            )
+            running_total_token_length = action_input_step.total_token_length
+
+            # Terminate if context length exceeded after this tool observation
+            if (
+                max_model_len is not None
+                and action_input_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
+            ):
+                action_input_step.is_terminal = True
+                chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
+                yield ToolLoopResult(action_input_step, num_tool_calls, have_set_resources, terminated=True)
+                return
+
+            new_content = [{"type": "text", "text": observation}]
+            if result.image:
+                image_base64 = image_to_data_uri(result.image)
+                new_content.append({"type": "image", "image": image_base64})
+
+            # Apply context folding based on the tool result (currently only summarize).
+            updated_messages, did_fold_context = self.apply_context_folding(
+                agent,
+                chain=chain,
+                messages=newest_messages,
+                tool_name=tool_call["function"]["name"],
+                observation=observation,
+                tool_call_id=tool_call["id"],
+                tool_result_name=result.name,
+                new_content=new_content,
+                context=context,
+            )
+
+            action_input_step.messages = updated_messages
+            newest_messages = updated_messages.copy()
+            if did_fold_context:
+                # Folded history is shorter; re-measure prompt tokens for the new
+                # messages (same path as first generation) instead of keeping the
+                # pre-fold cumulative total.
+                try:
+                    folded_prompt_tokens = estimate_chat_prompt_tokens(agent, action_input_step, tools=tools)
+                except ValueError:
+                    folded_prompt_tokens = 0
+                action_input_step.total_token_length = folded_prompt_tokens
+                running_total_token_length = folded_prompt_tokens
+
+            # Resolve this tool result to a loop control (tool's explicit ``control`` wins;
+            # else ``status`` routes to the run policy). ``raise`` aborts; ``end`` marks the
+            # step terminal and stops the tool loop; ``continue`` runs the next call / turn.
+            control = self.resolve_tool_control(result)
+            if control == CONTROL_RAISE:
+                self.raise_for_result(result)
+            action_input_step.is_terminal = control == CONTROL_END
+            if action_input_step.is_terminal:
+                break
+
+        yield ToolLoopResult(action_input_step, num_tool_calls, have_set_resources, terminated=False)
+
+    def apply_context_folding(
+        self,
+        agent,
+        chain: Chain,
+        messages: Messages,
+        tool_name: str,
+        observation: Any,
+        tool_call_id: str,
+        tool_result_name: str,
+        new_content: List[Dict[str, Any]],
+        context: Context,
+    ) -> Tuple[Messages, bool]:
+        """
+        Apply context folding based on the tool that was just executed.
+
+        Returns:
+            (updated Messages, did_fold) where ``did_fold`` is True when history was
+            replaced by a summarize fold (caller should refresh cumulative token counts).
+        """
+        tool_turn: Dict[str, Any] = {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_result_name,
+            "content": new_content,
+        }
+
+        # Currently we only support summarize; other tools are no-ops.
+        if tool_name == "summarize" and isinstance(observation, str):
+            # Before folding, append the full messages to the chain histories
+            # so training can still access the original, unfused trajectory.
+            chain.histories.append(messages.messages)
+
+            # Delegate folding policy to the tool module to get a folded view
+            # of the history up to this point, then append the tool message.
+            # Default behavior: keep only the fresh summary (do not stack summaries).
+            folded_turns = fold_messages_with_summarize(messages.messages, observation, keep_previous_summary=False)
+            context.trajectory_format = "segmented"
+            meta = messages.meta
+            return Messages.from_turns(folded_turns, **meta), True
+
+        # Default behavior for non-folding tools: just append the tool message.
+        turns = messages.messages + [tool_turn]
+        meta = messages.meta
+        return Messages.from_turns(turns, **meta), False
+
+    async def finalize_chain(self, agent, chain_id, chain, current_step, depth, context):
+        """Finalize the chain with reward calculation and cleanup."""
+        # Always record the final trajectory segment so that histories capture
+        chain.histories.append(current_step.messages.messages)
+
+        # The reward sees the whole conversation (every segment when context folding
+        # split it); a flat trajectory passes its single segment.
+        full_trajectory = [message for segment in chain.histories for message in segment]
+        chain.info["reward"] = await self.compute_reward(
+            agent,
+            context,
+            chain_id=chain_id,
+            trajectory=chain.histories[0] if context.trajectory_format == "flat" else chain.histories,
+            final_messages=full_trajectory,
+            reward_args=chain.info,
+        )
+
+        # Both strategies aggregate actual ToolResults, independent of Step layout.
+        chain.info["tool_metrics"] = aggregate_tool_metrics(step.tool_result for step in chain.steps())
+
+        await self.release_resources(context)
+
+    def build_trajectories(self, agent) -> List[Trajectory]:
+        """Build :class:`Trajectory` objects for every finished chain, in
+        ``(group_idx, chain_idx)`` order.
+
+        Reads ``chain.info``: ``reward`` and ``tool_metrics`` (set by
+        :meth:`finalize_chain`), ``finish_reason``, ``rollout_time_sec``, the ids, and
+        the task metadata (see :meth:`Rollout.make_trajectory`). Execution counts come
+        from the full chain's records, before filtering the internal
+        ``Trajectory.steps`` channel to tool-result steps.
+        """
+        items = list(self.current_steps.items())
+        items.sort(
+            key=lambda item: (
+                self.chains[item[0]].info.get("group_idx", 0),
+                self.chains[item[0]].info.get("chain_idx", 0),
+            )
+        )
+        trajectories: List[Trajectory] = []
+        for chain_id, _ in items:
+            chain = self.chains[chain_id]
+            info = chain.info
+            chain_steps = chain.steps()
+            trajectories.append(
+                self.make_trajectory(
+                    info=info,
+                    # Histories may contain multiple segments when context tools fold.
+                    segments=[Segment(messages=messages) for messages in chain.histories],
+                    reward=info.get("reward"),
+                    tool_metrics=info.get("tool_metrics"),
+                    finish_reason=info.get("finish_reason"),
+                    rollout_time_sec=info.get("rollout_time_sec"),
+                    num_turns=sum(s.type == "Thought" for s in chain_steps),
+                    tool_call_counts=count_tool_calls(s.tool_result for s in chain_steps),
+                    steps=[s for s in chain_steps if s.tool_result is not None],
+                )
+            )
+        return trajectories

@@ -20,26 +20,21 @@ the standalone training converter reads these segments and uses the internal
 ``trajectory.steps`` records for the corresponding environment signals.
 """
 
-import asyncio
 import json
 import logging
 import time
-import uuid
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from ....core import Context
 from ....core.context_config import ContextConfig
-from ....rewards.reward_base import calculate_reward
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
 from ....utils.monitor import Monitor
 from ...types import RunResult, Segment, Trajectory
-from ...utils.messages import Messages, MessagesList
-from ..base import Rollout
+from ...utils.messages import Messages
+from ..base import Rollout, TrajectorySpec
 from ..events import FinishReason
 from ..loop.generation import generate_response
 from ..loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
-from ..loop.progress import progress_bar
 from ..structures import Step
 from .prompt_builders import resolve_prompt_builder
 
@@ -90,12 +85,6 @@ class StepRollout(Rollout):
 
     # ---- L3: control flow -------------------------------------------------
 
-    def validate_run_args(self, max_turns, num_chains, max_concurrent_chains):
-        assert max_turns >= 1, "max_turns must be at least 1."
-        assert num_chains >= 1, "num_chains must be at least 1."
-        if max_concurrent_chains is not None:
-            assert max_concurrent_chains >= 1, "max_concurrent_chains must be >= 1 when set."
-
     async def run(
         self,
         agent,
@@ -125,70 +114,27 @@ class StepRollout(Rollout):
         Monitor.ensure_started()
         step = self.resolve_global_step(global_step)
 
-        messages_list = MessagesList.from_data(messages)
-        # Build the (task x num_chains) trajectory specs, sharing a group uid per task.
-        specs: List[Tuple[str, str, int, int, Any, Dict]] = []
-        for group_idx, task_messages in enumerate(messages_list):
-            uid = str(uuid.uuid4())
-            for chain_idx in range(num_chains):
-                traj_uid = str(uuid.uuid4())
-                meta = task_messages.meta | {
-                    "group_id": uid,
-                    "group_idx": group_idx,
-                    "chain_idx": chain_idx,
-                }
-                specs.append((traj_uid, uid, group_idx, chain_idx, task_messages, meta))
+        specs = self.make_specs(messages, num_chains)
+        results: Dict[str, Trajectory] = {}
 
-        sem = asyncio.Semaphore(int(max_concurrent_chains)) if max_concurrent_chains is not None else None
-
-        pbar = progress_bar(total=len(specs)) if show_progress else None
-
-        async def drive(spec) -> Trajectory:
-            try:
-                return await run_one(spec)
-            finally:
-                if pbar is not None:
-                    pbar.update(1)
-
-        async def run_one(spec) -> Trajectory:
-            traj_uid, uid, group_idx, chain_idx, task_messages, meta = spec
-            if sem is not None:
-                async with sem:
-                    return await self._run_trajectory(
-                        agent,
-                        traj_uid,
-                        uid,
-                        group_idx,
-                        chain_idx,
-                        task_messages,
-                        meta,
-                        max_turns,
-                        generation_config,
-                        context_config,
-                    )
-            return await self._run_trajectory(
+        async def run_one(spec: TrajectorySpec) -> None:
+            results[spec.chain_id] = await self._run_trajectory(
                 agent,
-                traj_uid,
-                uid,
-                group_idx,
-                chain_idx,
-                task_messages,
-                meta,
-                max_turns,
-                generation_config,
-                context_config,
+                spec,
+                max_turns=max_turns,
+                generation_config=generation_config,
+                context_config=context_config,
             )
 
-        try:
-            results = await asyncio.gather(*(drive(s) for s in specs), return_exceptions=True)
-        finally:
-            if pbar is not None:
-                pbar.close()
-        errors = [r for r in results if isinstance(r, BaseException)]
-        if errors:
-            raise errors[0]
+        async for _ev in self.run_all(
+            specs,
+            run_one,
+            max_concurrent_chains=max_concurrent_chains,
+            show_progress=show_progress,
+        ):
+            pass
 
-        trajectories = list(results)
+        trajectories = [results[spec.chain_id] for spec in specs]
         # Shared end-of-rollout reporting reads the completed trajectories, including
         # episode durations for timing summaries and slowest-trajectory logging.
         self.metrics.record_step(
@@ -200,23 +146,24 @@ class StepRollout(Rollout):
     async def _run_trajectory(
         self,
         agent,
-        traj_uid,
-        uid,
-        group_idx,
-        chain_idx,
-        task_messages,
-        meta,
-        max_turns,
-        generation_config,
-        context_config,
+        spec: TrajectorySpec,
+        *,
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]],
+        context_config: Optional[ContextConfig],
     ) -> Trajectory:
         """One trajectory's async step-loop. Emits one :class:`Step` per env step and
         returns the per-rollout :class:`Trajectory` (reward = episode outcome)."""
         # Match chain timing: setup through cleanup, excluding semaphore queueing.
         rollout_started_at = time.monotonic()
-        context = Context(
-            rollout_id=traj_uid,
-            group_id=uid,
+        traj_uid = spec.chain_id
+        task_messages = spec.messages
+        # Task metadata and the group ids; the chain id is not passed to the context
+        # metadata or the reward function (unlike ChainRollout).
+        meta = {k: v for k, v in spec.info.items() if k != "chain_id"}
+        context = self.new_context(
+            chain_id=traj_uid,
+            group_id=spec.group_id,
             metadata=meta,
             context_config=context_config,
         )
@@ -228,12 +175,7 @@ class StepRollout(Rollout):
             type="Action Input",
             messages=Messages.from_turns(deepcopy(task_messages.messages)),
         )
-        prepare_first_step = getattr(agent, "prepare_first_step", None)
-        if prepare_first_step is not None:
-            try:
-                await prepare_first_step(context, first_step)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"prepare_first_step failed for {traj_uid}: {e}")
+        await self.run_first_step_hook(agent, context, first_step, traj_uid)
         # Structured pre-action context for the prompt builder. ``current`` is the step the
         # model is about to act on; ``history`` is the prior steps (oldest first). Both carry
         # raw + bundled obs so either builder (chat window / flat verl-agent) can render.
@@ -384,29 +326,18 @@ class StepRollout(Rollout):
         else:
             finish_reason = FinishReason.MAX_TURNS
 
-        # Episode outcome (reuse the L2 reward path). Scale 1.0.
-        outcome: Optional[float] = None
-        reward_extras: Dict[str, Any] = {}
-        if agent.reward_fn is not None:
-            context.trajectory = full_messages
-            final_response = agent.extract_final_response(full_messages)
-            context.final_response = final_response
-            reward = await calculate_reward(
-                agent.reward_fn,
-                final_response=final_response,
-                trajectory=full_messages,
-                id=traj_uid,
-                context=context,
-                **{k: v for k, v in meta.items() if k not in ("final_response", "trajectory", "id")},
-            )
-            outcome = float(getattr(reward, "reward", reward) or 0.0)
-            reward_extras = dict(getattr(reward, "metrics", {}) or {})
+        # Episode outcome on the full (unwindowed) conversation.
+        reward = await self.compute_reward(
+            agent,
+            context,
+            chain_id=traj_uid,
+            trajectory=full_messages,
+            final_messages=full_messages,
+            reward_args=meta,
+        )
+        tool_metrics = aggregate_tool_metrics(step.tool_result for step in steps)
 
-        # Match chain's merge precedence: tool aggregates own the tool/* namespace.
-        reward_extras.update(aggregate_tool_metrics(step.tool_result for step in steps))
-
-        await context.release_resource(scope="global")
-        await context.end_resource(scope="rollout")
+        await self.release_resources(context)
         rollout_time_sec = time.monotonic() - rollout_started_at
 
         # One segment PER GENERATION (each the bounded prompt + response) — so
@@ -414,20 +345,15 @@ class StepRollout(Rollout):
         # structure used by the standalone training converter, not a chain-like blob.
         # (The episode reward above used ``full_messages``; segments are the training
         # units.)
-        return Trajectory(
+        return self.make_trajectory(
+            info=spec.info,
             segments=([Segment(messages=s.messages.messages) for s in steps] if steps else [Segment(messages=[])]),
-            reward=outcome,
-            metrics=reward_extras,
-            group_id=uid,
-            chain_id=traj_uid,
-            group_idx=group_idx,
-            chain_idx=chain_idx,
+            reward=reward,
+            tool_metrics=tool_metrics,
             finish_reason=finish_reason,
             rollout_time_sec=rollout_time_sec,
             num_turns=len(steps),
             tool_call_counts=count_tool_calls(s.tool_result for s in steps),
-            # Keep task data, not context scratch state or duplicated typed fields.
-            metadata={k: v for k, v in meta.items() if k not in self._RESERVED_INFO_KEYS},
             steps=steps,
         )
 

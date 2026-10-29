@@ -94,15 +94,13 @@ async def fake_reward(*args, **kwargs):
 
 @pytest.fixture
 def isolated_runtime(monkeypatch):
+    monkeypatch.setattr(rollout_base, "Context", FakeContext)
     for module in (chain_rollout, step_rollout):
-        monkeypatch.setattr(module, "Context", FakeContext)
         monkeypatch.setattr(module, "generate_response", fake_generation)
-    for module in (rollout_base, step_rollout):
-        monkeypatch.setattr(module, "calculate_reward", fake_reward)
-    monkeypatch.setattr(rollout_base, "observation_token_length", lambda *a, **k: 1)
-    monkeypatch.setattr(rollout_base, "estimate_chat_prompt_tokens", lambda *a, **k: 10)
-    for module in (chain_rollout, step_rollout):
-        monkeypatch.setattr(module, "progress_bar", lambda *a, **k: None)
+    monkeypatch.setattr(rollout_base, "calculate_reward", fake_reward)
+    monkeypatch.setattr(chain_rollout, "observation_token_length", lambda *a, **k: 1)
+    monkeypatch.setattr(chain_rollout, "estimate_chat_prompt_tokens", lambda *a, **k: 10)
+    monkeypatch.setattr(rollout_base, "progress_bar", lambda *a, **k: None)
     monkeypatch.setattr(chain_rollout.Monitor, "ensure_started", lambda: None)
     # Exercise real metric aggregation, but do not write to monitor sinks.
     events = []
@@ -482,10 +480,9 @@ async def test_execution_time_includes_setup_reward_and_cleanup_but_not_queueing
         clock[0] += 7.0
         return await fake_reward(*args, **kwargs)
 
-    monkeypatch.setattr(module, "Context", TimedContext)
+    monkeypatch.setattr(rollout_base, "Context", TimedContext)
     monkeypatch.setattr(module, "generate_response", generate)
     monkeypatch.setattr(rollout_base, "calculate_reward", reward)
-    monkeypatch.setattr(step_rollout, "calculate_reward", reward)
     agent = FakeAgent([[]])
     monkeypatch.setattr(agent, "prepare_first_step", prepare, raising=False)
     strategy = strategy_cls()
@@ -526,7 +523,6 @@ async def test_no_reward_function_returns_none(strategy_cls, tool_names, monkeyp
         pytest.fail("No reward function is configured; reward evaluation must not run.")
 
     monkeypatch.setattr(rollout_base, "calculate_reward", unexpected_reward)
-    monkeypatch.setattr(step_rollout, "calculate_reward", unexpected_reward)
     agent = FakeAgent(tool_names, terminal_after=1)
     agent.reward_fn = None
     result = await run(strategy_cls(), agent)
@@ -542,7 +538,6 @@ async def test_computed_zero_reward_is_not_missing(strategy_cls, monkeypatch, is
         return RewardResult(reward=0.0, metrics={"accuracy": 0.0})
 
     monkeypatch.setattr(rollout_base, "calculate_reward", zero_reward)
-    monkeypatch.setattr(step_rollout, "calculate_reward", zero_reward)
     result = await run(strategy_cls(), FakeAgent([[]]))
     assert result.rewards == [0.0]
     assert result[0].metrics["accuracy"] == 0.0
@@ -612,7 +607,6 @@ async def test_rollouts_merge_the_same_tool_metric_averages(
 
     monkeypatch.setattr(agent, "execute_tool_call", execute)
     monkeypatch.setattr(rollout_base, "calculate_reward", reward)
-    monkeypatch.setattr(step_rollout, "calculate_reward", reward)
     result = await run(strategy_cls(), agent)
     trajectory = result[0]
     expected = {"tool/act/valid": 0.5, "tool/act/cost": 3.0, "tool/act/step_reward": 0.5}
@@ -713,7 +707,7 @@ async def test_tool_raise_still_raises_instead_of_returning_a_finish_reason(
 async def test_chain_context_limit_takes_precedence_over_tool_end(isolated_runtime):
     agent = FakeAgent([["act"]], terminal_after=1)
     # Generation uses 10 tokens, then observation + wrapper exceeds the 11-token guard.
-    agent.max_model_len = rollout_base.TOKEN_SAFETY_MARGIN + 11
+    agent.max_model_len = chain_rollout.TOKEN_SAFETY_MARGIN + 11
     result = await run(chain_rollout.ChainRollout(), agent)
     assert agent.tool_calls == 1
     assert result[0].finish_reason == "max_model_len"
@@ -914,7 +908,7 @@ async def test_chain_projection_respects_context_limits(
 ):
     agent = FakeAgent([[]], terminal_after=1)
     agent.action_tool_name = "act"
-    agent.max_model_len = rollout_base.TOKEN_SAFETY_MARGIN + budget
+    agent.max_model_len = chain_rollout.TOKEN_SAFETY_MARGIN + budget
     result = await run(chain_rollout.ChainRollout(project_actions=True), agent)
     assert result[0].finish_reason == "max_model_len"
     assert result[0].num_turns == expected_turns
