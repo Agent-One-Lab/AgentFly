@@ -101,7 +101,7 @@ async def test_chess_smoke_e2e():
     await agent.run(
         messages=messages,
         max_turns=2,
-        num_chains=1,
+        group_size=1,
     )
 
     # Trajectories should be populated

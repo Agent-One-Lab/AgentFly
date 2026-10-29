@@ -142,7 +142,7 @@ async def generate_response(
     current_step,
     tools,
     depth,
-    chain_id,
+    episode_id,
     generation_config,
     context: "Context",
     use_token_ids: bool = True,

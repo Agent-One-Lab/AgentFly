@@ -37,7 +37,7 @@ async def test_image_agent_client():
         }
     ]
     result = await agent.run(
-        messages=messages_list, max_turns=4, num_chains=1
+        messages=messages_list, max_turns=4, group_size=1
     )
     print_trajectory(result[0])
 
@@ -75,7 +75,7 @@ async def test_image_agent_openai():
         }
     ]
     result = await agent.run(
-        messages=messages_list, max_turns=5, num_chains=1
+        messages=messages_list, max_turns=5, group_size=1
     )
     print_trajectory(result[0])
 
@@ -118,7 +118,7 @@ async def test_image_agent_async_vllm(release_image_agent):
     ]
     try:
         result = await agent.run(
-            messages=messages_list, max_turns=4, num_chains=1
+            messages=messages_list, max_turns=4, group_size=1
         )
         print_trajectory(result[0])
     finally:

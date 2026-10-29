@@ -13,7 +13,7 @@ from .utils import get_patch_from_runtime
 
 # asyncio.to_thread only prevents blocking the event loop; it does not shorten wall-clock
 # time. Within one reward the steps are inherently sequential (need patch before evaluate).
-# For parallelism: use num_chains > 1 so multiple rewards run concurrently across rollouts.
+# For parallelism: use group_size > 1 so multiple rewards run concurrently across rollouts.
 
 # Default timeout (seconds) for evaluate_swesmith; override via context.metadata["eval_timeout"].
 DEFAULT_EVAL_TIMEOUT = 240

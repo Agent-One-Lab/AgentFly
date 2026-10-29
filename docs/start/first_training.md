@@ -83,7 +83,7 @@ or replace `trainer.logger=['console','wandb']` with `trainer.logger=['console']
 |---|---|---|
 | `model` | `agent.init_config.model_name_or_path`, `actor_rollout_ref.model.path` | Base model to train (set both). |
 | `train_batch_size` | `data.train_batch_size` | **Tasks** (prompts) per training step. |
-| `num_chains` | `agent.run_config.num_chains` | Attempts per task. GRPO compares the attempts of one task, so use at least 2. |
+| `group_size` | `agent.run_config.group_size` | Attempts per task. GRPO compares the attempts of one task, so use at least 2. |
 | `ppo_mini_batch_size` | `actor_rollout_ref.actor.ppo_mini_batch_size` | **Trajectory rows** per optimizer step (see below). |
 | `ppo_micro_batch_size_per_gpu` | `actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu` | Rows per forward/backward pass on one GPU. Only affects memory, not the result. |
 | `max_turns` | `agent.run_config.max_turns` | Model generations per attempt. Leave room for the final answer: the reward grades the model's last message (or an answer tool's output), not a tool result. The example uses 3 (call the calculator, read the result, answer). |
@@ -94,10 +94,10 @@ or replace `trainer.logger=['console','wandb']` with `trainer.logger=['console']
 ### Batch sizes
 
 `data.train_batch_size` counts tasks, but the PPO batch sizes count **trajectory rows**. Each
-task produces `num_chains` rows (more with step rollouts or context folding, which record several
+task produces `group_size` rows (more with step rollouts or context folding, which record several
 rows per attempt). With the example's 64 tasks × 8 chains, a step has 512 rows:
 
-- `ppo_mini_batch_size = train_batch_size × num_chains = 512` gives one optimizer step per
+- `ppo_mini_batch_size = train_batch_size × group_size = 512` gives one optimizer step per
   training step, fully on-policy. A smaller value splits the rows into several optimizer steps.
 - Each GPU's share of a mini-batch (`ppo_mini_batch_size / number of GPUs`) must be a multiple of
   `ppo_micro_batch_size_per_gpu`.
@@ -129,7 +129,7 @@ step:12 - actor/pg_loss:... critic/score/mean:0.412 ... reward_extra/rm_<key>/me
 
 | `[Rollout]` field | Meaning |
 |---|---|
-| `trajs` | Trajectories this step (tasks × `num_chains`). |
+| `trajs` | Trajectories this step (tasks × `group_size`). |
 | `reward_mean`, `reward>0` | Mean reward, and how many trajectories got a reward above 0. `reward>0` is the success count only for 0-or-N rewards (ALFWorld, WebShop); a partial-credit reward (e.g. 0.1 for a wrong answer that used a tool) also counts. |
 | `turns`, `tool_calls` | Average model turns and tool calls per trajectory, with totals per tool. |
 | `groups(...)` | Share of tasks whose attempts all pass (reward ≥ 1), all fail, or differ. GRPO learns only from mixed groups. Shown when tasks have several attempts. |

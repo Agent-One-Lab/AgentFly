@@ -85,7 +85,7 @@ JUDGES_ENV=/path/to/judges.env sbatch examples/train_scripts/simuscene/train_sim
 The reference script defaults to:
 
 - 2 nodes × 8 GPUs (configure via `#SBATCH --nodes`).
-- GRPO with `num_chains=8`, `train_batch_size=32`, `mini_batch_size=128`.
+- GRPO with `group_size=8`, `train_batch_size=32`, `mini_batch_size=128`.
 - `max_turns=1` (single-shot code generation; the agent answers once via the
   `answer_qa` tool and the rendered video is judged).
 - WandB project `SimuScene`.

@@ -79,9 +79,9 @@ class TestTrajectoryConstruction:
             metrics={"f1": 0.8, "em": 1.0},
             finish_reason="terminal",
             rollout_time_sec=1.5,
-            chain_id="cid-1",
+            episode_id="cid-1",
             group_id="gid-1",
-            chain_idx=0,
+            episode_idx=0,
             group_idx=0,
             metadata={"answer": "42", "task_id": 7},
             runtime_info={"k": "v"},
@@ -89,7 +89,7 @@ class TestTrajectoryConstruction:
         assert t.reward == 0.7
         assert t.metrics == {"f1": 0.8, "em": 1.0}
         assert t.metadata == {"answer": "42", "task_id": 7}
-        assert t.chain_id == "cid-1"
+        assert t.episode_id == "cid-1"
         assert t.finish_reason == "terminal"
 
 
@@ -152,13 +152,13 @@ class TestTrajectorySerialization:
             segments=[Segment(messages=[{"role": "user", "content": "hi"}])],
             reward=0.5,
             metrics={"f1": 0.8},
-            chain_id="cid-1",
+            episode_id="cid-1",
         )
         info = t.model_dump(exclude={"segments"})
         assert "segments" not in info
         assert info["reward"] == 0.5
         assert info["metrics"] == {"f1": 0.8}
-        assert info["chain_id"] == "cid-1"
+        assert info["episode_id"] == "cid-1"
 
 
 class TestRunResult:
@@ -266,9 +266,9 @@ class TestTrajectoryReservedKeysLogic:
             "reward",
             "finish_reason",
             "rollout_time_sec",
-            "chain_id",
+            "episode_id",
             "group_id",
-            "chain_idx",
+            "episode_idx",
             "group_idx",
         }
         traj_fields = set(Trajectory.model_fields.keys())

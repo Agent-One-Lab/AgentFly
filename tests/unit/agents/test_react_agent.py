@@ -37,5 +37,5 @@ Input: {"query": "test query"}"""
     messages = [
         {"messages": [{"role": "user", "content": "What is the capital of France?"}]}
     ]
-    run_result = await agent.run(max_turns=4, messages=messages, num_chains=1)
+    run_result = await agent.run(max_turns=4, messages=messages, group_size=1)
     print(run_result.trajectories)

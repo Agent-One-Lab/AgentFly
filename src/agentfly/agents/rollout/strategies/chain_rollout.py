@@ -24,8 +24,8 @@ from ...types import RunResult, Segment, Trajectory
 from ...utils.messages import Messages
 from ..base import EpisodeSpec, Rollout
 from ..events import (
-    ChainEnded,
-    ChainStarted,
+    EpisodeEnded,
+    EpisodeStarted,
     FinishReason,
     MessageProduced,
     ToolObserved,
@@ -173,7 +173,7 @@ class ChainRollout(Rollout):
 
     def initialize_chains(self, specs: List[EpisodeSpec]) -> Tuple[Dict[str, Chain], Dict[str, Step]]:
         """A :class:`Chain` (whose ``info`` is the spec's task metadata and ids) and its
-        root step for each spec, keyed by ``episode_id`` (the chain id)."""
+        root step for each spec, keyed by ``episode_id``."""
         chains = {}
         start_steps = {}
         for spec in specs:
@@ -188,9 +188,9 @@ class ChainRollout(Rollout):
         agent,
         messages: List[Dict],
         max_turns: int,
-        num_chains: int,
+        group_size: int,
         generation_config: Optional[Dict[str, Any]] = None,
-        max_concurrent_chains: Optional[int] = None,
+        max_concurrent_episodes: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
         use_token_ids: bool = True,
@@ -213,9 +213,9 @@ class ChainRollout(Rollout):
         async for _ev in self.stream(
             messages,
             max_turns=max_turns,
-            num_chains=num_chains,
+            group_size=group_size,
             generation_config=generation_config,
-            max_concurrent_chains=max_concurrent_chains,
+            max_concurrent_episodes=max_concurrent_episodes,
             context_config=context_config,
             global_step=global_step,
             show_progress=show_progress,
@@ -227,9 +227,9 @@ class ChainRollout(Rollout):
         self,
         messages: List[Dict],
         max_turns: int,
-        num_chains: int,
+        group_size: int,
         generation_config: Optional[Dict[str, Any]] = None,
-        max_concurrent_chains: Optional[int] = None,
+        max_concurrent_episodes: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
         show_progress: bool = True,
@@ -237,7 +237,7 @@ class ChainRollout(Rollout):
         """Run all chains concurrently and yield their merged :mod:`.events` stream.
 
         This is the single shared rollout path: the per-chain generator :meth:`run_episode` is the loop,
-        and :meth:`Rollout.run_episodes` fans the per-chain event streams into one ``chain_id``-tagged
+        and :meth:`Rollout.run_episodes` fans the per-chain event streams into one ``episode_id``-tagged
         stream. Each chain populates ``self.chains`` / ``self.current_steps``
         as it ends; this method just relays events and, when drained, emits step metrics.
         The metrics x is resolved before any chain starts so per-chain records and the
@@ -247,12 +247,12 @@ class ChainRollout(Rollout):
             show_progress: render a ``tqdm`` bar over chain completion. Disable when a
                 consumer owns the terminal (e.g. the Textual console).
         """
-        self.validate_run_args(max_turns, num_chains, max_concurrent_chains)
+        self.validate_run_args(max_turns, group_size, max_concurrent_episodes)
         Monitor.ensure_started()
         self.reset()
         step = self.resolve_global_step(global_step)
 
-        specs = self.make_specs(messages, num_chains)
+        specs = self.make_specs(messages, group_size)
         chains, first_steps = self.initialize_chains(specs)
         # Prompt tools come from the agent's single source of truth (also used by
         # tokenize_trajectories), so generation and training render one prompt.
@@ -272,7 +272,7 @@ class ChainRollout(Rollout):
         async for ev in self.run_episodes(
             specs,
             run_episode,
-            max_concurrent_chains=max_concurrent_chains,
+            max_concurrent_episodes=max_concurrent_episodes,
             show_progress=show_progress,
         ):
             yield ev
@@ -284,7 +284,7 @@ class ChainRollout(Rollout):
 
     async def run_episode(
         self,
-        chain_id: str,
+        episode_id: str,
         first_step: Step,
         chain: Chain,
         tools: List[Dict],
@@ -304,24 +304,24 @@ class ChainRollout(Rollout):
 
         # Build Context from rollout data for tools that need it
         context = self.make_context(
-            episode_id=chain_id,
+            episode_id=episode_id,
             group_id=chain.info.get("group_id"),
             metadata=chain.info,
             context_config=context_config,
         )
 
-        yield ChainStarted(chain_id=chain_id, group_id=chain.info.get("group_id"))
+        yield EpisodeStarted(episode_id=episode_id, group_id=chain.info.get("group_id"))
 
         current_step = first_step
         depth = 0
         have_set_resources = False
 
-        await self.run_first_step_hook(self.agent, context, current_step, chain_id)
+        await self.run_first_step_hook(self.agent, context, current_step, episode_id)
 
         while not current_step.is_terminal and depth < max_turns:
             turn_result: Optional[TurnResult] = None
             async for item in self.run_turn(
-                chain_id=chain_id,
+                episode_id=episode_id,
                 chain=chain,
                 current_step=current_step,
                 depth=depth,
@@ -347,21 +347,21 @@ class ChainRollout(Rollout):
         chain.info.pop("no_tool_call_streak", None)
 
         # Finalize chain (reward + cleanup).
-        await self.finalize_chain(self.agent, chain_id, chain, current_step, depth, context)
+        await self.finalize_chain(self.agent, episode_id, chain, current_step, depth, context)
 
         chain.info["rollout_time_sec"] = time.monotonic() - started_at
 
         # This chain owns its final state; stream reads from here, not from events.
-        self.chains[chain_id] = chain
-        self.current_steps[chain_id] = current_step
+        self.chains[episode_id] = chain
+        self.current_steps[episode_id] = current_step
 
-        self.metrics.record_chain(
+        self.metrics.record_episode(
             global_step=self.global_step,
             trajectory=chain.histories,
             info=chain.info,
         )
 
-        yield ChainEnded(chain_id=chain_id, finish_reason=chain.info.get("finish_reason"))
+        yield EpisodeEnded(episode_id=episode_id, finish_reason=chain.info.get("finish_reason"))
 
     def generation_filled_budget(self, new_msg: Dict[str, Any], current_step: Step, tools, generation_config) -> bool:
         """True when the sampled response used its whole per-turn token budget.
@@ -385,7 +385,7 @@ class ChainRollout(Rollout):
 
     async def run_turn(
         self,
-        chain_id: str,
+        episode_id: str,
         chain: Chain,
         current_step: Step,
         depth: int,
@@ -437,7 +437,7 @@ class ChainRollout(Rollout):
                     or (exact >= 0 and abs(exact - incr) > 100)
                 ):
                     logger.info(
-                        f"[TOKDBG] chain={chain_id} depth={depth} incr={incr} "
+                        f"[TOKDBG] episode={episode_id} depth={depth} incr={incr} "
                         f"exact={exact} drift={(exact - incr) if exact >= 0 else 'NA'} "
                         f"max={max_model_len} guard_fires={incr >= max_model_len} "
                         f"exact_over={(exact > max_model_len) if exact >= 0 else 'NA'} "
@@ -464,7 +464,7 @@ class ChainRollout(Rollout):
                 current_step=current_step,
                 tools=tools,
                 depth=depth,
-                chain_id=chain_id,
+                episode_id=episode_id,
                 generation_config=generation_config,
                 context=context,
                 use_token_ids=self.use_token_ids,
@@ -483,7 +483,7 @@ class ChainRollout(Rollout):
                 or "max_tokens must be at least 1" in error_text
             ):
                 logger.warning(
-                    f"[TOKDBG] OVER-LENGTH at generation (chain={chain_id} "
+                    f"[TOKDBG] OVER-LENGTH at generation (episode={episode_id} "
                     f"depth={depth}) — aborting chain, not raising. incr="
                     f"{current_step.total_token_length} max={max_model_len} :: {error_text[:180]}"
                 )
@@ -510,7 +510,7 @@ class ChainRollout(Rollout):
         )
         thought_step.total_token_length = total_token_length if total_token_length is not None else 0
         yield MessageProduced(
-            chain_id=chain_id,
+            episode_id=episode_id,
             depth=depth,
             message=new_msg,
             total_token_length=total_token_length,
@@ -595,7 +595,7 @@ class ChainRollout(Rollout):
         loop_result: Optional[ToolLoopResult] = None
         async for item in self.execute_turn_tools(
             self.agent,
-            chain_id=chain_id,
+            episode_id=episode_id,
             chain=chain,
             depth=depth,
             tools=tools,
@@ -642,7 +642,7 @@ class ChainRollout(Rollout):
         self,
         agent,
         *,
-        chain_id: str,
+        episode_id: str,
         chain: Chain,
         depth: int,
         tools: List[Dict],
@@ -677,7 +677,7 @@ class ChainRollout(Rollout):
                 tool_call,
                 newest_messages,
                 chain,
-                chain_id,
+                episode_id,
                 depth,
                 have_set_resources,
             )
@@ -696,7 +696,7 @@ class ChainRollout(Rollout):
             )
             observation = result.observation
             yield ToolObserved(
-                chain_id=chain_id,
+                episode_id=episode_id,
                 depth=depth,
                 tool_name=tool_call["function"]["name"],
                 observation=observation,
@@ -807,7 +807,7 @@ class ChainRollout(Rollout):
         meta = messages.meta
         return Messages.from_turns(turns, **meta), False
 
-    async def finalize_chain(self, agent, chain_id, chain, current_step, depth, context):
+    async def finalize_chain(self, agent, episode_id, chain, current_step, depth, context):
         """Finalize the chain with reward calculation and cleanup."""
         # Always record the final trajectory segment so that histories capture
         chain.histories.append(current_step.messages.messages)
@@ -818,7 +818,7 @@ class ChainRollout(Rollout):
         chain.info["reward"] = await self.compute_reward(
             agent,
             context,
-            episode_id=chain_id,
+            episode_id=episode_id,
             trajectory=chain.histories[0] if context.trajectory_format == "flat" else chain.histories,
             final_messages=full_trajectory,
             reward_args=chain.info,
@@ -831,7 +831,7 @@ class ChainRollout(Rollout):
 
     def build_trajectories(self, agent) -> List[Trajectory]:
         """Build :class:`Trajectory` objects for every finished chain, in
-        ``(group_idx, chain_idx)`` order.
+        ``(group_idx, episode_idx)`` order.
 
         Reads ``chain.info``: ``reward`` and ``tool_metrics`` (set by
         :meth:`finalize_chain`), ``finish_reason``, ``rollout_time_sec``, the ids, and
@@ -843,12 +843,12 @@ class ChainRollout(Rollout):
         items.sort(
             key=lambda item: (
                 self.chains[item[0]].info.get("group_idx", 0),
-                self.chains[item[0]].info.get("chain_idx", 0),
+                self.chains[item[0]].info.get("episode_idx", 0),
             )
         )
         trajectories: List[Trajectory] = []
-        for chain_id, _ in items:
-            chain = self.chains[chain_id]
+        for episode_id, _ in items:
+            chain = self.chains[episode_id]
             info = chain.info
             chain_steps = chain.steps()
             trajectories.append(

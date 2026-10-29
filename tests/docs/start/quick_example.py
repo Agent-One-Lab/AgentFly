@@ -35,7 +35,7 @@ async def test_quick_example():
     result = await agent.run(
         messages=messages,
         max_turns=3,
-        num_chains=1,
+        group_size=1,
     )
     # --8<-- [end:agent_run]
 
@@ -130,7 +130,7 @@ async def test_tool_reward():
     result = await agent.run(
         messages=messages,
         max_turns=3,
-        num_chains=5,  # Generate 5 trajectories for the query
+        group_size=5,  # Generate 5 trajectories for the query
     )
     # --8<-- [end:run_with_answer]
 

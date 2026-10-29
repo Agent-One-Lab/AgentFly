@@ -30,9 +30,9 @@ def run_result():
                 reward=1.0,
                 metrics={"resolved": True, "output": {"patch": "+fixed"}},
                 metadata={"instance_id": "org/repo:1", "task_id": 17},
-                chain_id="chain-1",
+                episode_id="chain-1",
                 group_id="group-1",
-                chain_idx=0,
+                episode_idx=0,
                 group_idx=0,
                 finish_reason="terminal",
                 rollout_time_sec=1.5,
@@ -135,8 +135,8 @@ def test_run_helper_returns_exact_result(monkeypatch, run_result, agent_kind, to
         data_parallel_size=1,
         messages=messages,
         max_turns=5,
-        num_chains=2,
-        max_concurrent_chains=3,
+        group_size=2,
+        max_concurrent_episodes=3,
         temperature=0.25,
         resource_backend="local",
     ))
@@ -168,9 +168,9 @@ def test_run_helper_returns_exact_result(monkeypatch, run_result, agent_kind, to
     agent.run.assert_awaited_once_with(
         messages=messages,
         max_turns=5,
-        num_chains=2,
+        group_size=2,
         generation_config={"temperature": 0.25},
-        max_concurrent_chains=3,
+        max_concurrent_episodes=3,
         context_config=context_config,
     )
 

@@ -41,7 +41,7 @@ async def test_vision_agent():
         }
     ]
 
-    result = await react_agent.run(max_turns=3, messages=messages, num_chains=10)
+    result = await react_agent.run(max_turns=3, messages=messages, group_size=10)
     print_trajectory(result[0])
     # Inspect tokenization directly; no rollout object is needed.
     inputs = tokenize_trajectories(

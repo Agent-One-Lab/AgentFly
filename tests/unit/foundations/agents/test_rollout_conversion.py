@@ -33,7 +33,7 @@ def make_trajectory(cid, group, count, reward, metrics):
         ))
     return Trajectory(
         segments=[Segment(messages=s.messages.messages) for s in steps],
-        steps=steps, chain_id=cid, group_id=group, reward=reward, metrics=metrics,
+        steps=steps, episode_id=cid, group_id=group, reward=reward, metrics=metrics,
     )
 
 
@@ -420,7 +420,7 @@ async def test_convert_earlier_run_without_execution_state(
     first = await run_result(first_kind, "first", 0.75)
     first_before = deepcopy(first.model_dump())
     second = await run_result(second_kind, "second", -0.25)
-    assert second[0].chain_id == "second"
+    assert second[0].episode_id == "second"
     assert second.rewards == [-0.25]
     assert first.model_dump() == first_before
 
@@ -483,11 +483,11 @@ def test_conversion_selects_training_rows_without_mutating_result(
     trajectory.segments[5] = Segment(messages=[{"role": "tool", "content": "tail"}])
     masked_trajectory = make_trajectory("B", "G2", 1, None, {})
     result = RunResult(rollout=kind, trajectories=[
-        Trajectory(segments=[], chain_id="empty"),
+        Trajectory(segments=[], episode_id="empty"),
         trajectory,
         masked_trajectory,
         # Matches the zero-generation step rollout's placeholder view as well.
-        Trajectory(segments=[Segment(messages=[])], chain_id="context_only"),
+        Trajectory(segments=[Segment(messages=[])], episode_id="context_only"),
     ])
     before = deepcopy(result.model_dump())
     step_lists = [t.steps for t in result]

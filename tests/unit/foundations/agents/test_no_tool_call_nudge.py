@@ -23,7 +23,7 @@ async def run(strategy, agent, *, max_turns=None, generation_config=None):
             "task_id": "task_1",
         }],
         max_turns=max_turns if max_turns is not None else len(agent.tool_names),
-        num_chains=1,
+        group_size=1,
         generation_config=generation_config or {},
     )
 

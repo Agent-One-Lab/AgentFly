@@ -64,8 +64,8 @@ def test_trainer_routes_diagnostic_only_to_conversion(
 ):
     split_options, blocks = trainer_routing
     run_config = {
-        "rollout": "step", "max_turns": 3, "num_chains": 2,
-        "max_concurrent_chains": 4, "generation_config": {"max_tokens": 16},
+        "rollout": "step", "max_turns": 3, "group_size": 2,
+        "max_concurrent_episodes": 4, "generation_config": {"max_tokens": 16},
         "context_config": {},
     }
     if raw_options != "missing":

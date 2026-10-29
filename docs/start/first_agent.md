@@ -19,7 +19,7 @@ Then, we can use the agent to do the task (or, say *rollout* in reinforcement le
 ```python
 --8<-- "tests/docs/start/quick_example.py:agent_run"
 ```
-Here, `max_turns` specifies the maximal number of rounds that the agent can iteract with the environment. `num_chains` specifies how many chains/trajectories the agent will run for a single query.
+Here, `max_turns` specifies the maximal number of rounds that the agent can iteract with the environment. `group_size` specifies how many episodes (attempts, each giving one trajectory) the agent runs for a single query; the episodes of one query form a group.
 
 ## A complete script
 
@@ -54,7 +54,7 @@ per (task, chain), grouped by task. `result.rewards` lists their rewards (`None`
 | Field | Meaning |
 |---|---|
 | `segments[-1].messages` | The conversation of this attempt (see below). Usually there is one segment; context folding and step rollouts record several. |
-| `group_idx`, `chain_idx` | Which task (position in the batch) and which of its `num_chains` attempts. |
+| `group_idx`, `episode_idx` | Which task (position in the batch) and which of its `group_size` attempts. |
 | `reward`, `metrics` | The reward and any extra values the reward function returned. |
 | `finish_reason` | Why it stopped: `no_tool_calls` (the model answered without calling a tool), `max_turns`, `tool_end` (a finishing tool), `terminal` (the model's reply asked to stop), `max_model_len`, ... |
 | `num_turns`, `tool_call_counts` | Model generations, and tool calls per tool. |

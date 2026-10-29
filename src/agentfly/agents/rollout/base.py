@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 class EpisodeSpec:
     """One episode to roll out: a task's messages and the episode's ids.
 
-    ``episode_idx`` is the episode's index among the ``num_chains`` attempts at its
+    ``episode_idx`` is the episode's index among the ``group_size`` attempts at its
     task; ``group_idx`` is the task's index in the batch. Episodes of one task share
     ``group_id``.
     """
@@ -61,16 +61,13 @@ class EpisodeSpec:
 
     @property
     def info(self) -> Dict[str, Any]:
-        """A fresh dict: the task's metadata plus this episode's ids.
-
-        The ids use the public ``Trajectory`` / reward-function names (``chain_id`` /
-        ``chain_idx`` for ``episode_id`` / ``episode_idx``).
-        """
+        """A fresh dict: the task's metadata plus this episode's ids (the keys the
+        reward function receives and ``Trajectory`` reads)."""
         return self.messages.meta | {
-            "chain_id": self.episode_id,
+            "episode_id": self.episode_id,
             "group_id": self.group_id,
             "group_idx": self.group_idx,
-            "chain_idx": self.episode_idx,
+            "episode_idx": self.episode_idx,
         }
 
 
@@ -102,9 +99,9 @@ class Rollout(ABC):
     # derived from records, never trusted from incoming task metadata.
     RESERVED_INFO_KEYS = frozenset(
         {
-            "chain_id",
+            "episode_id",
             "group_id",
-            "chain_idx",
+            "episode_idx",
             "group_idx",
             "finish_reason",
             "rollout_time_sec",
@@ -254,21 +251,21 @@ class Rollout(ABC):
     # ---- L2: running many episodes ----
 
     @staticmethod
-    def validate_run_args(max_turns: int, num_chains: int, max_concurrent_chains: Optional[int]) -> None:
+    def validate_run_args(max_turns: int, group_size: int, max_concurrent_episodes: Optional[int]) -> None:
         assert max_turns >= 1, "max_turns must be at least 1."
-        assert num_chains >= 1, "num_chains must be at least 1."
-        if max_concurrent_chains is not None:
-            assert max_concurrent_chains >= 1, "max_concurrent_chains must be at least 1 when set."
+        assert group_size >= 1, "group_size must be at least 1."
+        if max_concurrent_episodes is not None:
+            assert max_concurrent_episodes >= 1, "max_concurrent_episodes must be at least 1 when set."
 
     @staticmethod
-    def make_specs(messages: Any, num_chains: int) -> List[EpisodeSpec]:
+    def make_specs(messages: Any, group_size: int) -> List[EpisodeSpec]:
         """One :class:`EpisodeSpec` per (task, attempt), in ``(group_idx, episode_idx)``
         order. Attempts at one task share a ``group_id``; every episode gets its own
         ``episode_id``."""
         specs: List[EpisodeSpec] = []
         for group_idx, task_messages in enumerate(MessagesList.from_data(messages)):
             group_id = str(uuid.uuid4())
-            for episode_idx in range(num_chains):
+            for episode_idx in range(group_size):
                 specs.append(
                     EpisodeSpec(
                         episode_id=str(uuid.uuid4()),
@@ -285,20 +282,20 @@ class Rollout(ABC):
         specs: List[EpisodeSpec],
         run_episode: Callable[[EpisodeSpec], Union[AsyncIterator[Any], Any]],
         *,
-        max_concurrent_chains: Optional[int] = None,
+        max_concurrent_episodes: Optional[int] = None,
         show_progress: bool = True,
     ) -> AsyncIterator[Any]:
         """Run ``run_episode(spec)`` for every spec concurrently and yield their events.
 
         ``run_episode(spec)`` is either an async generator, whose items are yielded here
         as one merged stream, or a coroutine (no events). Results are kept by the
-        strategy, not returned here. At most ``max_concurrent_chains`` run at once (no
+        strategy, not returned here. At most ``max_concurrent_episodes`` run at once (no
         limit when ``None``). The progress bar counts finished episodes. Every episode
         runs to the end even if another fails; the first error (in spec order) is raised
         once the stream is drained.
         """
         queue: asyncio.Queue = asyncio.Queue()
-        sem = asyncio.Semaphore(int(max_concurrent_chains)) if max_concurrent_chains is not None else None
+        sem = asyncio.Semaphore(int(max_concurrent_episodes)) if max_concurrent_episodes is not None else None
         finished = object()  # one per episode, for the progress bar
         done = object()  # once every episode has settled
 
@@ -442,7 +439,7 @@ class Rollout(ABC):
 
         - ``reward`` (as stored by :meth:`compute_reward`) → ``Trajectory.reward`` and
           ``Trajectory.metrics``; ``tool_metrics`` are merged into the metrics after it.
-        - ``info`` gives the ids (``chain_id``, ``group_id``, ``chain_idx``,
+        - ``info`` gives the ids (``episode_id``, ``group_id``, ``episode_idx``,
           ``group_idx``); its other non-reserved keys (dataset-row fields like
           ``answer``, ``task_id``) become ``Trajectory.metadata``.
         """
@@ -456,9 +453,9 @@ class Rollout(ABC):
             rollout_time_sec=rollout_time_sec,
             num_turns=num_turns,
             tool_call_counts=tool_call_counts,
-            chain_id=info.get("chain_id"),
+            episode_id=info.get("episode_id"),
             group_id=info.get("group_id"),
-            chain_idx=info.get("chain_idx"),
+            episode_idx=info.get("episode_idx"),
             group_idx=info.get("group_idx"),
             metadata={k: v for k, v in info.items() if k not in self.RESERVED_INFO_KEYS},
             steps=steps,

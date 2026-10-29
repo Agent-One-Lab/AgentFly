@@ -54,7 +54,7 @@ model=Qwen/Qwen3.5-${size}
 lr=5e-7
 gamma=0.95
 penalty_coef=0.1
-num_chains=8
+group_size=8
 train_batch_size=16                 # x8 chains = 128 trajectories per step
 val_batch_size=512                  # verl-agent's first two evaluations (2 x 256)
 ppo_mini_batch_size=8               # TRAJECTORY rows: 16 optimizer steps per training step
@@ -103,7 +103,7 @@ python3 -m agentfly.cli train \
     agent.run_config.generation_config.max_tokens=$max_response_length \
     agent.run_config.generation_config.temperature=1.0 \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     agent.run_config.use_token_ids=$use_token_ids \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \

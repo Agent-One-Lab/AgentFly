@@ -32,6 +32,6 @@ async def test_code_agent_end_to_end():
         },
     ]
 
-    result = await agent.run(max_turns=4, messages=messages, num_chains=2)
+    result = await agent.run(max_turns=4, messages=messages, group_size=2)
 
     print(result.trajectories)

@@ -33,14 +33,14 @@ def test_validate_run_args_is_shared():
 
 
 def test_make_specs_order_ids_and_info():
-    specs = Rollout.make_specs(tasks(2), num_chains=3)
+    specs = Rollout.make_specs(tasks(2), group_size=3)
     assert [(s.group_idx, s.episode_idx) for s in specs] == [(g, c) for g in range(2) for c in range(3)]
     assert len({s.episode_id for s in specs}) == 6
     assert len({s.group_id for s in specs[:3]}) == 1
     assert specs[0].group_id != specs[3].group_id
     info = specs[4].info
     assert info["task_id"] == "t1" and info["answer"] == 1
-    assert (info["chain_id"], info["group_id"], info["group_idx"], info["chain_idx"]) == (
+    assert (info["episode_id"], info["group_id"], info["group_idx"], info["episode_idx"]) == (
         specs[4].episode_id, specs[4].group_id, 1, 1,
     )
     info["scratch"] = 1
@@ -54,7 +54,7 @@ async def test_run_episodes_merges_events_limits_concurrency_and_counts_progress
         rollout_base, "progress_bar",
         lambda total: types.SimpleNamespace(update=updates.append, close=lambda: updates.append("closed")),
     )
-    specs = Rollout.make_specs(tasks(5), num_chains=1)
+    specs = Rollout.make_specs(tasks(5), group_size=1)
     in_flight = peak = 0
 
     async def run_episode(spec):
@@ -66,7 +66,7 @@ async def test_run_episodes_merges_events_limits_concurrency_and_counts_progress
         in_flight -= 1
         yield ("end", spec.group_idx)
 
-    events = [ev async for ev in Rollout.run_episodes(specs, run_episode, max_concurrent_chains=2)]
+    events = [ev async for ev in Rollout.run_episodes(specs, run_episode, max_concurrent_episodes=2)]
     assert peak <= 2
     assert sorted(events) == sorted([(kind, i) for i in range(5) for kind in ("start", "end")])
     assert updates == [1] * 5 + ["closed"]
@@ -75,7 +75,7 @@ async def test_run_episodes_merges_events_limits_concurrency_and_counts_progress
 @pytest.mark.asyncio
 async def test_run_episodes_accepts_coroutines_and_raises_first_error_after_all_finish(monkeypatch):
     monkeypatch.setattr(rollout_base, "progress_bar", lambda total: None)
-    specs = Rollout.make_specs(tasks(3), num_chains=1)
+    specs = Rollout.make_specs(tasks(3), group_size=1)
     finished = []
 
     async def run_episode(spec):
@@ -182,7 +182,7 @@ def test_unwrap_reward(raw, expected):
 
 
 def test_make_trajectory_merges_tool_metrics_last_and_keeps_task_metadata():
-    spec = Rollout.make_specs(tasks(1), num_chains=1)[0]
+    spec = Rollout.make_specs(tasks(1), group_size=1)[0]
     info = spec.info | {"finish_reason": "ignored", "capped_turns": 2}
     trajectory = StepRollout().make_trajectory(
         info=info,
@@ -197,7 +197,7 @@ def test_make_trajectory_merges_tool_metrics_last_and_keeps_task_metadata():
     )
     assert trajectory.reward == 0.5
     assert trajectory.metrics == {"score": 1, "tool/act/x": 2.0}
-    assert (trajectory.chain_id, trajectory.group_id, trajectory.group_idx, trajectory.chain_idx) == (
+    assert (trajectory.episode_id, trajectory.group_id, trajectory.group_idx, trajectory.episode_idx) == (
         spec.episode_id, spec.group_id, 0, 0,
     )
     assert trajectory.finish_reason == "max_turns"

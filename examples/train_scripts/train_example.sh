@@ -26,12 +26,12 @@ lr=5e-7
 max_model_len=8192
 train_batch_size=64        # prompts per training step
 max_new_tokens_per_turn=512
-num_chains=8               # rollouts per prompt
+group_size=8               # rollouts per prompt
 num_gpus=1
 # PPO batch sizes count trajectory rows (prompts x chains), not prompts. One mini-batch of all
 # rows = one optimizer step per training step (fully on-policy). Each GPU's share of the
 # mini-batch (ppo_mini_batch_size / num_gpus) must be a multiple of the micro-batch.
-ppo_mini_batch_size=$((train_batch_size * num_chains))
+ppo_mini_batch_size=$((train_batch_size * group_size))
 ppo_micro_batch_size_per_gpu=8
 
 kl_coef=0.001
@@ -72,7 +72,7 @@ python3 -m agentfly.cli train \
     agent.init_config.max_model_len=$max_model_len \
     agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     agent.use_agent=True \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

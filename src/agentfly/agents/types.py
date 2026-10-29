@@ -96,9 +96,9 @@ class Trajectory(BaseModel):
     """
 
     # Identifiers (set at chain construction)
-    chain_id: Optional[str] = None
+    episode_id: Optional[str] = None
     group_id: Optional[str] = None
-    chain_idx: Optional[int] = None
+    episode_idx: Optional[int] = None
     group_idx: Optional[int] = None
 
     # Free-form bags

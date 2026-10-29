@@ -28,8 +28,8 @@ Configure the agent behavior and capabilities:
 - **`agent.init_config.reward_name`**: Name of the reward function to use (e.g., `math_equal_reward_tool`, `qa_f1_reward`). Required: training stops with an error if it's unset
 - **`agent.init_config.backend_config.backend`**: Backend for agent execution - `async_verl` (recommended) or others
 - **`agent.run_config.max_turns`**: Maximum number of interaction turns per episode
-- **`agent.run_config.num_chains`**: Number of parallel interaction chains per sample
-- **`agent.run_config.max_concurrent_chains`**: Maximum concurrent running chains (`null` means no extra cap)
+- **`agent.run_config.group_size`**: Number of episodes (attempts) per sample; they form one group
+- **`agent.run_config.max_concurrent_episodes`**: Maximum episodes running at once (`null` means no extra cap)
 - **`agent.run_config.generation_config.max_tokens`**: Max tokens to generate per turn
 - **`agent.run_config.generation_config.temperature`**: Sampling temperature used during rollout generation
 - **`agent.run_config.context_config.resource_backend`**: Resource backend for tool/reward resources (e.g., `local`, `ray`)
@@ -134,7 +134,7 @@ python -m agentfly.cli train \
     agent.init_config.reward_name="math_equal_reward_tool" \
     agent.init_config.backend_config.backend=async_verl \
     agent.run_config.max_turns=3 \
-    agent.run_config.num_chains=8 \
+    agent.run_config.group_size=8 \
     agent.run_config.generation_config.max_tokens=256 \
     agent.run_config.context_config.resource_backend=local \
     actor_rollout_ref.actor.optim.lr=5e-7 \
@@ -179,7 +179,7 @@ python -m agentfly.cli train \
     agent.init_config.reward_name="qa_f1_reward" \
     agent.init_config.backend_config.backend=async_verl \
     agent.run_config.max_turns=4 \
-    agent.run_config.num_chains=1 \
+    agent.run_config.group_size=1 \
     agent.run_config.generation_config.max_tokens=512 \
     agent.run_config.context_config.resource_backend=local \
     actor_rollout_ref.actor.optim.lr=5e-7 \

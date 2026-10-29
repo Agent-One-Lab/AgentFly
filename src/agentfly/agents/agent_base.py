@@ -417,7 +417,7 @@ class BaseAgent(ABC):
                 exactly the sampled tokens. False leaves them off: every turn is
                 re-encoded from text (sampling and training still render alike).
             **kwargs: Additional keyword arguments forwarded to the rollout strategy
-                (e.g. ``num_chains``, ``max_concurrent_chains`` for the chain rollout).
+                (e.g. ``group_size``, ``max_concurrent_episodes`` for the chain rollout).
 
         Returns:
             :class:`~agentfly.agents.types.RunResult` containing the trajectories
@@ -538,7 +538,7 @@ class BaseAgent(ABC):
         tool_call,
         newest_messages,
         chain,
-        chain_id,
+        episode_id,
         depth,
         have_set_resources,
     ):

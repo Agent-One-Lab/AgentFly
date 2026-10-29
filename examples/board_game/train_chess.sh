@@ -65,7 +65,7 @@ reward_name="chess_puzzle_reward"
 max_turns=10
 
 # Parallel rollouts per puzzle sample
-num_chains=8
+group_size=8
 
 # ============================================================================
 # Training Data
@@ -117,7 +117,7 @@ python3 -m agentfly.cli train \
     agent.run_config.max_turns=${max_turns} \
     agent.init_config.backend_config.backend=${agent_backend} \
     agent.init_config.reward_name=$reward_name \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     agent.use_agent=True \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

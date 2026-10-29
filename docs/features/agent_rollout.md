@@ -31,7 +31,7 @@ We found that training with shorter turns are more stable than training with lon
 AgentFly provides two rollout strategies, chosen per call with `agent.run(rollout=...)` or in training
 with `agent.run_config.rollout`:
 
-- **`chain`** (default): for each query we start *n* chains (`num_chains`) and extend each with the
+- **`chain`** (default): for each query we start `group_size` episodes, each a chain extended with the
   full conversation history, at a fixed temperature.
 - **`step`**: each generation sees a bounded window of recent history (`rollout_config`), and every
   generation becomes its own training row, the single-turn conversion described above.
@@ -51,7 +51,7 @@ Each trajectory represents one task attempt and contains ordered `Segment` objec
 Each segment holds its message sequence in `segment.messages`:
 
 ```python
-result = await agent.run(messages=messages, max_turns=10, num_chains=1)
+result = await agent.run(messages=messages, max_turns=10, group_size=1)
 for trajectory in result:
     for segment in trajectory.segments:
         for message in segment.messages:
@@ -156,7 +156,7 @@ Samples are grouped by `Trajectory.group_id`, which both strategies stamp on eve
 rollout of a task. Rollouts without a reward are skipped rather than counted as
 failures, and a rollout with no `group_id` forms its own single-sample task. The block
 is emitted only when some task actually has more than one sample: with one rollout per
-task (validation, or `num_chains=1`) every pass rate is 0 or 1 by construction and the
+task (validation, or `group_size=1`) every pass rate is 0 or 1 by construction and the
 distribution carries no information about difficulty. `frac_zero_advantage` and
 `reward_std_mean` read raw rewards, so they stay meaningful for continuous rewards
 that never reach the pass threshold.

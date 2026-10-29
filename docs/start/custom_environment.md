@@ -109,5 +109,5 @@ bash examples/custom_env/train.sh            # extra Hydra overrides can be appe
 
 Each training rollout gets its own environment instance from the pool. `max_global_num` in the
 spec caps how many exist at once; rollouts beyond that wait for a free instance, so set it to at
-least the number of rollouts you want to run concurrently (`train_batch_size × num_chains` for full
+least the number of rollouts you want to run concurrently (`train_batch_size × group_size` for full
 parallelism).

@@ -8,7 +8,7 @@ its own small frozen dataclass and consumers ``isinstance``-dispatch.
 
 ``MessageProduced`` is the durable transcript item (Claude Code's ``Message``); the
 others are progress signals (Claude Code's ``StreamEvent``). Every event carries
-``chain_id`` so a merged, interleaved multi-rollout stream stays unambiguous.
+``episode_id`` so a merged, interleaved multi-rollout stream stays unambiguous.
 
 We do **not** stream generation, so there is no token-delta event — one
 ``MessageProduced`` is emitted per turn once the assistant message is complete.
@@ -39,8 +39,8 @@ class FinishReason(str, Enum):
 
 
 @dataclass(frozen=True)
-class ChainStarted:
-    chain_id: str
+class EpisodeStarted:
+    episode_id: str
     group_id: Optional[str] = None
 
 
@@ -48,7 +48,7 @@ class ChainStarted:
 class MessageProduced:
     """One assembled assistant message (durable transcript item)."""
 
-    chain_id: str
+    episode_id: str
     depth: int
     message: dict
     total_token_length: Optional[int] = None
@@ -58,7 +58,7 @@ class MessageProduced:
 class ToolObserved:
     """One tool result (progress signal)."""
 
-    chain_id: str
+    episode_id: str
     depth: int
     tool_name: str
     observation: Any
@@ -67,12 +67,12 @@ class ToolObserved:
 
 
 @dataclass(frozen=True)
-class ChainEnded:
+class EpisodeEnded:
     """Terminal event for a chain. Lightweight by design — the final ``Chain``/``Step``
     live in ``ChainRollout.chains`` / ``.current_steps`` (the loop writes them as it
     ends), not on the event."""
 
-    chain_id: str
+    episode_id: str
     finish_reason: Optional[str] = None
 
 
@@ -81,8 +81,8 @@ class RolloutError:
     """A chain raised. Carried as an event so a consumer can surface it without the
     merge deadlocking."""
 
-    chain_id: str
+    episode_id: str
     error: BaseException
 
 
-RolloutEvent = Union[ChainStarted, MessageProduced, ToolObserved, ChainEnded, RolloutError]
+RolloutEvent = Union[EpisodeStarted, MessageProduced, ToolObserved, EpisodeEnded, RolloutError]

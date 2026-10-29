@@ -377,7 +377,7 @@ def step_to_dataproto(
             raise ValueError(
                 "Step rollout conversion requires one runtime step per segment; "
                 f"got {len(steps)} steps and {traj.num_segments} segments "
-                f"for trajectory {traj.chain_id!r}."
+                f"for trajectory {traj.episode_id!r}."
             )
         post = [
             s.tool_result.anchor if s.tool_result is not None and s.tool_result.anchor is not None else s.observation
@@ -414,7 +414,7 @@ def step_to_dataproto(
         except Exception as e:  # noqa: BLE001 — diagnostics must never break the run
             logger.warning(f"[StepRollout] token-drift diagnostic failed: {e}")
 
-    inputs["traj_uid"] = np.array([t.chain_id for t in row_traj], dtype=object)
+    inputs["traj_uid"] = np.array([t.episode_id for t in row_traj], dtype=object)
     anchors = np.empty(len(row_anchor), dtype=object)
     anchors[:] = row_anchor
     inputs["anchor_obs"] = anchors

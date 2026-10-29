@@ -90,7 +90,7 @@ async def test_image_editing(agent):
         result = await agent.run(
             messages=messages_list,
             max_turns=4,  # 最多4步完成任务
-            num_chains=1,
+            group_size=1,
         )
 
         # 打印结果
@@ -167,7 +167,7 @@ async def test_specific_function(agent):
         }
     ]
 
-    result = await agent.run(messages=messages, max_turns=3, num_chains=1)
+    result = await agent.run(messages=messages, max_turns=3, group_size=1)
 
     # 显示结果
     print_trajectory(result[0])
@@ -215,7 +215,7 @@ async def interactive_test():
         try:
             print("\n⏳ 处理中...")
             result = await agent.run(
-                messages=messages_list, max_turns=4, num_chains=1
+                messages=messages_list, max_turns=4, group_size=1
             )
 
             print("\n✅ 处理完成！")

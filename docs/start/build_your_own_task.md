@@ -122,7 +122,7 @@ async def test_my_task_smoke():
         "messages": [{"role": "user", "content": "What is 2 + 2?"}],
         "answer": "4",
     }
-    result = await agent.run(messages=sample, max_turns=3, num_chains=1)
+    result = await agent.run(messages=sample, max_turns=3, group_size=1)
     for traj in result.trajectories:
         print(agent.extract_final_response(traj.segments[-1].messages), traj.reward)
 ```

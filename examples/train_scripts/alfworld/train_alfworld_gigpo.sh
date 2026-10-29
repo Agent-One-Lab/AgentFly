@@ -57,7 +57,7 @@ lr=1e-6
 gamma=0.95                          # GiGPO step return-to-go discount
 gigpo_mode=mean_std_norm
 penalty_coef=0.1                    # invalid-action penalty (post-discount)
-num_chains=8                        # rollout n (group size)
+group_size=8                        # rollout n (group size)
 train_batch_size=16
 val_batch_size=128
 ppo_mini_batch_size=256             # verl-agent ppo_mini_batch_size
@@ -120,7 +120,7 @@ python3 -m agentfly.cli train \
     agent.run_config.generation_config.max_tokens=$max_response_length \
     agent.run_config.generation_config.temperature=1.0 \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

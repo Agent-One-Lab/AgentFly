@@ -357,7 +357,7 @@ async def test_live_rollout_creates_file_and_submits():
             "exec_timeout": 60,
         }
     ]
-    result = await agent.run(messages=messages, max_turns=8, num_chains=1)
+    result = await agent.run(messages=messages, max_turns=8, group_size=1)
 
     traj = result.trajectories[0]
     segment = traj.segments[0].messages

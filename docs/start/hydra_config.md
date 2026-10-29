@@ -41,13 +41,13 @@ These are the keys defined by AgentFly itself (the rest are inherited from verl)
 | `agent.init_config.max_model_len` | Max sequence length the model engine should support. |
 | `agent.train_on_last_turn` | If `True`, only compute loss on the last assistant turn. Useful for stability on long rollouts. |
 | `agent.run_config.max_turns` | Max number of generation/tool turns per chain. |
-| `agent.run_config.num_chains` | Number of parallel chains (trajectories) per prompt. Higher → more samples for GRPO/RLOO. |
+| `agent.run_config.group_size` | Number of episodes (attempts) per prompt; they form one group. Higher → more samples for GRPO/RLOO. |
 | `agent.run_config.generation_config.max_tokens` | Max tokens generated per turn (also `temperature`, etc.). |
 | `agent.run_config.rollout` | Rollout strategy: `chain` (one growing conversation per trajectory) or `step` (one training row per step, with a bounded history). |
 | `agent.run_config.rollout_config` | Keyword options for the rollout, e.g. for `step`: `{prompt_builder: alfworld_flat, history_length: 2, max_prompt_length: 2048}`, and the loop-control policy (`on_no_tool_call`, `on_invalid_tool_call`, `on_tool_error`). |
 | `agent.run_config.use_token_ids` | `true` (default): train on the token ids the model sampled. `false`: re-encode every turn from text. |
 | `agent.run_config.context_config.resource_backend` | Where containers are allocated: `local` or a cluster backend. |
-| `agent.run_config.max_concurrent_chains` | Cap on chains running concurrently (memory protection). `null` for no extra cap. |
+| `agent.run_config.max_concurrent_episodes` | Cap on episodes running concurrently (memory protection). `null` for no extra cap. |
 
 Rollout settings live under `agent.run_config.*` and agent construction under `agent.init_config.*`; top-level keys such as `agent.max_turns` or `agent.generation_config.*` do not exist and are rejected by Hydra.
 

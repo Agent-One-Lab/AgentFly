@@ -19,10 +19,10 @@ def test_chain_logging_preserves_payloads_without_accumulating_state(monkeypatch
     for index in range(3):
         events.clear()
         trajectory = [[{"role": "assistant", "content": f"answer-{index}"}], []]
-        info = {"chain_id": f"chain-{index}", "reward": 0.5}
+        info = {"episode_id": f"chain-{index}", "reward": 0.5}
         before = deepcopy((trajectory, info))
 
-        reporter.record_chain(global_step=7, trajectory=trajectory, info=info)
+        reporter.record_episode(global_step=7, trajectory=trajectory, info=info)
 
         assert Counter(event.name for event in events) == {
             "agent/rollout/trajectory": 1,
@@ -89,7 +89,7 @@ def test_step_emits_each_summary_once_with_existing_values(monkeypatch):
 def sampled(rewards_by_task):
     """One batch of trajectories: {task: [reward per sample]} in rollout order."""
     return [
-        Trajectory(segments=[], group_id=task, chain_idx=index, reward=reward)
+        Trajectory(segments=[], group_id=task, episode_idx=index, reward=reward)
         for task, rewards in rewards_by_task.items()
         for index, reward in enumerate(rewards)
     ]
@@ -144,7 +144,7 @@ def test_pass_rate_distribution_separates_trainable_tasks_from_saturated_ones(mo
 def test_pass_rate_distribution_skipped_without_repeated_samples(monkeypatch):
     events = []
     monkeypatch.setattr(metrics, "emit", events.append)
-    # Validation and num_chains=1 give one sample per task, where every pass rate is 0
+    # Validation and group_size=1 give one sample per task, where every pass rate is 0
     # or 1 by construction and says nothing about difficulty.
     single = sampled({"task_a": [1.0], "task_b": [0.0]})
 
@@ -323,7 +323,7 @@ def test_timing_summaries_use_trajectory_durations(
     events = []
     monkeypatch.setattr(metrics, "emit", events.append)
     trajectories = [
-        Trajectory(segments=[], chain_id=f"chain-{i}", rollout_time_sec=duration, reward=0.5)
+        Trajectory(segments=[], episode_id=f"chain-{i}", rollout_time_sec=duration, reward=0.5)
         for i, duration in enumerate(durations)
     ]
     before = [trajectory.model_dump() for trajectory in trajectories]
@@ -386,11 +386,11 @@ def test_slowest_log_preserves_complete_trajectory_payload(layout, monkeypatch):
         metrics={"accuracy": 1.0, "output": {"patch": "+fixed"}},
         metadata={"task_id": "task-1", "rollout_time_sec": 999.0},
         runtime_info={"attempt": 2},
-        chain_id="slow", group_id="group-1", chain_idx=1, group_idx=0,
+        episode_id="slow", group_id="group-1", episode_idx=1, group_idx=0,
         finish_reason="max_turns",
         steps=[step],
     )
-    faster = Trajectory(segments=[], rollout_time_sec=1.0, chain_id="fast")
+    faster = Trajectory(segments=[], rollout_time_sec=1.0, episode_id="fast")
     before = deepcopy(slowest.model_dump())
 
     metrics.RolloutMetrics().record_step(global_step=4, trajectories=[faster, slowest])
@@ -412,8 +412,8 @@ def test_reporting_does_not_reuse_previous_batch_timing(monkeypatch):
     events = []
     monkeypatch.setattr(metrics, "emit", events.append)
     reporter = metrics.RolloutMetrics()
-    first = Trajectory(segments=[], rollout_time_sec=12.0, chain_id="first")
-    second = Trajectory(segments=[], rollout_time_sec=0.0, chain_id="second")
+    first = Trajectory(segments=[], rollout_time_sec=12.0, episode_id="first")
+    second = Trajectory(segments=[], rollout_time_sec=0.0, episode_id="second")
 
     for index, trajectory in enumerate((first, second, first)):
         events.clear()
@@ -423,7 +423,7 @@ def test_reporting_does_not_reuse_previous_batch_timing(monkeypatch):
         assert all(event.value == trajectory.rollout_time_sec for event in timing_events)
         slowest_events = [event for event in events if event.name == "agent/rollout/slowest_message"]
         assert len(slowest_events) == 1
-        assert json.loads(slowest_events[0].value)["chain_id"] == trajectory.chain_id
+        assert json.loads(slowest_events[0].value)["episode_id"] == trajectory.episode_id
 
     events.clear()
     reporter.record_step(global_step=3, trajectories=[Trajectory(segments=[])])

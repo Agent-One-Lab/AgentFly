@@ -46,7 +46,7 @@ async def _run_and_inspect(agent):
     result = await agent.run(
         messages=messages_list,
         max_turns=4,
-        num_chains=1,
+        group_size=1,
     )
     print_trajectory(result[0])
     # --8<-- [end:agent_run_print]

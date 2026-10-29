@@ -76,7 +76,7 @@ python3 -m agentfly.cli train \
     agent.run_config.generation_config.max_tokens=$max_response_length \
     agent.run_config.generation_config.temperature=1.0 \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=8 \
+    agent.run_config.group_size=8 \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.actor.ppo_mini_batch_size=8 \

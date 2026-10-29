@@ -32,7 +32,7 @@ def gather_responses(trajectories):
 
         responses.append(
             {
-                "id": trajectory.chain_id or trajectory.metadata.get("id"),
+                "id": trajectory.episode_id or trajectory.metadata.get("id"),
                 "response": response_text,
             }
         )
@@ -44,9 +44,9 @@ def gather_responses(trajectories):
 @click.option("--model_name_or_path", type=str, required=True)
 @click.option("--api_key", type=str, default="EMPTY")
 @click.option("--max_turns", type=int, required=True)
-@click.option("--num_chains", type=int, default=1, required=True)
+@click.option("--group_size", type=int, default=1, required=True)
 @click.option(
-    "--max_concurrent_chains",
+    "--max_concurrent_episodes",
     type=int,
     default=None,
     help="Concurrent chain cap; omit uses default (64). Use 0 for unlimited.",
@@ -57,8 +57,8 @@ def main(
     model_name_or_path: str,
     api_key: str,
     max_turns: int,
-    num_chains: int,
-    max_concurrent_chains: int,
+    group_size: int,
+    max_concurrent_episodes: int,
     data_file: str,
     output_dir: str,
 ):
@@ -80,8 +80,8 @@ def main(
         )
         result = await agent.run(
             messages=messages,
-            num_chains=num_chains,
-            max_concurrent_chains=max_concurrent_chains,
+            group_size=group_size,
+            max_concurrent_episodes=max_concurrent_episodes,
             max_turns=max_turns,
         )
         responses = gather_responses(result.trajectories)

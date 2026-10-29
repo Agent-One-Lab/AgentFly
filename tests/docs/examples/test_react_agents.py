@@ -34,7 +34,7 @@ async def test_code_agent():
             }
         ],
         max_turns=4,
-        num_chains=1,
+        group_size=1,
     )
     print(f"Trajectories: {run_result.trajectories}")
     print(f"Rewards: {run_result.rewards}")
@@ -63,7 +63,7 @@ async def test_react_vqa_agent():
             }
         ],
         max_turns=4,
-        num_chains=1,
+        group_size=1,
     )
     print(run_result.trajectories)
 
@@ -94,7 +94,7 @@ async def test_react_vqa_retrieval_agent():
             }
         ],
         max_turns=4,
-        num_chains=1,
+        group_size=1,
     )
     print(run_result.trajectories)
 
@@ -122,7 +122,7 @@ async def test_react_scienceworld_agent():
             "variation_idx": 281,
         },
         max_turns=12,
-        num_chains=1,
+        group_size=1,
     )
     print(f"Trajectories: {run_result.trajectories}")
     print(f"Rewards: {run_result.rewards}")
@@ -160,7 +160,7 @@ async def test_react_webshop_agent():
             "question": "i want a super soft jay franco disney minnie mouse twin bed set, and price lower than 120.00 dollars",
         },
         max_turns=12,
-        num_chains=1,
+        group_size=1,
     )
     print(f"Trajectories: {run_result.trajectories}")
     print(f"Rewards: {run_result.rewards}")

@@ -27,7 +27,7 @@ lr=5e-7
 length=512
 val_batch_size=512
 train_batch_size=512
-num_chains=1
+group_size=1
 kl_coef=0.001
 
 train_dataset="./data/rlhf/qa/infoseek_train.json"
@@ -64,13 +64,13 @@ project_name="Open"
 trust_remote_code=True
 
 
-# experiment_name="${model}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${num_chains}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_turns}turns-${adv_estimator}"
+# experiment_name="${model}-${train_dataset}-${lr}-${length}-bs${batch_size}-n${group_size}-kl${kl_loss_type}${kl_coef}-entropy${entropy_coeff}-${max_turns}turns-${adv_estimator}"
 
 python3 -m agentfly.cli train \
     algorithm.adv_estimator=$adv_estimator \
     data.train_files=${train_dataset} \
     data.val_files=${eval_dataset} \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     data.val_batch_size=$val_batch_size \
     data.train_batch_size=$train_batch_size \
     agent.use_agent=True \

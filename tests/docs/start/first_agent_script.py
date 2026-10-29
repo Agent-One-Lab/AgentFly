@@ -24,7 +24,7 @@ async def main():
         {"messages": [{"role": "user", "content": "What is 123 * 45?"}], "answer": "5535"},
         {"messages": [{"role": "user", "content": "What is 2 ** 10 - 24?"}], "answer": "1000"},
     ]
-    result = await agent.run(messages=tasks, max_turns=3, num_chains=2)
+    result = await agent.run(messages=tasks, max_turns=3, group_size=2)
     # --8<-- [end:batch_run]
 
     # --8<-- [start:read_result]
@@ -32,7 +32,7 @@ async def main():
     for traj in result:
         messages = traj.segments[-1].messages  # the full conversation of this attempt
         print(
-            f"task {traj.group_idx} chain {traj.chain_idx}: "
+            f"task {traj.group_idx} chain {traj.episode_idx}: "
             f"answer={agent.extract_final_response(messages)!r} "
             f"turns={traj.num_turns} finish={traj.finish_reason} tools={traj.tool_call_counts}"
         )

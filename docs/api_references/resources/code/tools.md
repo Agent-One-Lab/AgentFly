@@ -56,6 +56,6 @@ await react_agent.run(
         "answer": "2",  # passed to the reward by name
     }],
     max_turns=5,
-    num_chains=1,
+    group_size=1,
 )
 ```

@@ -124,7 +124,7 @@ agent = HFAgent(
 result = await agent.run(
     messages={"messages": [{"role": "user", "content": "What is 3 * 7?"}], "answer": "21"},
     max_turns=3,
-    num_chains=1,
+    group_size=1,
     generation_config={"temperature": 0.7, "max_tokens": 1024},
 )
 ```

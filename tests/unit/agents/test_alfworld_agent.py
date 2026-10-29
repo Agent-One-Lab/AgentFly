@@ -114,7 +114,7 @@ async def test_alfworld_agent_rollout():
     result = await agent.run(
         messages=messages,
         max_turns=MAX_TURNS,
-        num_chains=NUM_CHAINS,
+        group_size=NUM_CHAINS,
         generation_config={"max_tokens": MAX_NEW_TOKENS_PER_TURN},
     )
 

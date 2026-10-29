@@ -91,31 +91,31 @@ class StepRollout(Rollout):
         agent,
         messages: List[Dict],
         max_turns: int,
-        num_chains: int,
+        group_size: int,
         generation_config: Optional[Dict[str, Any]] = None,
-        max_concurrent_chains: Optional[int] = None,
+        max_concurrent_episodes: Optional[int] = None,
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
         use_token_ids: bool = True,
         show_progress: bool = True,
         **kwargs,
     ) -> RunResult:
-        """Roll out ``num_chains`` trajectories per task, async-concurrently.
+        """Roll out ``group_size`` trajectories per task, async-concurrently.
 
         Returns a :class:`RunResult` of one :class:`~agentfly.agents.types.Trajectory`
         per rollout. Conversations live in ``segments``; runtime ``steps`` provide
         the corresponding environment signals. Trajectories come back in
-        ``(group_idx, chain_idx)`` order (the spec order). ``global_step`` sets the
+        ``(group_idx, episode_idx)`` order (the spec order). ``global_step`` sets the
         metrics x-axis (see ``Rollout.resolve_global_step``). ``use_token_ids`` see
         ``Rollout.run``. ``show_progress`` renders a progress bar over finished trajectories.
         """
-        self.validate_run_args(max_turns, num_chains, max_concurrent_chains)
+        self.validate_run_args(max_turns, group_size, max_concurrent_episodes)
         self.agent = agent
         self.use_token_ids = bool(use_token_ids)
         Monitor.ensure_started()
         step = self.resolve_global_step(global_step)
 
-        specs = self.make_specs(messages, num_chains)
+        specs = self.make_specs(messages, group_size)
         results: Dict[str, Trajectory] = {}
 
         async def run_episode(spec: EpisodeSpec) -> None:
@@ -130,7 +130,7 @@ class StepRollout(Rollout):
         async for _ev in self.run_episodes(
             specs,
             run_episode,
-            max_concurrent_chains=max_concurrent_chains,
+            max_concurrent_episodes=max_concurrent_episodes,
             show_progress=show_progress,
         ):
             pass
@@ -159,9 +159,9 @@ class StepRollout(Rollout):
         started_at = time.monotonic()
         episode_id = spec.episode_id
         task_messages = spec.messages
-        # Task metadata and the group ids; the chain id is not passed to the context
+        # Task metadata and the group ids; the episode id is not passed to the context
         # metadata or the reward function (unlike ChainRollout).
-        meta = {k: v for k, v in spec.info.items() if k != "chain_id"}
+        meta = {k: v for k, v in spec.info.items() if k != "episode_id"}
         context = self.make_context(
             episode_id=episode_id,
             group_id=spec.group_id,
@@ -218,7 +218,7 @@ class StepRollout(Rollout):
             )
             # Reuse the chain generation helper (return_dict / tools / tool_call_source /
             # skills / trajectory_segments / raw-field overlay). ``chain``/``depth``/
-            # ``chain_id`` are unused by it; pass None / depth / episode_id.
+            # ``episode_id`` are unused by it; pass None / depth / episode_id.
             gen_step = Step(
                 type="Action Input",
                 messages=Messages.from_turns(prompt_messages),

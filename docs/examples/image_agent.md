@@ -138,12 +138,12 @@ agent = ImageEditingAgent(
 await agent.run(
     messages=messages_list,
     max_turns=4,
-    num_chains=1,
+    group_size=1,
     enable_streaming=True  # Must be True for streaming
 )
 ```
 
-**Note**: When using streaming, `num_chains` must be 1 due to console streaming limitations.
+**Note**: When using streaming, `group_size` must be 1 due to console streaming limitations.
 
 ## Backend Configuration Options
 
@@ -194,7 +194,7 @@ conversation segments; later segments may repeat earlier messages as context.
 ```python
 from agentfly.agents.utils.inspection import print_trajectory
 
-result = await agent.run(messages=messages_list, max_turns=4, num_chains=1)
+result = await agent.run(messages=messages_list, max_turns=4, group_size=1)
 
 # Print one trajectory, keeping its segment boundaries visible
 print_trajectory(result[0])
@@ -362,7 +362,7 @@ async def main():
     result = await agent.run(
         messages=messages_list,
         max_turns=4,
-        num_chains=1,
+        group_size=1,
         enable_streaming=True
     )
 

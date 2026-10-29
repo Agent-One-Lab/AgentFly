@@ -70,7 +70,7 @@ class FakeAgent:
         )
 
 
-async def fake_generation(agent, chain, current_step, tools, depth, chain_id,
+async def fake_generation(agent, chain, current_step, tools, depth, episode_id,
                           generation_config, context, use_token_ids=True):
     message = {
         "role": "assistant",
@@ -117,7 +117,7 @@ async def run(strategy, agent):
             "task_id": "task_1",
         }],
         max_turns=len(agent.tool_names),
-        num_chains=1,
+        group_size=1,
     )
 
 
@@ -136,8 +136,8 @@ async def test_reused_rollout_emits_one_summary_per_batch(strategy_cls, isolated
             agent=FakeAgent([["act"]]),
             messages=[{"role": "user", "content": "O0"}],
             max_turns=1,
-            num_chains=3,
-            max_concurrent_chains=2,
+            group_size=3,
+            max_concurrent_episodes=2,
         )
 
         summaries = [event for event in isolated_runtime if event.name not in per_chain_names]
@@ -177,7 +177,7 @@ async def test_caller_supplied_step_drives_the_metrics_axis(strategy_cls, isolat
             agent=FakeAgent([["act"]]),
             messages=[{"role": "user", "content": "O0"}],
             max_turns=1,
-            num_chains=2,
+            group_size=2,
             global_step=trainer_step,
         )
         # Every event of the run shares the caller's step, per-chain records included:
@@ -193,7 +193,7 @@ async def test_caller_supplied_step_drives_the_metrics_axis(strategy_cls, isolat
             agent=FakeAgent([["act"]]),
             messages=[{"role": "user", "content": "O0"}],
             max_turns=1,
-            num_chains=1,
+            group_size=1,
         )
         steps.append(next(e.value for e in isolated_runtime if e.name == "agent/rollout/step"))
         isolated_runtime.clear()
@@ -249,7 +249,7 @@ async def test_folded_chain_preserves_each_context_view(isolated_runtime):
     assert after.messages[1]["content"][0]["text"] == "O0 summary"
     assert before.messages[-1]["token_ids"] == [101, 2]
     assert after.messages[-2]["token_ids"] == [102, 2]
-    chain = strategy.chains[trajectory.chain_id]
+    chain = strategy.chains[trajectory.episode_id]
     assert [segment.messages for segment in trajectory.segments] == chain.histories
     assert trajectory.num_turns == 2
     assert trajectory.tool_call_counts == {"summarize": 1, "act": 1}
@@ -274,7 +274,7 @@ async def test_run_preserves_final_context_and_conversion_only_selects_training_
     # identity stand-in. The model and environment are the isolated fixtures.
     agent.postprocess_trajectories = types.MethodType(ActionAgent.postprocess_trajectories, agent)
     result = await BaseAgent.run(
-        agent, rollout=kind, max_turns=1, num_chains=1,
+        agent, rollout=kind, max_turns=1, group_size=1,
         messages=[{
             "messages": [{"role": "system", "content": "SYS"},
                          {"role": "user", "content": "O0"}],
@@ -422,21 +422,21 @@ async def test_task_metadata_is_preserved_without_runtime_fields(
     messages = [{
         "messages": [{"role": "user", "content": "O0"}],
         **deepcopy(task_metadata),
-        "chain_id": "old_chain", "group_id": "old_group",
-        "chain_idx": -1, "group_idx": -1,
+        "episode_id": "old_chain", "group_id": "old_group",
+        "episode_idx": -1, "group_idx": -1,
         "num_turns": 999, "tool_call_counts": {"fake": 999},
     }]
     original = deepcopy(messages)
     result = await strategy_cls().run(
-        agent=agent, messages=messages, max_turns=1, num_chains=2,
+        agent=agent, messages=messages, max_turns=1, group_size=2,
     )
     assert messages == original
-    assert len({trajectory.chain_id for trajectory in result}) == 2
+    assert len({trajectory.episode_id for trajectory in result}) == 2
     for i, trajectory in enumerate(result):
         assert trajectory.metadata == task_metadata
-        assert trajectory.chain_id != "old_chain"
+        assert trajectory.episode_id != "old_chain"
         assert trajectory.group_id != "old_group"
-        assert trajectory.chain_idx == i
+        assert trajectory.episode_idx == i
         assert trajectory.group_idx == 0
         assert trajectory.num_turns == 1
         assert trajectory.tool_call_counts == {}
@@ -490,7 +490,7 @@ async def test_execution_time_includes_setup_reward_and_cleanup_but_not_queueing
     result = await strategy.run(
         agent=agent,
         messages=[{"messages": [{"role": "user", "content": "O0"}]}],
-        max_turns=1, num_chains=2, max_concurrent_chains=1,
+        max_turns=1, group_size=2, max_concurrent_episodes=1,
     )
     # Each episode takes 2 + 3 + 5 + 7 + 11 + 13 seconds on the controlled clock.
     assert [trajectory.rollout_time_sec for trajectory in result] == [41.0, 41.0]
@@ -570,9 +570,9 @@ async def test_migration_does_not_change_multi_tool_execution(
 def test_gather_responses_reads_segment_messages():
     messages = [{"role": "assistant", "content": [{"type": "text", "text": "answer"}]}]
     trajectories = [
-        Trajectory(segments=[Segment(messages=deepcopy(messages))], chain_id="chain_1"),
+        Trajectory(segments=[Segment(messages=deepcopy(messages))], episode_id="chain_1"),
         Trajectory(segments=[Segment(messages=[])], metadata={"id": "task_2"}),
-        Trajectory(segments=[], chain_id="chain_3"),
+        Trajectory(segments=[], episode_id="chain_3"),
     ]
     assert gather_responses(trajectories) == [
         {"id": "chain_1", "response": "answer"},
@@ -658,7 +658,7 @@ async def test_equivalent_tool_stops_have_the_same_finish_reason(
     assert trajectory.tool_call_counts == {"act": agent.tool_calls}
     assert RunResult.model_validate_json(result.model_dump_json())[0].finish_reason == expected
     if isinstance(strategy, chain_rollout.ChainRollout):
-        assert strategy.chains[trajectory.chain_id].info["finish_reason"] == expected
+        assert strategy.chains[trajectory.episode_id].info["finish_reason"] == expected
 
 
 @pytest.mark.asyncio
@@ -836,7 +836,7 @@ async def test_chain_projects_before_recording_and_emitting_messages(
     # Message normalization still happens, but response text and sampled IDs are preserved.
     expected_stored = {**message, "content": [{"type": "text", "text": text}],
                        "tool_calls": [expected_call]}
-    thought = next(s for s in strategy.chains[result[0].chain_id].steps() if s.type == "Thought")
+    thought = next(s for s in strategy.chains[result[0].episode_id].steps() if s.type == "Thought")
     assert thought.messages[-1] == expected_stored
     assert execution_messages == [expected_stored]
     assert result[0].segments[0].messages[-2] == expected_stored
@@ -868,7 +868,7 @@ async def test_chain_projection_preserves_existing_calls_and_model_stop_policy(
     should_execute = project_actions or model_status == "continue"
     assert agent.tool_calls == int(should_execute)
     assert result[0].finish_reason == ("tool_control_end" if should_execute else "terminal")
-    thought = next(s for s in strategy.chains[result[0].chain_id].steps() if s.type == "Thought")
+    thought = next(s for s in strategy.chains[result[0].episode_id].steps() if s.type == "Thought")
     assert thought.messages[-1]["tool_calls"] == [
         {"id": "call_0", "type": "function", "function": {"name": "act", "arguments": "{}"}},
     ]
@@ -926,7 +926,7 @@ async def test_initial_prompt_history_is_not_execution(strategy_cls, isolated_ru
             {"role": "assistant", "content": "old answer"},
             {"role": "user", "content": "current question"},
         ]}],
-        max_turns=1, num_chains=1,
+        max_turns=1, group_size=1,
     )
     assert result[0].num_turns == 1
     assert result[0].tool_call_counts == {}

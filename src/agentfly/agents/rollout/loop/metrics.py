@@ -3,7 +3,7 @@
 ``RolloutMetrics`` owns the metric aggregation/emission that used to live inside
 ``ChainRollout`` as ``monitor_chain`` / ``monitor_step``. The loop feeds it:
 
-- :meth:`record_chain` once per chain as it ends (the ``ChainEnded`` point), and
+- :meth:`record_episode` once per episode as it ends (the ``EpisodeEnded`` point), and
 - :meth:`record_step` once the whole rollout is drained.
 
 End-of-rollout reporting consumes typed trajectories, not chain runtime dictionaries.
@@ -187,14 +187,14 @@ class RolloutMetrics:
         pass for the per-task pass-rate distribution."""
         self.success_threshold = success_threshold
 
-    def record_chain(
+    def record_episode(
         self,
         *,
         global_step: int,
         trajectory: Any,
         info: Any,
     ) -> None:
-        """Per-chain reporting (was ``ChainRollout.monitor_chain``).
+        """Per-episode reporting (was ``ChainRollout.monitor_chain``).
 
         Logs the full trajectory + info to the local JSONL sink only — emitting these to
         wandb every chain would cost too much bandwidth.
@@ -385,7 +385,7 @@ class RolloutMetrics:
         """Report how this batch's per-task pass rates are distributed.
 
         Emitted only when some task actually has several rollouts: with one sample per
-        task (validation, or ``num_chains=1``) every pass rate is 0 or 1 by construction
+        task (validation, or ``group_size=1``) every pass rate is 0 or 1 by construction
         and the distribution would say nothing about task difficulty. The raw per-task
         pass rates go out as a histogram so the shape — U-shaped means a pool of
         always-failed and always-solved tasks, i.e. little to learn from — is visible

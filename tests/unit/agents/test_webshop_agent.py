@@ -37,6 +37,6 @@ async def test_webshop_agent_call():
         },
     ]
 
-    result = await agent.run(max_turns=8, messages=messages, num_chains=4)
+    result = await agent.run(max_turns=8, messages=messages, group_size=4)
     for trajectory in result:
         print_trajectory(trajectory)

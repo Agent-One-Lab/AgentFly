@@ -23,7 +23,7 @@ async def main():
         backend_config={"backend": "async_vllm", "gpu_memory_utilization": 0.5},
     )
     tasks = [{"messages": [{"role": "user", "content": PROMPT}], "target": t} for t in (37, 81)]
-    result = await agent.run(messages=tasks, max_turns=10, num_chains=2)
+    result = await agent.run(messages=tasks, max_turns=10, group_size=2)
     for traj in result:
         print(f"target={traj.metadata['target']} reward={traj.reward} guesses={traj.metrics['guesses']}")
     await ResourceEngine.close()  # end the pooled environments

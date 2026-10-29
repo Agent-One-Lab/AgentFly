@@ -64,7 +64,7 @@ model=Qwen/Qwen2.5-${size}-Instruct
 lr=5e-7
 gigpo_mode=mean_std_norm
 penalty_coef=0.1
-num_chains=8                        # group size
+group_size=8                        # group size
 train_batch_size=16                 # x8 chains = 128 trajectories per step
 val_batch_size=128
 ppo_mini_batch_size=8               # TRAJECTORY rows (see header): 16 updates / step
@@ -118,7 +118,7 @@ python3 -m agentfly.cli train \
     agent.run_config.generation_config.max_tokens=$max_response_length \
     agent.run_config.generation_config.temperature=1.0 \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     agent.run_config.use_token_ids=true \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \

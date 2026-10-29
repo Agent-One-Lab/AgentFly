@@ -101,9 +101,9 @@ max_model_len=16384
 max_new_tokens_per_turn=256
 val_batch_size=512
 batch_size=64
-num_chains=8
+group_size=8
 # full on-policy
-mini_batch_size=$((batch_size * num_chains))
+mini_batch_size=$((batch_size * group_size))
 kl_coef=0.001
 train_dataset="./data/rlhf/scienceworld/scienceworld_train.json"
 eval_dataset="./data/rlhf/scienceworld/scienceworld_test.json"
@@ -145,7 +145,7 @@ python -m agentfly.cli train \
     agent.init_config.reward_name=$reward_name \
     agent.generation_config.max_tokens=$max_new_tokens_per_turn \
     agent.max_turns=${max_turns} \
-    agent.num_chains=$num_chains \
+    agent.group_size=$group_size \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.model.path=${model} \

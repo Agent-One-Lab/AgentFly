@@ -33,7 +33,7 @@ lr=4e-7
 max_new_tokens_per_turn=512
 val_batch_size=512
 train_batch_size=64
-num_chains=8
+group_size=8
 kl_coef=0.001
 
 # GUI-specific dataset paths (update these to your actual dataset paths)
@@ -77,7 +77,7 @@ python3 -m agentfly.cli train \
     agent.init_config.tools=${tools} \
     agent.run_config.generation_config.max_tokens=${max_new_tokens_per_turn} \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=${num_chains} \
+    agent.run_config.group_size=${group_size} \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

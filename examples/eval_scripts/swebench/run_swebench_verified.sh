@@ -12,7 +12,7 @@ base_name=$(basename $model_name_or_path)
 agent="bash"
 setting="bash"
 result_dir="results/swe/${base_name}-agent_${agent}-setting_${setting}"
-max_concurrent_chains=48
+max_concurrent_episodes=48
 max_model_len=40000
 
 python -m agentfly.cli swebench \
@@ -22,7 +22,7 @@ python -m agentfly.cli swebench \
   --max-turns 30 \
   --temperature 0.0 \
   --reward-name r2e_gym_reward \
-  --max-concurrent-chains ${max_concurrent_chains} \
+  --max-concurrent-episodes ${max_concurrent_episodes} \
   --max-model-len ${max_model_len} \
   --agent ${agent} \
   --tool-set ${setting} \

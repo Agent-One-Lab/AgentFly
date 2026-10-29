@@ -76,7 +76,7 @@ model=Qwen/Qwen3.5-${size}
 lr=1e-6
 gamma=0.95
 penalty_coef=0.1
-num_chains=8                        # rollout n (group size)
+group_size=8                        # rollout n (group size)
 train_batch_size=16
 val_batch_size=512                  # verl-agent's first two evaluations (2 x 256)
 ppo_mini_batch_size=64              # step rows per optimizer step (verl-agent run_webshop.sh; ALFWorld uses 256)
@@ -124,7 +124,7 @@ python3 -m agentfly.cli train \
     agent.run_config.generation_config.max_tokens=$max_response_length \
     agent.run_config.generation_config.temperature=1.0 \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

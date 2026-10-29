@@ -208,7 +208,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
         tool_call,
         newest_messages,
         chain,
-        chain_id,
+        episode_id,
         depth,
         have_set_resources,
     ):
@@ -235,7 +235,7 @@ class Qwen3CoderSWEAgent(BaseAgent):
             tool_call,
             newest_messages,
             chain,
-            chain_id,
+            episode_id,
             depth,
             have_set_resources,
         )

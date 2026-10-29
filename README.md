@@ -102,7 +102,7 @@ async def main():
     result = await agent.run(
         messages=messages,
         max_turns=3,
-        num_chains=1,
+        group_size=1,
     )
 
     for traj in result.trajectories:

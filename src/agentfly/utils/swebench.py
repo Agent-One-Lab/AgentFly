@@ -109,8 +109,8 @@ async def _run_agent_async(
     data_parallel_size: int,
     messages: List[dict],
     max_turns: int,
-    num_chains: int,
-    max_concurrent_chains: int | None,
+    group_size: int,
+    max_concurrent_episodes: int | None,
     temperature: float,
     resource_backend: str,
 ) -> RunResult:
@@ -159,9 +159,9 @@ async def _run_agent_async(
     return await agent.run(
         messages=messages,
         max_turns=max_turns,
-        num_chains=num_chains,
+        group_size=group_size,
         generation_config={"temperature": temperature},
-        max_concurrent_chains=max_concurrent_chains,
+        max_concurrent_episodes=max_concurrent_episodes,
         context_config=ContextConfig(resource_backend=resource_backend),
     )
 
@@ -240,9 +240,9 @@ def _save_per_sample_results(
 @click.option("--template", default=None, help="Optional chat-bricks template name.")
 @click.option("--temperature", type=float, default=0.0, show_default=True)
 @click.option("--max-turns", type=int, default=30, show_default=True)
-@click.option("--num-chains", type=int, default=1, show_default=True)
+@click.option("--group-size", type=int, default=1, show_default=True)
 @click.option(
-    "--max-concurrent-chains",
+    "--max-concurrent-episodes",
     type=int,
     default=None,
     help="Cap concurrent chains across the batch (default: unlimited).",
@@ -326,8 +326,8 @@ def main(
     template: str | None,
     temperature: float,
     max_turns: int,
-    num_chains: int,
-    max_concurrent_chains: int | None,
+    group_size: int,
+    max_concurrent_episodes: int | None,
     agent: str,
     tool_set: str,
     reward_name: str,
@@ -384,8 +384,8 @@ def main(
             data_parallel_size=data_parallel_size,
             messages=messages,
             max_turns=max_turns,
-            num_chains=num_chains,
-            max_concurrent_chains=max_concurrent_chains,
+            group_size=group_size,
+            max_concurrent_episodes=max_concurrent_episodes,
             temperature=temperature,
             resource_backend=resource_backend,
         )

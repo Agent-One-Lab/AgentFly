@@ -194,7 +194,7 @@ async def test_country_capital_skill_canberra_trap(skills):
         {"messages": [{"role": "user", "content": "What is the capital of Australia?"}]}
     ]
     result = await agent.run(
-        messages=messages, max_turns=6, num_chains=1
+        messages=messages, max_turns=6, group_size=1
     )
 
     segment = result.trajectories[0].segments[0].messages
@@ -213,7 +213,7 @@ async def test_add_numbers_skill_runs_script(skills):
     agent = _build_agent(skills)
     messages = [{"messages": [{"role": "user", "content": "What is 17 plus 25?"}]}]
     result = await agent.run(
-        messages=messages, max_turns=6, num_chains=1
+        messages=messages, max_turns=6, group_size=1
     )
 
     segment = result.trajectories[0].segments[0].messages
@@ -243,7 +243,7 @@ async def test_word_count_skill_exit_code_branch(skills):
         }
     ]
     result = await agent.run(
-        messages=messages, max_turns=8, num_chains=1
+        messages=messages, max_turns=8, group_size=1
     )
 
     segment = result.trajectories[0].segments[0].messages

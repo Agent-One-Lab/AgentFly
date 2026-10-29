@@ -4,12 +4,12 @@ from types import SimpleNamespace
 import pytest
 
 from agentfly.agents.rollout.strategies.chain_rollout import ChainRollout
-from agentfly.agents.rollout.events import ChainEnded
+from agentfly.agents.rollout.events import EpisodeEnded
 
 
 @pytest.mark.asyncio
 async def test_run_respects_max_concurrent_chains(monkeypatch):
-    """``ChainRollout`` fans out chains but caps concurrency at ``max_concurrent_chains``.
+    """``ChainRollout`` fans out chains but caps concurrency at ``max_concurrent_episodes``.
 
     Post-refactor, the rollout is a standalone strategy object that reaches agent
     state through ``self.agent`` (the host). The concurrency loop (``stream``)
@@ -25,7 +25,7 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
 
     async def fake_run_episode(
         self,
-        chain_id,
+        episode_id,
         first_step,
         chain,
         tools,
@@ -40,11 +40,11 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
         await asyncio.sleep(0.05)
         first_step.is_terminal = True
         # stream reads final state from here, not from the events.
-        self.chains[chain_id] = chain
-        self.current_steps[chain_id] = first_step
+        self.chains[episode_id] = chain
+        self.current_steps[episode_id] = first_step
         async with lock:
             in_flight -= 1
-        yield ChainEnded(chain_id=chain_id)
+        yield EpisodeEnded(episode_id=episode_id)
 
     monkeypatch.setattr(
         rollout, "run_episode", fake_run_episode.__get__(rollout, ChainRollout)
@@ -53,8 +53,8 @@ async def test_run_respects_max_concurrent_chains(monkeypatch):
     async for _ev in rollout.stream(
         messages=[{"role": "user", "content": "hi"}],
         max_turns=1,
-        num_chains=5,
-        max_concurrent_chains=2,
+        group_size=5,
+        max_concurrent_episodes=2,
     ):
         pass
 

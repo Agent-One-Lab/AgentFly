@@ -27,8 +27,8 @@ lr=5e-7
 length=512  # Increased for longer episodes
 val_batch_size=256
 train_batch_size=32
-num_chains=8  # More chains for better exploration
-mini_batch_size=$((train_batch_size * num_chains))
+group_size=8  # More chains for better exploration
+mini_batch_size=$((train_batch_size * group_size))
 
 max_new_tokens_per_turn=256
 max_model_len=12288
@@ -87,7 +87,7 @@ python3 -m agentfly.cli train \
     agent.init_config.reward_name=${reward_name} \
     agent.run_config.generation_config.max_tokens=$max_new_tokens_per_turn \
     agent.run_config.max_turns=${max_turns} \
-    agent.run_config.num_chains=$num_chains \
+    agent.run_config.group_size=$group_size \
     actor_rollout_ref.model.path=$model \
     actor_rollout_ref.actor.optim.lr=$lr \
     actor_rollout_ref.model.use_remove_padding=False \

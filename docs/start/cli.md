@@ -116,8 +116,8 @@ agentfly swebench \
 | `--template` | `None` | Optional `chat-bricks` template name. |
 | `--temperature` | `0.0` | Sampling temperature. |
 | `--max-turns` | `30` | Per-sample turn cap. |
-| `--num-chains` | `1` | Parallel chains per sample. |
-| `--max-concurrent-chains` | unlimited | Cap concurrent chains across the batch. |
+| `--group-size` | `1` | Episodes (attempts) per sample. |
+| `--max-concurrent-episodes` | unlimited | Cap concurrent episodes across the batch. |
 | `--limit` | all | Run at most this many samples (after shuffling). `--limit 1` runs a single task, a quick setup check. |
 | `--seed` | `None` | Shuffle the dataset with this seed before `--limit`. |
 

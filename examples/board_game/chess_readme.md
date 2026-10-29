@@ -97,7 +97,7 @@ template="qwen2.5"                 # Chat template
 ```bash
 agent_type="react"                 # ReAct agent for tool use
 max_turns=10                       # Max moves per puzzle
-num_chains=8                       # Parallel rollouts per sample
+group_size=8                       # Parallel rollouts per sample
 ```
 
 ### Reward Function
@@ -237,7 +237,7 @@ actor_rollout_ref.actor.fsdp_config.optimizer_offload=True
 ### Slow training
 - Reduce `analysis_depth` in `ChessPuzzleEnv` (default: 20)
 - Use simpler puzzles (lower rating, `mateIn1` only)
-- Decrease `num_chains`
+- Decrease `group_size`
 
 
 ### For real training, use Lichess data:

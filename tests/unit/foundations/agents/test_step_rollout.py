@@ -229,15 +229,15 @@ def _step(i, reward, invalid, anchor):
     )
 
 
-def _traj(traj_uid, chain_idx, outcome, steps):
+def _traj(traj_uid, episode_idx, outcome, steps):
     return Trajectory(
         segments=[Segment(messages=s.messages.messages) for s in steps],
         reward=outcome,
         metrics={"trajectory/accuracy": float(outcome > 0)},   # a reward-fn extra metric
         group_id="G",
-        chain_id=traj_uid,
+        episode_id=traj_uid,
         group_idx=0,
-        chain_idx=chain_idx,
+        episode_idx=episode_idx,
         steps=steps,
     )
 
