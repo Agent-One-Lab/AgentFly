@@ -304,13 +304,13 @@ def chain_to_dataproto(
 
         # Loop-policy counters carried in Trajectory.metadata (see ChainRollout):
         # turns that hit the per-turn token cap, tool-less turns, and nudges sent.
-        def _meta_sum(key):
+        def meta_sum(key):
             return sum(int((t.metadata or {}).get(key, 0) or 0) for t in trajectories)
 
         capped, no_tool, nudges = (
-            _meta_sum("capped_turns"),
-            _meta_sum("no_tool_call_turns"),
-            _meta_sum("no_tool_call_nudges"),
+            meta_sum("capped_turns"),
+            meta_sum("no_tool_call_turns"),
+            meta_sum("no_tool_call_nudges"),
         )
         # Trajectory outcomes (rewards, finish reasons, turn counters) are in the [Rollout]
         # summary line; this line covers the training batch built from them.
@@ -501,21 +501,21 @@ def token_drift_stats(
 
     tokenize = tokenize or tokenize_trajectories
 
-    def _last_ids(conv):
+    def last_ids(conv):
         for m in reversed(conv):
             if m.get("role") == "assistant" and m.get("token_ids"):
                 return m["token_ids"]
         return None
 
     n = len(conversations)
-    with_ids = [i for i in range(n) if _last_ids(conversations[i])]
+    with_ids = [i for i in range(n) if last_ids(conversations[i])]
     stats = {"token_drift/frac_rows_with_ids": len(with_ids) / max(1, n)}
     if not with_ids:
         return stats
 
     eos_id = getattr(getattr(agent, "tokenizer", None), "eos_token_id", None)
     if eos_id is not None:
-        ends = [_last_ids(conversations[i])[-1] == eos_id for i in with_ids]
+        ends = [last_ids(conversations[i])[-1] == eos_id for i in with_ids]
         stats["token_drift/frac_ids_end_with_eos"] = sum(ends) / len(ends)
 
     sample = with_ids[:max_rows]

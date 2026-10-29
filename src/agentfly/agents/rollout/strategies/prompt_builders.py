@@ -114,7 +114,7 @@ class ChatWindowPromptBuilder(StepPromptBuilder):
     def __init__(self, max_prompt_length: int = 2048):
         self.max_prompt_length = max_prompt_length
 
-    def _messages(self, agent, history, current, history_length):
+    def messages(self, agent, history, current, history_length):
         msgs: List[Dict[str, Any]] = []
         system_prompt = getattr(agent, "system_prompt", None)
         if system_prompt:
@@ -128,13 +128,13 @@ class ChatWindowPromptBuilder(StepPromptBuilder):
 
     def build(self, agent, *, history, current, history_length, step_index=0):
         n = history_length
-        msgs = self._messages(agent, history, current, n)
-        while n > 0 and self._too_long(agent, msgs):
+        msgs = self.messages(agent, history, current, n)
+        while n > 0 and self.too_long(agent, msgs):
             n -= 1
-            msgs = self._messages(agent, history, current, n)
+            msgs = self.messages(agent, history, current, n)
         return msgs
 
-    def _prompt_token_count(self, agent, msgs) -> int:
+    def prompt_token_count(self, agent, msgs) -> int:
         tokenizer = getattr(agent, "tokenizer", None)
         if tokenizer is not None:
             try:
@@ -144,13 +144,13 @@ class ChatWindowPromptBuilder(StepPromptBuilder):
                 pass
         return sum(len(str(m.get("content", ""))) for m in msgs) // 4
 
-    def _too_long(self, agent, msgs) -> bool:
+    def too_long(self, agent, msgs) -> bool:
         if not self.max_prompt_length:
             return False
-        return self._prompt_token_count(agent, msgs) > self.max_prompt_length
+        return self.prompt_token_count(agent, msgs) > self.max_prompt_length
 
 
-def _normalize_obs(obs: Any) -> str:
+def normalize_obs(obs: Any) -> str:
     """Return the plain observation text.
 
     AgentFly's ALFWorld env sometimes yields the observation as a 1-tuple ``(text,)``
@@ -174,14 +174,14 @@ class FlatAlfworldPromptBuilder(StepPromptBuilder):
         self.max_prompt_length = max_prompt_length
 
     @staticmethod
-    def _fmt_admissible(admissible) -> str:
+    def fmt_admissible(admissible) -> str:
         # verl-agent: "\n ".join(f"'{s}'" for s in admissible if s != 'help')
         return "\n ".join(f"'{s}'" for s in (admissible or []) if s != "help")
 
     def build(self, agent, *, history, current, history_length, step_index=0):
         window = history[-history_length:] if history_length and history_length > 0 else []
-        cur_obs = _normalize_obs(current.get("raw_obs", ""))
-        admissible = self._fmt_admissible(current.get("admissible"))
+        cur_obs = normalize_obs(current.get("raw_obs", ""))
+        admissible = self.fmt_admissible(current.get("admissible"))
 
         if not window:
             text = ALFWORLD_TEMPLATE_NO_HIS.format(
@@ -195,7 +195,7 @@ class FlatAlfworldPromptBuilder(StepPromptBuilder):
             lines = [
                 "[Observation {n}: '{obs}', Action {n}: '{act}']".format(
                     n=start + j + 1,
-                    obs=_normalize_obs(h.get("raw_obs", "")),
+                    obs=normalize_obs(h.get("raw_obs", "")),
                     act=h.get("action", ""),
                 )
                 for j, h in enumerate(window)
@@ -212,7 +212,7 @@ class FlatAlfworldPromptBuilder(StepPromptBuilder):
         return [{"role": "user", "content": text}]
 
 
-def _history_lines(window, step_index: int) -> str:
+def history_lines(window, step_index: int) -> str:
     """verl-agent's ``SimpleMemory.fetch`` rendering: one ``[Observation n: '…', Action n: '…']``
     line per remembered step, absolute 1-based step numbers, newline-joined."""
     start = step_index - len(window)
@@ -237,14 +237,14 @@ class FlatWebshopPromptBuilder(StepPromptBuilder):
         self.max_prompt_length = max_prompt_length
 
     @staticmethod
-    def _fmt_available(actions) -> str:
+    def fmt_available(actions) -> str:
         # verl-agent: "\n".join(f"'{s}'," for s in available_actions)
         return "\n".join(f"'{a}'," for a in (actions or []))
 
     def build(self, agent, *, history, current, history_length, step_index=0):
         window = history[-history_length:] if history_length and history_length > 0 else []
         cur_obs = current.get("raw_obs", "")
-        available = self._fmt_available(current.get("admissible"))
+        available = self.fmt_available(current.get("admissible"))
         if not window:
             text = WEBSHOP_TEMPLATE_NO_HIS.format(
                 task_description=current.get("task_description", ""),
@@ -256,7 +256,7 @@ class FlatWebshopPromptBuilder(StepPromptBuilder):
                 task_description=current.get("task_description", ""),
                 step_count=step_index,
                 history_length=len(window),
-                action_history=_history_lines(window, step_index),
+                action_history=history_lines(window, step_index),
                 current_step=step_index + 1,
                 current_observation=cur_obs,
                 available_actions=available,
@@ -264,7 +264,7 @@ class FlatWebshopPromptBuilder(StepPromptBuilder):
         return [{"role": "user", "content": text}]
 
 
-_PROMPT_BUILDER_REGISTRY = {
+PROMPT_BUILDER_REGISTRY = {
     "chat_window": ChatWindowPromptBuilder,
     "alfworld_flat": FlatAlfworldPromptBuilder,
     "webshop_flat": FlatWebshopPromptBuilder,
@@ -273,7 +273,7 @@ _PROMPT_BUILDER_REGISTRY = {
 
 def register_prompt_builder(name: str, builder_cls) -> None:
     """Register a step-prompt builder class under ``name`` (case-insensitive)."""
-    _PROMPT_BUILDER_REGISTRY[name.lower()] = builder_cls
+    PROMPT_BUILDER_REGISTRY[name.lower()] = builder_cls
 
 
 def resolve_prompt_builder(spec, **kwargs) -> StepPromptBuilder:
@@ -286,5 +286,5 @@ def resolve_prompt_builder(spec, **kwargs) -> StepPromptBuilder:
     """
     if isinstance(spec, StepPromptBuilder):
         return spec
-    builder_cls = resolve_reference(spec, _PROMPT_BUILDER_REGISTRY, "prompt_builder")
+    builder_cls = resolve_reference(spec, PROMPT_BUILDER_REGISTRY, "prompt_builder")
     return builder_cls(**kwargs)

@@ -122,7 +122,7 @@ def pass_rate_distribution(
     }
 
 
-def _fmt_counts(counts: Dict[str, int]) -> str:
+def fmt_counts(counts: Dict[str, int]) -> str:
     return "{" + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])) + "}"
 
 
@@ -154,7 +154,7 @@ def rollout_summary(
         for counts in tool_counts:
             by_tool.update(counts)
         total = sum(by_tool.values())
-        parts.append(f"tool_calls={total / len(tool_counts):.1f}/traj {_fmt_counts(dict(by_tool))}")
+        parts.append(f"tool_calls={total / len(tool_counts):.1f}/traj {fmt_counts(dict(by_tool))}")
     if distribution:
         parts.append(
             f"| groups({distribution['num_groups']} tasks x {distribution['samples_per_task']:.0f}, "
@@ -163,7 +163,7 @@ def rollout_summary(
         )
     finishes = Counter(t.finish_reason for t in trajectories if t.finish_reason)
     if finishes:
-        parts.append(f"| finish={_fmt_counts(dict(finishes))}")
+        parts.append(f"| finish={fmt_counts(dict(finishes))}")
 
     def meta_sum(key: str) -> int:
         return sum(int((t.metadata or {}).get(key, 0) or 0) for t in trajectories)
@@ -366,7 +366,7 @@ class RolloutMetrics:
                 )
                 emit(evt)
 
-        distribution = self._record_pass_rate_distribution(global_step=global_step, trajectories=trajectories)
+        distribution = self.record_pass_rate_distribution(global_step=global_step, trajectories=trajectories)
         logger.info(
             rollout_summary(
                 global_step=global_step,
@@ -376,7 +376,7 @@ class RolloutMetrics:
             )
         )
 
-    def _record_pass_rate_distribution(
+    def record_pass_rate_distribution(
         self,
         *,
         global_step: int,
