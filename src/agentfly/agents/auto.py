@@ -84,6 +84,8 @@ class AutoAgent:
                     - tools: Registered names, import references, or tool objects (default: none)
                     - reward_fn: The reward function (e.g. a ``@reward``)
                     - reward_name: A registered reward name or import reference (instead of reward_fn)
+                    - subagents: ``{name: settings}`` for subagents the agent can create; tools in
+                      each ``settings`` may be names or import references too
                     - template, system_prompt, max_model_len, ...: other agent arguments
 
         Returns:
@@ -116,8 +118,23 @@ class AutoAgent:
 
         agent_type = config["agent_type"]
         agent_kwargs.pop("agent_type")
-        # Tools may be registered names, import references, or tool objects, mixed.
-        tools = [get_tools_from_names([t])[0] if isinstance(t, str) else t for t in (agent_kwargs.get("tools") or [])]
+        # Tools may be registered names, import references, or tool objects, mixed. The same
+        # holds for the tools in each subagent declaration.
+        def resolve_tools(tool_list):
+            return [get_tools_from_names([t])[0] if isinstance(t, str) else t for t in (tool_list or [])]
+
+        tools = resolve_tools(agent_kwargs.get("tools"))
+        subagents = agent_kwargs.get("subagents")
+        if isinstance(subagents, DictConfig):
+            subagents = OmegaConf.to_container(subagents)
+        if subagents:
+            resolved = {}
+            for name, declared in subagents.items():
+                declared = OmegaConf.to_container(declared) if isinstance(declared, DictConfig) else dict(declared)
+                if "tools" in declared:
+                    declared["tools"] = resolve_tools(declared["tools"])
+                resolved[name] = declared
+            agent_kwargs["subagents"] = resolved
         agent_class = cls._get_agent_class(agent_type)
         reward_fn = agent_kwargs.get("reward_fn")
         reward_name = agent_kwargs.pop("reward_name", None)

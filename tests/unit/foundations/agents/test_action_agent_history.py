@@ -16,12 +16,17 @@ def _tool():
 
 @pytest.fixture
 def make_agent(monkeypatch):
+    import agentfly.agents.agent_base as agent_base
     from agentfly.agents.specialized import action_agent as aa
 
-    monkeypatch.setattr(BaseAgent, "__init__", lambda self, model_name_or_path, **kw: None)
+    # Run the real constructor without loading a model or starting a backend.
+    monkeypatch.setattr(agent_base, "create_tokenizer", lambda model: None)
+    monkeypatch.setattr(agent_base, "create_processor", lambda model: None)
+    monkeypatch.setattr(agent_base, "get_jinja_template", lambda template: None)
+    monkeypatch.setattr(BaseAgent, "_init_llm_engine", lambda *args: None)
 
     def _make(**kwargs):
-        return aa.ActionAgent("dummy", tools=[_tool()], **kwargs)
+        return aa.ActionAgent("dummy", tools=[_tool()], backend_config={"backend": "client"}, monitors=[], **kwargs)
 
     return _make
 

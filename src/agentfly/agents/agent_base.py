@@ -6,6 +6,7 @@ are parsed into tool calls (:meth:`BaseAgent.parse`). It also converts finished 
 training batches for the verl trainer (:meth:`BaseAgent.to_verl_dataproto`).
 """
 
+import copy
 import inspect
 import json
 import logging
@@ -83,7 +84,8 @@ class BaseAgent(ABC):
         tool_parser_name: Optional[str] = None,
         default_tool_call_source: str = "parser",
         render_tools_in_prompt: bool = True,
-        **kwargs,  # To pass other unused arguments
+        subagents: Optional[Dict[str, Dict[str, Any]]] = None,
+        **kwargs,  # Settings of a subclass (see ``configure``); anything else is an error
     ):
         """
         Args:
@@ -114,6 +116,10 @@ class BaseAgent(ABC):
                 ``<action>`` format), where the tools exist only to execute the parsed action. Read
                 exclusively through :meth:`prompt_tools`, which both generation and training
                 tokenization consult, so the two always render the same prompt.
+            subagents: Subagents this agent can create, as ``{name: settings}``. Each ``settings``
+                dict holds any of this agent's own settings (those :meth:`configure` takes, e.g.
+                ``system_prompt``, ``tools``, ``max_model_len``). Only the settings are kept here;
+                :meth:`create_subagent` builds a subagent from them when it is needed.
 
         Note:
             Loop control — whether a malformed tool call, a tool-body error, or a no-tool-call
@@ -122,49 +128,35 @@ class BaseAgent(ABC):
             (see :class:`~agentfly.agents.rollout.base.Rollout`).
 
         """
-        if default_tool_call_source not in ("parser", "backend"):
-            raise ValueError(
-                f"default_tool_call_source must be 'parser' or 'backend', got: {default_tool_call_source!r}"
-            )
+        # This agent's own settings: set by ``configure`` after the shared set-up below, and
+        # given again by ``derive`` to a copy that shares that set-up.
+        settings = dict(
+            system_prompt=system_prompt,
+            tools=tools,
+            skills=skills,
+            max_model_len=max_model_len,
+            reward_fn=reward_fn,
+            tool_parser=tool_parser,
+            tool_parser_name=tool_parser_name,
+            default_tool_call_source=default_tool_call_source,
+            render_tools_in_prompt=render_tools_in_prompt,
+            subagents=subagents,
+            **kwargs,
+        )
+        self.check_settings(settings)
         if backend_config is None:
             backend_config = {"backend": "async_vllm"}
-        self._validate_init_args(
-            model_name_or_path,
-            template,
-            system_prompt,
-            tools,
-            backend_config,
-            reward_fn,
-            debug,
-            monitors,
-            wandb_project_name,
-            wandb_run_name,
-            local_cache_dir,
-            tool_parser,
-            tool_parser_name,
-        )
+        self._validate_init_args(template, backend_config)
 
+        # ---- Shared set-up: engine, tokenizer, template, monitors (a derived copy keeps these) ----
         self.debug = debug
         self.backend_config = backend_config
         self.backend = backend_config["backend"]
-        self.tools = self._bind_method_tools(tools)
-        self.max_model_len = max_model_len
-        self.default_tool_call_source = default_tool_call_source
-        self.tool_names = [tool.name for tool in self.tools]
-        self.render_tools_in_prompt = render_tools_in_prompt
-        self.skills = self._normalize_skills(skills)
-        self.skill_names = [s.name for s in self.skills]
-
-        if isinstance(system_prompt, str):
-            system_prompt = system_prompt.replace("\\n", "\n")
-        self.system_prompt = system_prompt
         self.model_name_or_path = model_name_or_path
 
         # Create appropriate tokenizer for trajectory processing
         self.tokenizer = create_tokenizer(model_name_or_path)
         self.processor = create_processor(model_name_or_path)
-
-        self.reward_fn = reward_fn
 
         # We use model name as template if no template is provided
         # For a model name, chat-bricks will use HF's template by default
@@ -186,32 +178,13 @@ class BaseAgent(ABC):
         self.local_run_cache_dir = None
         self._initialize_monitor(monitors)
 
-        # Initialize tool parser
-        self.tool_parser = tool_parser
-        if self.tool_parser is None and tool_parser_name is not None:
-            self.tool_parser = create_tool_parser(tool_parser_name, self.tokenizer)
-
         super().__init__()
 
-        if kwargs:
-            raise ValueError(f"Unused arguments for agent: {kwargs}")
+        # ---- This agent's own settings ----
+        self.configure(**settings)
 
-    def _validate_init_args(
-        self,
-        model_name_or_path,
-        template,
-        system_prompt,
-        tools,
-        backend_config,
-        reward_fn,
-        debug,
-        monitors,
-        wandb_project_name,
-        wandb_run_name,
-        local_cache_dir,
-        tool_parser,
-        tool_parser_name,
-    ):
+    def _validate_init_args(self, template, backend_config):
+        """Check the arguments of the shared set-up (backend and template)."""
         if not isinstance(backend_config, dict) or "backend" not in backend_config:
             raise ValueError(
                 "backend_config must be a dict with at least a 'backend' key (e.g. {'backend': 'async_vllm'})."
@@ -223,25 +196,146 @@ class BaseAgent(ABC):
                 "template to the server instead (e.g. agentfly deploy --template ...), and leave template unset here."
             )
 
-        if tool_parser is not None and tool_parser_name is not None:
+    # ---- Own settings: configure, derive, subagents ----
+
+    @classmethod
+    def setting_names(cls) -> set:
+        """The settings :meth:`configure` takes for this class: the keyword-only arguments of
+        ``configure`` on the class and its bases."""
+        names = set()
+        for klass in cls.__mro__:
+            configure = klass.__dict__.get("configure")
+            if configure is None:
+                continue
+            for name, param in inspect.signature(configure).parameters.items():
+                if param.kind is inspect.Parameter.KEYWORD_ONLY:
+                    names.add(name)
+        return names
+
+    def check_settings(self, settings: Dict[str, Any]) -> None:
+        """Raise if ``settings`` (arguments for :meth:`configure`) are not valid for this agent.
+
+        Runs before anything is built, in ``__init__`` and in :meth:`derive`. Subclasses with
+        settings of their own extend it.
+        """
+        agent_cls = type(self).__name__
+        unknown = {k: v for k, v in settings.items() if k not in self.setting_names()}
+        if unknown:
+            raise ValueError(f"Unused arguments for agent: {unknown}")
+
+        source = settings.get("default_tool_call_source", "parser")
+        if source not in ("parser", "backend"):
+            raise ValueError(f"default_tool_call_source must be 'parser' or 'backend', got: {source!r}")
+
+        if settings.get("tool_parser") is not None and settings.get("tool_parser_name") is not None:
             raise ValueError("Cannot specify both tool_parser and tool_parser_name. Use only one.")
 
         # Names and import references ("pkg.mod:tool") are resolved by AutoAgent and the training
         # config; constructing an agent directly takes the objects themselves.
-        agent_cls = type(self).__name__
-        for t in tools or []:
+        for t in settings.get("tools") or []:
             if isinstance(t, str):
                 raise TypeError(
                     f"{agent_cls}(tools=...) takes tool objects (e.g. `from agentfly.tools import calculator`); "
                     f'got the string {t!r}. To use tool names or import references ("pkg.mod:tool"), '
                     "build the agent with AutoAgent.from_config(...)."
                 )
+        reward_fn = settings.get("reward_fn")
         if isinstance(reward_fn, str):
             raise TypeError(
                 f"{agent_cls}(reward_fn=...) takes a reward object (e.g. a `@reward` function); got the string "
                 f"{reward_fn!r}. To use reward names or import references, build the agent with "
                 "AutoAgent.from_config(...) and reward_name."
             )
+
+        subagents = settings.get("subagents") or {}
+        if not isinstance(subagents, dict):
+            raise TypeError(f"subagents must be a dict of {{name: settings}}, got {type(subagents).__name__}.")
+        for name, declared in subagents.items():
+            if not isinstance(declared, dict):
+                raise TypeError(f"Subagent {name!r} must be declared as a dict of settings, got {declared!r}.")
+            unknown = sorted(set(declared) - self.setting_names())
+            if unknown:
+                raise ValueError(
+                    f"Subagent {name!r} has unknown settings {unknown}. "
+                    f"{agent_cls} settings are: {sorted(self.setting_names())}."
+                )
+            self.check_settings(declared)
+
+    def configure(
+        self,
+        *,
+        system_prompt: Optional[str] = None,
+        tools: Optional[List] = None,
+        skills: Optional[List] = None,
+        max_model_len: Optional[int] = None,
+        reward_fn: Optional[Callable] = None,
+        tool_parser: Optional[Any] = None,
+        tool_parser_name: Optional[str] = None,
+        default_tool_call_source: str = "parser",
+        render_tools_in_prompt: bool = True,
+        subagents: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> None:
+        """Set this agent's own settings and everything computed from them.
+
+        ``__init__`` calls it once, after the shared set-up (engine, tokenizer, template,
+        monitors); :meth:`derive` calls it on a copy. The arguments are kept in
+        ``self.own_settings``. Subclasses with settings of their own extend it with more
+        keyword-only arguments, call ``super().configure(...)``, then add theirs to
+        ``own_settings``. Arguments are checked by :meth:`check_settings` beforehand.
+        """
+        tools = list(tools or [])
+        skills = list(skills or [])
+        subagents = dict(subagents or {})
+        self.own_settings = dict(
+            system_prompt=system_prompt,
+            tools=tools,
+            skills=skills,
+            max_model_len=max_model_len,
+            reward_fn=reward_fn,
+            tool_parser=tool_parser,
+            tool_parser_name=tool_parser_name,
+            default_tool_call_source=default_tool_call_source,
+            render_tools_in_prompt=render_tools_in_prompt,
+            subagents=subagents,
+        )
+        self.tools = self._bind_method_tools(tools)
+        self.max_model_len = max_model_len
+        self.default_tool_call_source = default_tool_call_source
+        self.tool_names = [tool.name for tool in self.tools]
+        self.render_tools_in_prompt = render_tools_in_prompt
+        self.skills = self._normalize_skills(skills)
+        self.skill_names = [s.name for s in self.skills]
+        if isinstance(system_prompt, str):
+            system_prompt = system_prompt.replace("\\n", "\n")
+        self.system_prompt = system_prompt
+        self.reward_fn = reward_fn
+        self.tool_parser = tool_parser
+        if self.tool_parser is None and tool_parser_name is not None:
+            self.tool_parser = create_tool_parser(tool_parser_name, self.tokenizer)
+        self.subagents = subagents
+
+    def derive(self, **settings) -> "BaseAgent":
+        """A copy of this agent with some of its own settings replaced.
+
+        The copy shares this agent's engine, tokenizer, processor, template and backend: no
+        engine is built, nothing is loaded and no logging sink is added. ``settings`` are any of
+        :meth:`configure`'s arguments; the others keep this agent's values, except
+        ``subagents``, which is empty unless given. Settings a subclass sets outside
+        ``configure`` are copied as they are, and per-instance state (e.g. a cache) would be
+        shared with the copy.
+        """
+        merged = {**self.own_settings, "subagents": {}, **settings}
+        self.check_settings(merged)
+        child = copy.copy(self)
+        child.configure(**merged)
+        return child
+
+    def create_subagent(self, name: str) -> "BaseAgent":
+        """Build the subagent declared as ``name`` (see ``subagents``): a new agent on every call,
+        sharing this agent's engine and tokenizer (see :meth:`derive`)."""
+        if name not in self.subagents:
+            raise ValueError(f"No subagent named {name!r}. Declared subagents: {sorted(self.subagents)}.")
+        return self.derive(**self.subagents[name])
 
     def _bind_method_tools(self, tools: List) -> List:
         """Give this agent its own instance of each ``@tool``-decorated method of its class.

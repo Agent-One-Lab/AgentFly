@@ -74,6 +74,21 @@ CONTEXT_TRIGGER_MESSAGE_TYPE_ENV = "CONTEXT_TRIGGER_MESSAGE_TYPE"
 CONTEXT_TRIGGER_TURNS_ENV = "CONTEXT_TRIGGER_TURNS"
 
 
+def resolve_context_trigger_turns(value: Optional[int]) -> Optional[int]:
+    """``value``, or ``CONTEXT_TRIGGER_TURNS`` from the environment when it is unset.
+    Raises if the result is set but not an integer >= 1."""
+    if value is None:
+        env_turns = os.getenv(CONTEXT_TRIGGER_TURNS_ENV)
+        if env_turns is not None and str(env_turns).strip() != "":
+            try:
+                value = int(env_turns)
+            except ValueError as exc:
+                raise ValueError(f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}") from exc
+    if value is not None and value < 1:
+        raise ValueError("context_trigger_turns must be >= 1 when set")
+    return value
+
+
 class ActionAgent(BaseAgent):
     """Agent that parses the action format: <think>...</think>, <action> action </action>.
 
@@ -91,7 +106,40 @@ class ActionAgent(BaseAgent):
         truncate_history_at_action: bool = False,
         **kwargs,
     ):
-        self.action_tool_name = tools[0].name
+        # The action format puts the environment interface in the prompt text
+        # itself; the tool exists only to execute the parsed ``<action>``. So by
+        # default no tool schema is rendered into the prompt (matches verl-agent).
+        kwargs.setdefault("render_tools_in_prompt", False)
+        super().__init__(
+            model_name_or_path,
+            tool_parser_name=tool_parser_name,
+            tools=tools,
+            context_trigger_turns=context_trigger_turns,
+            context_trigger_message_type=context_trigger_message_type,
+            truncate_history_at_action=truncate_history_at_action,
+            **kwargs,
+        )
+
+    def check_settings(self, settings: Dict) -> None:
+        super().check_settings(settings)
+        resolve_context_trigger_turns(settings.get("context_trigger_turns"))
+
+    def configure(
+        self,
+        *,
+        context_trigger_turns: Optional[int] = None,
+        context_trigger_message_type: Optional[str] = None,
+        truncate_history_at_action: bool = False,
+        **settings,
+    ) -> None:
+        """The base settings plus the action format's own (see :meth:`BaseAgent.configure`)."""
+        super().configure(**settings)
+        self.own_settings.update(
+            context_trigger_turns=context_trigger_turns,
+            context_trigger_message_type=context_trigger_message_type,
+            truncate_history_at_action=truncate_history_at_action,
+        )
+        self.action_tool_name = self.tools[0].name
         # What the assistant message's ``content`` holds. False (default): the FULL
         # generated text, so the history the model sees next turn equals what it
         # sampled (and what training splices via ``token_ids``) — the on-policy
@@ -99,18 +147,7 @@ class ActionAgent(BaseAgent):
         # at the first ``</action>``/``</summarize>`` (an ablation; the tool call is
         # always parsed from the truncated copy either way).
         self.truncate_history_at_action = truncate_history_at_action
-        if context_trigger_turns is None:
-            env_turns = os.getenv(CONTEXT_TRIGGER_TURNS_ENV)
-            if env_turns is not None and str(env_turns).strip() != "":
-                try:
-                    context_trigger_turns = int(env_turns)
-                except ValueError as exc:
-                    raise ValueError(f"{CONTEXT_TRIGGER_TURNS_ENV} must be an integer, got: {env_turns!r}") from exc
-
-        if context_trigger_turns is not None and context_trigger_turns < 1:
-            raise ValueError("context_trigger_turns must be >= 1 when set")
-
-        self.context_trigger_turns = context_trigger_turns
+        self.context_trigger_turns = resolve_context_trigger_turns(context_trigger_turns)
         message_type = context_trigger_message_type
         if message_type is None:
             message_type = os.getenv(CONTEXT_TRIGGER_MESSAGE_TYPE_ENV, "base")
@@ -118,11 +155,6 @@ class ActionAgent(BaseAgent):
             message_type,
             CONTEXT_TRIGGER_MESSAGE_DICT["base"],
         )
-        # The action format puts the environment interface in the prompt text
-        # itself; the tool exists only to execute the parsed ``<action>``. So by
-        # default no tool schema is rendered into the prompt (matches verl-agent).
-        kwargs.setdefault("render_tools_in_prompt", False)
-        super().__init__(model_name_or_path, tool_parser_name=tool_parser_name, tools=tools, **kwargs)
 
     # Action tools whose initial observation must come from the env at rollout start.
     _WEBSHOP_TOOLS = frozenset({"webshop_browser_action", "webshop_browser"})
