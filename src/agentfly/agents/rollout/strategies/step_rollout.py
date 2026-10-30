@@ -183,6 +183,7 @@ class StepRollout(Rollout):
         # metadata or the reward function (unlike ChainRollout).
         meta = {k: v for k, v in spec.info.items() if k != "episode_id"}
         context = self.make_context(
+            agent=agent,
             episode_id=episode_id,
             group_id=spec.group_id,
             metadata=meta,

@@ -407,11 +407,12 @@ class ActionAgent(BaseAgent):
         self,
         responses: List[str],
         context: Optional[Context] = None,
+        trajectory_segments: Optional[List[List[Dict]]] = None,
         **kwargs,
     ) -> List[Dict]:
-        trajectory_segments = []
-        if context is not None:
-            trajectory_segments = context.metadata.get("trajectory_segments", [])
+        """Parse each response; ``trajectory_segments[i]`` is the prompt response ``i`` was
+        sampled from (the rollout passes it; empty when not given)."""
+        trajectory_segments = trajectory_segments or []
         return [
             self._parse_single_response(
                 response,

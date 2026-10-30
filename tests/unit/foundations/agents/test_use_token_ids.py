@@ -32,7 +32,7 @@ class _FakeAgent:
     async def generate_async(self, messages, **kwargs):
         return self.response
 
-    def parse(self, response_texts, tool_calls=None, context=None):
+    def parse(self, response_texts, tool_calls=None, context=None, **kwargs):
         return [{"role": "assistant", "content": response_texts[0]}]
 
 

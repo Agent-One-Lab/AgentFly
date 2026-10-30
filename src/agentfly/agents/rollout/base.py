@@ -351,21 +351,26 @@ class Rollout(ABC):
 
     # ---- L2: one episode's lifecycle ----
 
-    @staticmethod
     def make_context(
+        self,
         *,
+        agent,
         episode_id: str,
         group_id: Optional[str],
         metadata: Dict[str, Any],
         context_config: Optional[Any] = None,
     ) -> Context:
-        """The per-episode :class:`Context` (resources and metadata for tools)."""
-        return Context(
+        """The per-episode :class:`Context`: resources and metadata for tools, plus the
+        episode's main agent and this strategy (``context.agent`` / ``context.rollout``)."""
+        context = Context(
             rollout_id=episode_id,
             group_id=group_id,
             metadata=metadata,
             context_config=context_config,
         )
+        context.agent = agent
+        context.rollout = self
+        return context
 
     @staticmethod
     async def run_first_step_hook(agent, context: Context, first_step, episode_id: str) -> None:

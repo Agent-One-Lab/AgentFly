@@ -8,10 +8,15 @@ for tools and rewards that need to run in containers or access shared resources.
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Set
 
 from ..resources.types import BaseResource, BaseResourceSpec, ContainerResourceSpec
 from .context_config import ContextConfig, resolve_resource_backend
+
+if TYPE_CHECKING:
+    from ..agents.agent_base import BaseAgent
+    from ..agents.rollout.base import Rollout
+    from ..agents.rollout.sessions import Session
 
 
 def _coerce_context_config(raw: Optional[Any]) -> ContextConfig:
@@ -36,7 +41,11 @@ def _spec_key(spec: BaseResourceSpec) -> str:
 
 class Context:
     """
-    Execution context for tools and rewards in agentic RL rollouts.
+    Execution context for tools and rewards in agentic RL rollouts: one episode.
+
+    It holds the episode's ids, task metadata and resources (the environment), and, when a
+    rollout strategy made it, the episode's main agent (``agent``), the strategy running it
+    (``rollout``) and its sessions (``sessions``: each agent's work in this episode, by id).
     """
 
     def __init__(
@@ -59,10 +68,17 @@ class Context:
         """
         self.rollout_id = rollout_id
         self.group_id = group_id
+        # Reward inputs, set by the rollout just before the reward is computed: the main
+        # conversation, its final response, and whether ``trajectory`` is one list of
+        # messages ("flat") or a list of segments ("segmented", after context folding).
         self.final_response: str = None
         self.trajectory: List[Dict[str, Any]] = []
         self.trajectory_format: str = "flat"
         self.metadata = dict(metadata) if metadata else {}
+        # Set by the rollout strategy that runs the episode (see ``Rollout.make_context``).
+        self.agent: Optional[BaseAgent] = None
+        self.rollout: Optional[Rollout] = None
+        self.sessions: Dict[int, Session] = {}
         self.context_config: ContextConfig = _coerce_context_config(context_config)
         self.rollout_resource_ids: List[str] = []
         self.global_resource_ids: Set[str] = set()

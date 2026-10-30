@@ -319,6 +319,7 @@ class ChainRollout(Rollout):
 
         # Build Context from rollout data for tools that need it
         context = self.make_context(
+            agent=agent,
             episode_id=episode_id,
             group_id=chain.info.get("group_id"),
             metadata=chain.info,
@@ -783,7 +784,6 @@ class ChainRollout(Rollout):
                 tool_call_id=tool_call["id"],
                 tool_result_name=result.name,
                 new_content=new_content,
-                context=context,
             )
 
             action_input_step.messages = updated_messages
@@ -821,7 +821,6 @@ class ChainRollout(Rollout):
         tool_call_id: str,
         tool_result_name: str,
         new_content: List[Dict[str, Any]],
-        context: Context,
     ) -> Tuple[Messages, bool]:
         """
         Apply context folding based on the tool that was just executed.
@@ -847,7 +846,6 @@ class ChainRollout(Rollout):
             # of the history up to this point, then append the tool message.
             # Default behavior: keep only the fresh summary (do not stack summaries).
             folded_turns = fold_messages_with_summarize(messages.messages, observation, keep_previous_summary=False)
-            context.trajectory_format = "segmented"
             meta = messages.meta
             return Messages.from_turns(folded_turns, **meta), True
 
@@ -858,6 +856,9 @@ class ChainRollout(Rollout):
 
     async def finalize_chain(self, agent, episode_id, chain, current_step, depth, context):
         """Finalize the chain with reward calculation and cleanup."""
+        # Folding is the only thing that stores earlier views before this point, so it
+        # decides the format the reward reads from ``context.trajectory_format``.
+        context.trajectory_format = "segmented" if chain.histories else "flat"
         # Always record the final trajectory segment so that histories capture
         chain.histories.append(current_step.messages.messages)
 

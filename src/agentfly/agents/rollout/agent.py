@@ -46,7 +46,12 @@ class RolloutAgent(Protocol):
         context: Any = None,
         **kwargs,
     ) -> List[Dict]:
-        """Turn raw response text (+ optional backend tool calls) into assistant messages."""
+        """Turn raw response text (+ optional backend tool calls) into assistant messages.
+
+        The rollout also passes ``trajectory_segments``: for each response, the prompt it
+        was sampled from (parsers that react to the prompt, e.g. a forced-summary turn,
+        read it).
+        """
         ...
 
     def prompt_tools(self) -> List[Dict]:

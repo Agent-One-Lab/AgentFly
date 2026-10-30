@@ -166,14 +166,13 @@ async def generate_response(
     )
     responses = normalize_generate_response(raw)
     response_texts = responses.get("response_texts")
-    context.metadata = {
-        **context.metadata,
-        "trajectory_segments": [current_step.messages.messages],
-    }
+    # The prompt each response was sampled from goes to the parser directly, not through
+    # ``context.metadata``, which every conversation of the episode shares.
     new_msg = agent.parse(
         response_texts,
         tool_calls=responses.get("tool_calls"),
         context=context,
+        trajectory_segments=[current_step.messages.messages],
     )
     overlay_raw_message_fields(new_msg, responses)
     if use_token_ids:
