@@ -22,30 +22,26 @@ the standalone training converter reads these segments and uses the internal
 
 import json
 import logging
-import time
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from ....core.context_config import ContextConfig
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
-from ....utils.monitor import Monitor
-from ...types import RunResult, Segment, Trajectory
+from ...types import Segment
 from ...utils.action_format import message_text
 from ...utils.messages import Messages
-from ..base import EpisodeSpec, Rollout
-from ..events import FinishReason
+from ..base import Rollout
+from ..events import FinishReason, MessageProduced, ToolObserved
 from ..loop.generation import generate_response
-from ..loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
+from ..sessions import LoopState, SessionResult
 from ..structures import Step
 from .prompt_builders import resolve_prompt_builder
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class WindowState:
-    """The turn loop's state for one episode; :meth:`StepRollout.run_loop` updates it.
+@dataclass(kw_only=True)
+class WindowState(LoopState):
+    """The turn loop's state for one session; :meth:`StepRollout.run_loop` updates it.
 
     ``current`` is the state the model acts on next and ``history`` the earlier
     ``(obs, action)`` turns (oldest first); the prompt builder renders a bounded window
@@ -53,18 +49,17 @@ class WindowState:
     ``steps`` holds one :class:`Step` per generation.
     """
 
-    episode_id: str
     current: Dict[str, Any]
     task_description: str
     full_messages: List[Dict]
     history: List[Dict[str, Any]] = field(default_factory=list)
     steps: List[Step] = field(default_factory=list)
-    depth: int = 0
-    have_set_resources: bool = False
     finish_reason: Optional[FinishReason] = None
 
 
 class StepRollout(Rollout):
+    name = "step"
+
     def __init__(
         self,
         history_length: int = 2,
@@ -101,177 +96,64 @@ class StepRollout(Rollout):
         self.history_length = history_length
         self.max_prompt_length = max_prompt_length
         self.prompt_builder = resolve_prompt_builder(prompt_builder, max_prompt_length=max_prompt_length)
-        # Rollout metric reporting (mirrors ChainRollout): emit agent/rollout/* to the
-        # monitor once the whole rollout is drained.
-        self.metrics = RolloutMetrics()
 
-    # ---- L3: control flow -------------------------------------------------
+    # ---- the strategy contract ----
 
-    async def run(
-        self,
-        agent,
-        messages: List[Dict],
-        max_turns: int,
-        group_size: int,
-        generation_config: Optional[Dict[str, Any]] = None,
-        max_concurrent_episodes: Optional[int] = None,
-        context_config: Optional[ContextConfig] = None,
-        global_step: Optional[int] = None,
-        use_token_ids: bool = True,
-        show_progress: bool = True,
-        **kwargs,
-    ) -> RunResult:
-        """Roll out ``group_size`` trajectories per task, async-concurrently.
-
-        Returns a :class:`RunResult` of one :class:`~agentfly.agents.types.Trajectory`
-        per rollout. Conversations live in ``segments``; runtime ``steps`` provide
-        the corresponding environment signals. Trajectories come back in
-        ``(group_idx, episode_idx)`` order (the spec order). ``global_step`` sets the
-        metrics x-axis (see ``Rollout.resolve_global_step``). ``use_token_ids`` see
-        ``Rollout.run``. ``show_progress`` renders a progress bar over finished trajectories.
-        """
-        self.validate_run_args(max_turns, group_size, max_concurrent_episodes)
-        self.use_token_ids = bool(use_token_ids)
-        Monitor.ensure_started()
-        step = self.resolve_global_step(global_step)
-
-        specs = self.make_specs(messages, group_size)
-        results: Dict[str, Trajectory] = {}
-
-        async def run_episode(spec: EpisodeSpec) -> None:
-            results[spec.episode_id] = await self.run_episode(
-                agent,
-                spec,
-                max_turns=max_turns,
-                generation_config=generation_config,
-                context_config=context_config,
-            )
-
-        async for _ev in self.run_episodes(
-            specs,
-            run_episode,
-            max_concurrent_episodes=max_concurrent_episodes,
-            show_progress=show_progress,
-        ):
-            pass
-
-        trajectories = [results[spec.episode_id] for spec in specs]
-        # Shared end-of-rollout reporting reads the completed trajectories, including
-        # episode durations for timing summaries and slowest-trajectory logging.
-        self.metrics.record_step(
-            global_step=step,
-            trajectories=trajectories,
-        )
-        return RunResult(trajectories=trajectories, rollout="step")
-
-    async def run_episode(
-        self,
-        agent,
-        spec: EpisodeSpec,
-        *,
-        max_turns: int,
-        generation_config: Optional[Dict[str, Any]],
-        context_config: Optional[ContextConfig],
-    ) -> Trajectory:
-        """One episode's async step-loop. Emits one :class:`Step` per env step and
-        returns the per-rollout :class:`Trajectory` (reward = episode outcome)."""
-        # Match chain timing: setup through cleanup, excluding semaphore queueing.
-        started_at = time.monotonic()
-        episode_id = spec.episode_id
-        task_messages = spec.messages
-        # Task metadata and the group ids; the episode id is not passed to the context
-        # metadata or the reward function (unlike ChainRollout).
-        meta = {k: v for k, v in spec.info.items() if k != "episode_id"}
-        context = self.make_context(
-            agent=agent,
+    def new_state(self, agent, messages: List[Dict], *, episode_id: str, info: Dict[str, Any]) -> WindowState:
+        """A window whose current observation is the last user message of ``messages``
+        (the whole of ``messages`` starts the full conversation)."""
+        task_description = info.get("task_description", "")
+        return WindowState(
             episode_id=episode_id,
-            group_id=spec.group_id,
-            metadata=meta,
-            context_config=context_config,
-        )
-
-        # Seed the initial observation from the env (env-source-of-truth agents reset
-        # the env and inject the first obs). We reuse the same hook as ChainRollout;
-        # the initial obs text is read back from the seeded first step.
-        first_step = Step(
-            type="Action Input",
-            messages=Messages.from_turns(deepcopy(task_messages.messages)),
-        )
-        await self.run_first_step_hook(agent, context, first_step, episode_id)
-        # Structured pre-action context for the prompt builder. ``current`` is the step the
-        # model is about to act on; ``history`` is the prior steps (oldest first). Both carry
-        # raw + bundled obs so either builder (chat window / flat verl-agent) can render.
-        # task_description = the ENV's templated goal (verl-agent's extract_task: the text
-        # after "Your task is to: " in the initial obs), NOT the dataset's human-annotated
-        # task_description — verl-agent uses goal_desc_human_anns_prob=0.0 (templated goals).
-        initial_obs = context.metadata.get("_flat_initial_obs", "")
-        task_description = (
-            context.metadata.get("_flat_task_description")  # set by the env hook (WebShop)
-            or self.extract_task(str(initial_obs))  # ALFWorld: "Your task is to: …"
-            or meta.get("task_description", "")
-        )
-        state = WindowState(
-            episode_id=episode_id,
+            info=info,
             current={
-                "raw_obs": context.metadata.get("_flat_initial_obs", ""),
-                "obs": self.last_user_text(first_step.messages),
-                "admissible": context.metadata.get("_flat_initial_admissible", []),
+                "raw_obs": "",
+                "obs": self.last_user_text(messages),
+                "admissible": [],
                 "task_description": task_description,
             },
             task_description=task_description,
-            full_messages=list(first_step.messages.messages),  # for the outcome reward
-        )
-        # Tool schemas, exactly as ChainRollout builds them — so per-step generation
-        # goes through the *same* path (tools / tool_call_source / skills / parse with
-        # trajectory_segments). StepRollout must differ from ChainRollout only in
-        # history length + per-step layout, never in how it talks to the model.
-        # Prompt tools come from the agent's single source of truth (also used by
-        # tokenize_trajectories), so generation and training render one prompt.
-        tools = agent.prompt_tools()
-
-        await self.run_loop(
-            agent=agent,
-            context=context,
-            state=state,
-            tools=tools,
-            max_turns=max_turns,
-            generation_config=generation_config,
-        )
-        steps = state.steps
-        finish_reason = state.finish_reason
-        full_messages = state.full_messages
-
-        # Episode outcome on the full (unwindowed) conversation.
-        reward = await self.compute_reward(
-            agent,
-            context,
-            episode_id=episode_id,
-            trajectory=full_messages,
-            final_messages=full_messages,
-            reward_args=meta,
-        )
-        tool_metrics = aggregate_tool_metrics(step.tool_result for step in steps)
-
-        await self.release_resources(context)
-        rollout_time_sec = time.monotonic() - started_at
-
-        # One segment PER GENERATION (each the bounded prompt + response) — so
-        # inspection of segments shows the per-step
-        # structure used by the standalone training converter, not a chain-like blob.
-        # (The episode reward above used ``full_messages``; segments are the training
-        # units.)
-        return self.make_trajectory(
-            info=spec.info,
-            segments=([Segment(messages=s.messages.messages) for s in steps] if steps else [Segment(messages=[])]),
-            reward=reward,
-            tool_metrics=tool_metrics,
-            finish_reason=finish_reason,
-            rollout_time_sec=rollout_time_sec,
-            num_turns=len(steps),
-            tool_call_counts=count_tool_calls(s.tool_result for s in steps),
-            steps=steps,
+            full_messages=list(messages),
         )
 
+    def after_first_step_hook(self, state: WindowState, context) -> None:
+        """Take the env's start from what the first-step hook recorded.
+
+        Env-source-of-truth agents (WebShop, ALFWorld) record the initial observation and
+        admissible actions in ``context.metadata`` for the prompt builders. The task
+        description is the env's templated goal when there is one (WebShop records it;
+        for ALFWorld it is verl-agent's ``extract_task``: the text after "Your task is
+        to: " in the initial observation), not the dataset's human-annotated one;
+        verl-agent uses ``goal_desc_human_anns_prob=0.0`` (templated goals).
+        """
+        initial_obs = context.metadata.get("_flat_initial_obs", "")
+        task_description = (
+            context.metadata.get("_flat_task_description")
+            or self.extract_task(str(initial_obs))
+            or state.task_description
+        )
+        state.current["raw_obs"] = initial_obs
+        state.current["admissible"] = context.metadata.get("_flat_initial_admissible", [])
+        state.current["task_description"] = task_description
+        state.task_description = task_description
+
+    def transcript(self, state: WindowState) -> List[List[Dict]]:
+        """The full (unwindowed) conversation."""
+        return [state.full_messages]
+
+    def segments(self, state: WindowState) -> List[Segment]:
+        """One segment per generation (its bounded prompt and response), the units the
+        step-level training converter reads; one empty segment if nothing was generated."""
+        if not state.steps:
+            return [Segment(messages=[])]
+        return [Segment(messages=step.messages.messages) for step in state.steps]
+
+    def records(self, state: WindowState) -> List[Step]:
+        """One step per generation; ``tool_result`` is set when an action ran."""
+        return state.steps
+
+    def result(self, state: WindowState) -> SessionResult:
+        return self.session_result(state, finish_reason=state.finish_reason, turns=len(state.steps))
 
     async def run_loop(
         self,
@@ -282,13 +164,13 @@ class StepRollout(Rollout):
         tools: List[Dict],
         max_turns: int,
         generation_config: Optional[Dict[str, Any]],
-    ) -> None:
-        """Run up to ``max_turns`` turns of ``agent`` on ``state``.
+    ):
+        """Run up to ``max_turns`` turns of ``agent`` on ``state``; yields
+        ``MessageProduced`` / ``ToolObserved``.
 
         Only the turns: no context set-up, first-step hook, reward or resource release.
         ``state`` is updated in place and ``state.finish_reason`` is set when the loop
-        stops (``max_turns`` unless a turn ended it). A bounded-window episode is not
-        meant to be continued, so there is no resume support.
+        stops (``max_turns`` unless a turn ended it).
         """
         for _ in range(max_turns):
             depth = state.depth
@@ -307,7 +189,7 @@ class StepRollout(Rollout):
                 type="Action Input",
                 messages=Messages.from_turns(prompt_messages),
             )
-            action_msg, _ = await generate_response(
+            action_msg, total_token_length = await generate_response(
                 agent,
                 None,
                 gen_step,
@@ -328,6 +210,12 @@ class StepRollout(Rollout):
             # of the trajectory is ever lost and every trajectory has >=1 step.
             gen_step.messages = Messages.from_turns(list(prompt_messages) + [action_msg])
             state.steps.append(gen_step)
+            yield MessageProduced(
+                episode_id=state.episode_id,
+                depth=depth,
+                message=action_msg,
+                total_token_length=total_token_length,
+            )
 
             # Control decisions run through the SAME base machinery as ChainRollout.
             tool_calls = action_msg.get("tool_calls") or []
@@ -378,6 +266,14 @@ class StepRollout(Rollout):
 
             obs_text = result.observation or ""
             state.full_messages.append({"role": "tool", "content": obs_text})
+            yield ToolObserved(
+                episode_id=state.episode_id,
+                depth=depth,
+                tool_name=tool_call["function"]["name"],
+                observation=result.observation,
+                status=result.status,
+                image=result.image,
+            )
 
             # Resolve the tool result to a control: the tool's explicit ``control`` wins
             # (e.g. an env tool that reached a terminal state writes ``control="end"``),

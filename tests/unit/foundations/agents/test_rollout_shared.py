@@ -206,10 +206,15 @@ def test_make_trajectory_merges_tool_metrics_last_and_keeps_task_metadata():
 
 def test_chain_only_machinery_lives_on_chain_rollout():
     for name in (
-        "execute_turn_tools", "apply_context_folding", "render_no_tool_call_message",
-        "finalize_chain", "build_trajectories",
+        "execute_turn_tools", "apply_context_folding", "render_no_tool_call_message", "run_turn",
     ):
         assert not hasattr(Rollout, name), name
         assert hasattr(ChainRollout, name), name
     assert not hasattr(StepRollout(), "max_consecutive_no_tool_calls")
     assert isinstance(EpisodeSpec, type)
+
+
+def test_the_episode_lifecycle_is_shared():
+    for name in ("run", "stream", "run_episode", "add_session", "finish_episode"):
+        for strategy_cls in (ChainRollout, StepRollout):
+            assert getattr(strategy_cls, name) is getattr(Rollout, name), (strategy_cls.__name__, name)

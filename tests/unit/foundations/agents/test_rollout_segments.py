@@ -24,9 +24,11 @@ from agentfly.utils.trajectories import gather_responses
 
 
 class FakeContext:
-    def __init__(self, *, metadata, **kwargs):
+    def __init__(self, *, metadata, rollout_id=None, **kwargs):
+        self.rollout_id = rollout_id
         self.metadata = dict(metadata)
         self.trajectory_format = "flat"
+        self.sessions = {}
 
     async def release_resource(self, **kwargs):
         pass
@@ -101,7 +103,7 @@ def isolated_runtime(monkeypatch):
     monkeypatch.setattr(chain_rollout, "observation_token_length", lambda *a, **k: 1)
     monkeypatch.setattr(chain_rollout, "estimate_chat_prompt_tokens", lambda *a, **k: 10)
     monkeypatch.setattr(rollout_base, "progress_bar", lambda *a, **k: None)
-    monkeypatch.setattr(chain_rollout.Monitor, "ensure_started", lambda: None)
+    monkeypatch.setattr(rollout_base.Monitor, "ensure_started", lambda: None)
     # Exercise real metric aggregation, but do not write to monitor sinks.
     events = []
     monkeypatch.setattr(rollout_metrics, "emit", events.append)
@@ -119,6 +121,20 @@ async def run(strategy, agent):
         max_turns=len(agent.tool_names),
         group_size=1,
     )
+
+
+def record_sessions(strategy):
+    """Each episode's sessions by episode id, recorded as the strategy adds them."""
+    sessions = {}
+    add_session = strategy.add_session
+
+    def recording(context, *args, **kwargs):
+        session = add_session(context, *args, **kwargs)
+        sessions.setdefault(context.rollout_id, {})[session.id] = session
+        return session
+
+    strategy.add_session = recording
+    return sessions
 
 
 def roles(segment):
@@ -149,10 +165,10 @@ async def test_reused_rollout_emits_one_summary_per_batch(strategy_cls, isolated
         assert step_event.x == global_step
         assert step_event.x_name == "agent/rollout/step"
 
-        # Chain still logs once per completed trajectory; step keeps its summary-only path.
+        # Both strategies log once per completed trajectory (JSONL only).
         for name in per_chain_names:
             events = [event for event in isolated_runtime if event.name == name]
-            assert len(events) == (3 if strategy_cls is chain_rollout.ChainRollout else 0)
+            assert len(events) == 3
             assert all(event.sinks == ["jsonl"] for event in events)
         assert not hasattr(strategy, "finished_chains_count")
         assert not hasattr(strategy.metrics, "monitor_info")
@@ -239,6 +255,7 @@ async def test_rollouts_return_segments(strategy_cls, expected_roles, isolated_r
 @pytest.mark.asyncio
 async def test_folded_chain_preserves_each_context_view(isolated_runtime):
     strategy = chain_rollout.ChainRollout()
+    sessions = record_sessions(strategy)
     result = await run(strategy, FakeAgent([["summarize"], ["act"]], terminal_after=2))
     trajectory = result[0]
     assert trajectory.num_segments == 2
@@ -249,8 +266,10 @@ async def test_folded_chain_preserves_each_context_view(isolated_runtime):
     assert after.messages[1]["content"][0]["text"] == "O0 summary"
     assert before.messages[-1]["token_ids"] == [101, 2]
     assert after.messages[-2]["token_ids"] == [102, 2]
-    chain = strategy.chains[trajectory.episode_id]
-    assert [segment.messages for segment in trajectory.segments] == chain.histories
+    state = sessions[trajectory.episode_id][0].state
+    assert [segment.messages for segment in trajectory.segments] == [
+        *state.chain.histories, state.current_step.messages.messages,
+    ]
     assert trajectory.num_turns == 2
     assert trajectory.tool_call_counts == {"summarize": 1, "act": 1}
     averages = {event.name: event.value for event in isolated_runtime}
@@ -453,8 +472,8 @@ async def test_execution_time_includes_setup_reward_and_cleanup_but_not_queueing
     module, strategy_cls, monkeypatch, isolated_runtime,
 ):
     clock = [100.0]
-    # Replace only this module's clock, not asyncio's process-wide monotonic clock.
-    monkeypatch.setattr(module, "time", types.SimpleNamespace(monotonic=lambda: clock[0]), raising=False)
+    # Replace only the episode lifecycle's clock, not asyncio's process-wide monotonic clock.
+    monkeypatch.setattr(rollout_base, "time", types.SimpleNamespace(monotonic=lambda: clock[0]))
 
     class TimedContext(FakeContext):
         def __init__(self, **kwargs):
@@ -649,6 +668,7 @@ async def test_equivalent_tool_stops_have_the_same_finish_reason(
 
     monkeypatch.setattr(agent, "execute_tool_call", execute)
     strategy = strategy_cls(project_actions=project_actions, **policy)
+    sessions = record_sessions(strategy)
     result = await run(strategy, agent)
     trajectory = result[0]
     assert trajectory.finish_reason == expected
@@ -658,7 +678,7 @@ async def test_equivalent_tool_stops_have_the_same_finish_reason(
     assert trajectory.tool_call_counts == {"act": agent.tool_calls}
     assert RunResult.model_validate_json(result.model_dump_json())[0].finish_reason == expected
     if isinstance(strategy, chain_rollout.ChainRollout):
-        assert strategy.chains[trajectory.episode_id].info["finish_reason"] == expected
+        assert sessions[trajectory.episode_id][0].state.chain.info["finish_reason"] == expected
 
 
 @pytest.mark.asyncio
@@ -814,6 +834,7 @@ async def test_chain_projects_before_recording_and_emitting_messages(
 
     monkeypatch.setattr(agent, "execute_tool_call", execute)
     strategy = chain_rollout.ChainRollout(project_actions=True)
+    sessions = record_sessions(strategy)
     original_run_turn = strategy.run_turn
 
     async def capture_turn(**kwargs):
@@ -836,7 +857,7 @@ async def test_chain_projects_before_recording_and_emitting_messages(
     # Message normalization still happens, but response text and sampled IDs are preserved.
     expected_stored = {**message, "content": [{"type": "text", "text": text}],
                        "tool_calls": [expected_call]}
-    thought = next(s for s in strategy.chains[result[0].episode_id].steps() if s.type == "Thought")
+    thought = next(s for s in sessions[result[0].episode_id][0].state.chain.steps() if s.type == "Thought")
     assert thought.messages[-1] == expected_stored
     assert execution_messages == [expected_stored]
     assert result[0].segments[0].messages[-2] == expected_stored
@@ -858,6 +879,7 @@ async def test_chain_projection_preserves_existing_calls_and_model_stop_policy(
 
     monkeypatch.setattr(chain_rollout, "generate_response", generate)
     strategy = chain_rollout.ChainRollout(project_actions=project_actions)
+    sessions = record_sessions(strategy)
 
     def unexpected_projection(*args):
         pytest.fail("An existing tool call must not be projected")
@@ -868,7 +890,7 @@ async def test_chain_projection_preserves_existing_calls_and_model_stop_policy(
     should_execute = project_actions or model_status == "continue"
     assert agent.tool_calls == int(should_execute)
     assert result[0].finish_reason == ("tool_control_end" if should_execute else "terminal")
-    thought = next(s for s in strategy.chains[result[0].episode_id].steps() if s.type == "Thought")
+    thought = next(s for s in sessions[result[0].episode_id][0].state.chain.steps() if s.type == "Thought")
     assert thought.messages[-1]["tool_calls"] == [
         {"id": "call_0", "type": "function", "function": {"name": "act", "arguments": "{}"}},
     ]

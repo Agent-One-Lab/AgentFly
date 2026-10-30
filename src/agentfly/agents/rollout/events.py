@@ -1,8 +1,8 @@
 """Typed events yielded by the rollout generator.
 
-The per-chain loop (:meth:`ChainRollout.run_episode`) is an async generator that
-``yield``s these events; :meth:`ChainRollout.stream` merges the per-chain streams
-into one. Following Claude Code's ``queryLoop`` (which yields a discriminated union of
+Each episode (:meth:`Rollout.run_episode`, shared by every strategy) is an async
+generator that ``yield``s these events; :meth:`Rollout.stream` merges the episodes'
+streams into one. Following Claude Code's ``queryLoop`` (which yields a discriminated union of
 typed event/message classes rather than one struct with a ``type`` flag), each event is
 its own small frozen dataclass and consumers ``isinstance``-dispatch.
 
@@ -68,9 +68,9 @@ class ToolObserved:
 
 @dataclass(frozen=True)
 class EpisodeEnded:
-    """Terminal event for a chain. Lightweight by design — the final ``Chain``/``Step``
-    live in ``ChainRollout.chains`` / ``.current_steps`` (the loop writes them as it
-    ends), not on the event."""
+    """Terminal event for an episode. Lightweight by design — the episode's
+    ``Trajectory`` is in the strategy's ``trajectories`` (by episode id), not on the
+    event."""
 
     episode_id: str
     finish_reason: Optional[str] = None

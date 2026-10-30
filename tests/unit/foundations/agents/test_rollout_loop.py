@@ -9,7 +9,7 @@ import pytest
 from test_rollout_segments import FakeAgent, fake_generation, isolated_runtime  # noqa: F401
 
 from agentfly.agents.rollout import base as rollout_base
-from agentfly.agents.rollout.events import FinishReason, MessageProduced
+from agentfly.agents.rollout.events import FinishReason, MessageProduced, ToolObserved
 from agentfly.agents.rollout.loop import metrics as rollout_metrics
 from agentfly.agents.rollout.strategies import chain_rollout
 from agentfly.agents.rollout.strategies.chain_rollout import ChainRollout, ChainState
@@ -55,7 +55,7 @@ def new_chain_state(episode_id="e1"):
     root = chain.add_step(type="Action Input", messages=[
         {"role": "system", "content": "SYS"}, {"role": "user", "content": "O0"},
     ])
-    return ChainState(episode_id=episode_id, chain=chain, current_step=root)
+    return ChainState(episode_id=episode_id, info=chain.info, chain=chain, current_step=root)
 
 
 async def drain(gen):
@@ -74,7 +74,7 @@ async def test_chain_loop_runs_only_the_turns(loop_only):
     assert agent.tool_calls == 2
     assert state.chain.info["finish_reason"] == FinishReason.MAX_TURNS
     assert sum(isinstance(e, MessageProduced) for e in events) == 2
-    assert strategy.chains == {} and strategy.current_steps == {}
+    assert strategy.trajectories == {}
     assert not hasattr(strategy, "agent")
 
 
@@ -132,13 +132,19 @@ async def test_step_loop_runs_only_the_turns(loop_only):
     agent = FakeAgent([["act"], ["act"], ["act"]], terminal_after=2)
     state = WindowState(
         episode_id="e1",
+        info={},
         current={"raw_obs": "O0", "obs": "O0", "admissible": [], "task_description": ""},
         task_description="",
         full_messages=[{"role": "user", "content": "O0"}],
     )
-    await strategy.run_loop(
+    events = await drain(strategy.run_loop(
         agent=agent, context=StrictContext(), state=state, tools=[], max_turns=3, generation_config={},
-    )
+    ))
+    # The same events as ChainRollout's loop: one per generation and one per tool result.
+    assert [type(e) for e in events] == [MessageProduced, ToolObserved] * 2
+    assert [e.depth for e in events] == [0, 0, 1, 1]
+    assert events[1].tool_name == "act" and events[1].observation == "O1"
+    assert events[2].message is state.full_messages[3]
     assert agent.tool_calls == 2
     assert state.depth == 2
     assert len(state.steps) == 2

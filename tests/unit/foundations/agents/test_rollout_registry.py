@@ -83,12 +83,28 @@ async def test_register_and_run_custom_rollout_without_training_methods(marker, 
 
 
 def test_chain_rollout_is_a_rollout_subclass():
-    # composition contract: the concrete strategy implements the base interface
-    assert issubclass(ChainRollout, Rollout)
-    assert Rollout.run.__isabstractmethod__
-    assert Rollout.__abstractmethods__ == {"run"}
-    with pytest.raises(TypeError, match="abstract"):
-        Rollout()
+    # composition contract: the concrete strategies implement the base's strategy contract
+    assert issubclass(ChainRollout, Rollout) and issubclass(StepRollout, Rollout)
+    for method in ("new_state", "run_loop", "segments", "transcript", "records", "result"):
+        assert getattr(ChainRollout, method) is not getattr(Rollout, method), method
+        assert getattr(StepRollout, method) is not getattr(Rollout, method), method
+
+
+@pytest.mark.parametrize("method,args,kwargs", [
+    ("new_state", (None, []), {"episode_id": "e", "info": {}}),
+    ("run_loop", (), {"agent": None, "context": None, "state": None, "tools": [], "max_turns": 1,
+                      "generation_config": None}),
+    ("segments", (None,), {}),
+    ("transcript", (None,), {}),
+    ("records", (None,), {}),
+    ("result", (None,), {}),
+])
+def test_a_strategy_without_the_contract_names_the_missing_method(method, args, kwargs):
+    class Bare(Rollout):
+        pass
+
+    with pytest.raises(NotImplementedError, match=rf"Bare does not implement {method}\(\)"):
+        getattr(Bare(), method)(*args, **kwargs)
 
 
 def test_chain_rollout_has_no_unused_timer():

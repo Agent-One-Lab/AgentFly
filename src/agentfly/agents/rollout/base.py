@@ -10,23 +10,26 @@ Layering:
   the agent and are reached via ``agent``.
 - **L2** shared machinery (this class, concrete), used by every strategy:
   - loop-control policy: ``resolve_tool_control``, ``tool_finish_reason``, …;
-  - one episode's lifecycle: ``make_context`` → ``run_first_step_hook`` → (the
-    strategy's turn loop) → ``compute_reward`` → ``release_resources`` →
-    ``make_trajectory``;
-  - running many episodes: ``validate_run_args``, ``make_specs``, ``run_episodes``.
+  - running a batch: ``run`` → ``stream`` → ``run_episode`` for every episode;
+  - one episode's lifecycle (``run_episode``): ``make_context`` →
+    ``run_first_step_hook`` → ``add_session`` (session 0, the main agent) → the
+    strategy's ``run_loop`` → ``finish_episode`` (``compute_reward``,
+    ``release_resources``, ``make_trajectory``).
 
 An *episode* is one attempt at one task; the attempts at one task form a *group*
 (``group_id``).
-- **L3** the thin strategy (a subclass): ``run`` and its turn loop, returning a
-  ``RunResult``. Training conversion and tokenization live outside the rollout
-  interface; inference-only rollouts need no training methods.
+- **L3** the strategy (a subclass) implements the strategy contract: ``new_state``,
+  ``run_loop`` and the methods that read its loop state (``segments``,
+  ``transcript``, ``records``, ``result``). Training conversion and tokenization live
+  outside the rollout interface; inference-only rollouts need no training methods.
 """
 
 import asyncio
 import inspect
 import logging
+import time
 import uuid
-from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple, Union
 
@@ -35,11 +38,15 @@ from ...rewards.reward_base import calculate_reward
 from ...rewards.types import RewardResult
 from ...tools.tool_base import InvalidToolCallError
 from ...tools.types import CONTROL, CONTROL_CONTINUE, CONTROL_END, ToolResult
+from ...utils.monitor import Monitor
 from ..types import RunResult, Segment, Trajectory
 from ..utils.action_format import message_text
 from ..utils.messages import Messages, MessagesList
-from .events import FinishReason
+from .events import EpisodeEnded, EpisodeStarted, FinishReason
+from .loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
 from .loop.progress import progress_bar
+from .sessions import LoopState, Session, SessionResult
+from .structures import Step
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +93,17 @@ def unwrap_reward(raw_reward: Any) -> Tuple[Optional[float], Dict[str, Any]]:
         return float(raw_reward), {}
     return None, {}
 
-class Rollout(ABC):
-    """Base rollout strategy: shared machinery (L2) + the abstract L3 interface.
+class Rollout:
+    """Base rollout strategy: shared machinery (L2) + the strategy contract (L3).
 
     Concrete strategies (:class:`~agentfly.agents.rollout.strategies.chain_rollout.ChainRollout`, …) subclass
-    this, implement :meth:`run`, and reuse the concrete methods
-    here. Agent-provided state/hooks are reached through ``agent`` (a
-    :class:`~agentfly.agents.rollout.agent.RolloutAgent`).
+    this and implement the contract (:meth:`new_state`, :meth:`run_loop`, …); the
+    shared :meth:`run` drives them. Agent-provided state/hooks are reached through
+    ``agent`` (a :class:`~agentfly.agents.rollout.agent.RolloutAgent`).
     """
+
+    # The strategy's name, reported as ``RunResult.rollout``.
+    name: str = ""
 
     # Runtime-owned keys, excluded from task metadata. Execution counts are
     # derived from records, never trusted from incoming task metadata.
@@ -158,6 +168,9 @@ class Rollout(ABC):
         # run, so this counter only ever carries one run's step unless a caller supplies
         # its own — which is why callers that have a step counter should pass it.
         self.global_step = 0
+        self.metrics = RolloutMetrics()
+        # The current run's finished episodes, by episode id (filled by run_episode).
+        self.trajectories: Dict[str, Trajectory] = {}
 
     def resolve_global_step(self, global_step: Optional[int] = None) -> int:
         """Fix this run's metrics x value, *before* any metric is recorded.
@@ -249,6 +262,95 @@ class Rollout(ABC):
         raise RuntimeError(f"Tool {result.name!r} error: {result.observation}")
 
     # ---- L2: running many episodes ----
+
+    async def run(
+        self,
+        agent,
+        messages: List[Dict],
+        max_turns: int,
+        group_size: int = 1,
+        generation_config: Optional[Dict[str, Any]] = None,
+        max_concurrent_episodes: Optional[int] = None,
+        context_config: Optional[Any] = None,
+        global_step: Optional[int] = None,
+        use_token_ids: bool = True,
+        show_progress: bool = True,
+        **kwargs,
+    ) -> RunResult:
+        """Roll out ``group_size`` episodes per task and return a :class:`RunResult`.
+
+        Drains :meth:`stream`; the trajectories come back in ``(group_idx,
+        episode_idx)`` order. ``global_step`` is the caller's step counter for the
+        metrics x-axis (see :meth:`resolve_global_step`). ``use_token_ids``: carry the
+        backend's sampled token ids onto generated assistant messages (see
+        :func:`generate_response`). ``show_progress`` renders a progress bar over
+        finished episodes.
+        """
+        async for _event in self.stream(
+            agent,
+            messages,
+            max_turns=max_turns,
+            group_size=group_size,
+            generation_config=generation_config,
+            max_concurrent_episodes=max_concurrent_episodes,
+            context_config=context_config,
+            global_step=global_step,
+            use_token_ids=use_token_ids,
+            show_progress=show_progress,
+        ):
+            pass
+        return RunResult(trajectories=self.trajectories_in_order(), rollout=self.name)
+
+    async def stream(
+        self,
+        agent,
+        messages: List[Dict],
+        max_turns: int,
+        group_size: int = 1,
+        generation_config: Optional[Dict[str, Any]] = None,
+        max_concurrent_episodes: Optional[int] = None,
+        context_config: Optional[Any] = None,
+        global_step: Optional[int] = None,
+        use_token_ids: bool = True,
+        show_progress: bool = True,
+    ) -> AsyncIterator[Any]:
+        """Run every episode concurrently and yield their merged :mod:`.events`.
+
+        Each episode is a :meth:`run_episode`; its trajectory goes to
+        ``self.trajectories`` when it ends. Once drained, the step metrics are recorded.
+        The metrics x is resolved before any episode starts, so the per-episode records
+        and the end-of-run summaries share one step. See :meth:`run` for the arguments;
+        disable ``show_progress`` when a consumer owns the terminal (e.g. a console).
+        """
+        self.validate_run_args(max_turns, group_size, max_concurrent_episodes)
+        self.use_token_ids = bool(use_token_ids)
+        Monitor.ensure_started()
+        self.trajectories = {}
+        step = self.resolve_global_step(global_step)
+        specs = self.make_specs(messages, group_size)
+
+        def run_episode(spec: EpisodeSpec):
+            return self.run_episode(
+                agent,
+                spec,
+                max_turns=max_turns,
+                generation_config=generation_config,
+                context_config=context_config,
+            )
+
+        async for event in self.run_episodes(
+            specs,
+            run_episode,
+            max_concurrent_episodes=max_concurrent_episodes,
+            show_progress=show_progress,
+        ):
+            yield event
+
+        self.metrics.record_step(global_step=step, trajectories=self.trajectories_in_order())
+
+    def trajectories_in_order(self) -> List[Trajectory]:
+        """The current run's finished trajectories in ``(group_idx, episode_idx)`` order."""
+        return sorted(self.trajectories.values(), key=lambda t: (t.group_idx, t.episode_idx))
 
     @staticmethod
     def validate_run_args(max_turns: int, group_size: int, max_concurrent_episodes: Optional[int]) -> None:
@@ -350,6 +452,63 @@ class Rollout(ABC):
             raise errors[0]
 
     # ---- L2: one episode's lifecycle ----
+
+    async def run_episode(
+        self,
+        agent,
+        spec: EpisodeSpec,
+        *,
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]],
+        context_config: Optional[Any] = None,
+    ) -> AsyncIterator[Any]:
+        """Run one episode as an async generator of :mod:`.events`.
+
+        Sets up the episode (context, first-step hook), runs the main agent's session
+        (session 0) with :meth:`run_loop`, then :meth:`finish_episode` (reward, release,
+        metrics). The trajectory goes to ``self.trajectories[spec.episode_id]``; the
+        events don't carry it.
+        """
+        started_at = time.monotonic()
+        info = spec.info
+        context = self.make_context(
+            agent=agent,
+            episode_id=spec.episode_id,
+            group_id=spec.group_id,
+            metadata=info,
+            context_config=context_config,
+        )
+        yield EpisodeStarted(episode_id=spec.episode_id, group_id=spec.group_id)
+
+        first_step = Step(type="Action Input", messages=Messages.from_turns(deepcopy(spec.messages.messages)))
+        await self.run_first_step_hook(agent, context, first_step, spec.episode_id)
+        session = self.add_session(context, agent, first_step.messages.messages, info=info)
+        self.after_first_step_hook(session.state, context)
+
+        # Prompt tools come from the agent's single source of truth (also used by
+        # tokenize_trajectories), so generation and training render one prompt.
+        async for event in self.run_loop(
+            agent=agent,
+            context=context,
+            state=session.state,
+            tools=agent.prompt_tools(),
+            max_turns=max_turns,
+            generation_config=generation_config,
+        ):
+            yield event
+
+        trajectory = await self.finish_episode(agent, context, session.state, started_at=started_at)
+        self.trajectories[spec.episode_id] = trajectory
+        yield EpisodeEnded(episode_id=spec.episode_id, finish_reason=trajectory.finish_reason)
+
+    def add_session(self, context: Context, agent, messages: List[Dict], *, info: Dict[str, Any]) -> Session:
+        """Start a session in ``context``'s episode: a new loop state (:meth:`new_state`)
+        for ``agent`` from ``messages``, registered under the next id (the first is 0,
+        the main agent)."""
+        state = self.new_state(agent, messages, episode_id=context.rollout_id, info=info)
+        session = Session(id=len(context.sessions), parent_id=None, agent=agent, state=state)
+        context.sessions[session.id] = session
+        return session
 
     def make_context(
         self,
@@ -466,25 +625,101 @@ class Rollout(ABC):
             steps=steps,
         )
 
-    # ---- L3: the thin, strategy-specific interface ----
+    async def finish_episode(self, agent, context: Context, state: LoopState, *, started_at: float) -> Trajectory:
+        """End an episode from its main session's ``state``: reward, tool metrics,
+        resource release, the per-episode log, and the :class:`Trajectory`.
 
-    @abstractmethod
-    async def run(
-        self,
-        agent,
-        messages: List[Dict],
-        max_turns: int,
-        generation_config: Optional[Dict[str, Any]] = None,
-        context_config: Optional[Any] = None,
-        global_step: Optional[int] = None,
-        use_token_ids: bool = True,
-        **kwargs,
-    ) -> RunResult:
-        """Drive the rollout for a batch of tasks and return a :class:`RunResult`.
-
-        ``global_step`` is the caller's step counter for the metrics x-axis; see
-        :meth:`resolve_global_step`. ``use_token_ids``: carry the backend's sampled token
-        ids onto generated assistant messages (see :func:`generate_response`); a strategy
-        stores it as ``self.use_token_ids`` for the run.
+        The reward reads :meth:`transcript`: one message list is a "flat" trajectory,
+        several (context folding split the conversation) a "segmented" one, which
+        ``context.trajectory_format`` tells the reward. The outcome is written into
+        ``state.info`` (``reward``, ``tool_metrics``, ``rollout_time_sec``), which the
+        per-episode log records.
         """
-        ...
+        info = state.info
+        transcript = self.transcript(state)
+        context.trajectory_format = "flat" if len(transcript) == 1 else "segmented"
+        info["reward"] = await self.compute_reward(
+            agent,
+            context,
+            episode_id=state.episode_id,
+            trajectory=transcript[0] if context.trajectory_format == "flat" else transcript,
+            final_messages=[message for messages in transcript for message in messages],
+            reward_args=info,
+        )
+        records = self.records(state)
+        info["tool_metrics"] = aggregate_tool_metrics(record.tool_result for record in records)
+        await self.release_resources(context)
+        info["rollout_time_sec"] = time.monotonic() - started_at
+
+        self.metrics.record_episode(global_step=self.global_step, trajectory=transcript, info=info)
+        result = self.result(state)
+        return self.make_trajectory(
+            info=info,
+            segments=self.segments(state),
+            reward=info["reward"],
+            tool_metrics=info["tool_metrics"],
+            finish_reason=result.finish_reason,
+            rollout_time_sec=info["rollout_time_sec"],
+            num_turns=result.turns,
+            tool_call_counts=count_tool_calls(record.tool_result for record in records),
+            steps=records,
+        )
+
+    # ---- L3: the strategy contract (each strategy implements these) ----
+
+    def not_implemented(self, method: str) -> NotImplementedError:
+        return NotImplementedError(f"{type(self).__name__} does not implement {method}()")
+
+    def new_state(self, agent, messages: List[Dict], *, episode_id: str, info: Dict[str, Any]) -> LoopState:
+        """A new loop state for a session that starts from ``messages``."""
+        raise self.not_implemented("new_state")
+
+    def run_loop(
+        self,
+        *,
+        agent,
+        context: Context,
+        state: LoopState,
+        tools: List[Dict],
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]],
+    ) -> AsyncIterator[Any]:
+        """Run up to ``max_turns`` turns of ``agent`` on ``state``, yielding
+        :mod:`.events` (an async generator). Only the turns: no context set-up, reward
+        or resource release. ``state`` is updated in place."""
+        raise self.not_implemented("run_loop")
+
+    def segments(self, state: LoopState) -> List[Segment]:
+        """The training segments (model-context views) recorded in ``state``."""
+        raise self.not_implemented("segments")
+
+    def transcript(self, state: LoopState) -> List[List[Dict]]:
+        """The conversation the reward reads: one message list, or several when context
+        folding split it."""
+        raise self.not_implemented("transcript")
+
+    def records(self, state: LoopState) -> List[Step]:
+        """The per-turn :class:`Step` records kept as ``Trajectory.steps``; tool metrics
+        are read from their tool results."""
+        raise self.not_implemented("records")
+
+    def result(self, state: LoopState) -> SessionResult:
+        """Where the loop on ``state`` stopped (:class:`SessionResult`)."""
+        raise self.not_implemented("result")
+
+    def session_result(self, state: LoopState, *, finish_reason: Optional[str], turns: int) -> SessionResult:
+        """A :class:`SessionResult` for :meth:`result`: the strategy gives the finish
+        reason and turn count; the last assistant message is read from
+        :meth:`transcript` and the last tool result from :meth:`records`."""
+        assistant = [m for messages in self.transcript(state) for m in messages if m.get("role") == "assistant"]
+        tool_results = [record.tool_result for record in self.records(state) if record.tool_result is not None]
+        return SessionResult(
+            finish_reason=finish_reason,
+            turns=turns,
+            last_assistant=assistant[-1] if assistant else None,
+            last_tool_result=tool_results[-1] if tool_results else None,
+        )
+
+    def after_first_step_hook(self, state: LoopState, context: Context) -> None:
+        """Session 0 only: read into ``state`` what the agent's first-step hook recorded
+        in ``context``. Does nothing by default."""

@@ -9,30 +9,21 @@ raises) follows the rollout's run policy.
 import logging
 import os
 import sys
-import time
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from agentfly.tools.src.context.tools import fold_messages_with_summarize
 
-from ....core import Context, ContextConfig
+from ....core import Context
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
-from ....utils.monitor import Monitor
 from ....utils.vision import image_to_data_uri
-from ...types import RunResult, Segment, Trajectory
+from ...types import Segment
 from ...utils.messages import Messages
-from ..base import EpisodeSpec, Rollout
-from ..events import (
-    EpisodeEnded,
-    EpisodeStarted,
-    FinishReason,
-    MessageProduced,
-    ToolObserved,
-)
+from ..base import Rollout
+from ..events import FinishReason, MessageProduced, ToolObserved
 from ..loop.generation import generate_response, prepare_generation_config
-from ..loop.metrics import RolloutMetrics, aggregate_tool_metrics, count_tool_calls
 from ..loop.tokens import estimate_chat_prompt_tokens, observation_token_length
+from ..sessions import LoopState, SessionResult
 from ..structures import Chain, Step
 
 # Extra tokens charged per tool observation for the chat-template prefix that wraps it
@@ -91,37 +82,35 @@ MINISWE_NO_TOOL_CALL_TRUNCATED_TEXT = (
 class TurnResult:
     """Internal control value yielded by :meth:`ChainRollout.run_turn` as its last
     item — carries the loop-control outcome that the old method returned. Not a
-    ``RolloutEvent``; :meth:`ChainRollout.run_episode` consumes it and does not relay it."""
+    ``RolloutEvent``; :meth:`ChainRollout.run_loop` consumes it and does not relay it."""
 
     next_step: Step
     have_set_resources: bool
     should_continue: bool
 
 
-@dataclass
-class ChainState:
+@dataclass(kw_only=True)
+class ChainState(LoopState):
     """The turn loop's state for one conversation; :meth:`ChainRollout.run_loop` updates it.
 
-    ``depth`` counts the turns taken so far, across calls, so a conversation can be
-    continued by calling ``run_loop`` again on the same state.
+    ``chain`` holds every step so far and ``current_step`` the one the model acts on
+    next; ``info`` is the chain's info (the same dict). ``depth`` is kept across calls,
+    so a conversation can be continued by calling ``run_loop`` again on the same state.
     """
 
-    episode_id: str
     chain: Chain
     current_step: Step
-    depth: int = 0
-    have_set_resources: bool = False
 
 
 class ChainRollout(Rollout):
     """
-    Chain-based rollout strategy (L3). It starts multiple chains and runs them
-    asynchronously, reusing the shared machinery on :class:`Rollout` (L2) and reaching
-    agent-specific behavior through the ``agent`` argument (a
-    :class:`~agentfly.agents.rollout.agent.RolloutAgent`). The transient run-state
-    (``self.chains`` / ``self.current_steps``) is rebuilt each :meth:`run` call, so a
-    strategy instance is reusable across runs.
+    Chain-based rollout strategy (L3): one growing conversation per session. It
+    implements the strategy contract on :class:`ChainState`; the shared machinery on
+    :class:`Rollout` (L2) runs the episodes, and agent-specific behavior is reached
+    through the ``agent`` argument (a :class:`~agentfly.agents.rollout.agent.RolloutAgent`).
     """
+
+    name = "chain"
 
     def __init__(
         self,
@@ -169,198 +158,33 @@ class ChainRollout(Rollout):
         # ONLY on env done or max_turns. Keeps the two rollouts' termination identical
         # so step-vs-chain comparisons don't confound rollout type with early exits.
         self.project_actions = project_actions
-        self.reset()
-        self.chains: Dict[str, Chain] = {}
-        self.current_steps: Dict[str, Step] = {}
-        self.metrics = RolloutMetrics()
 
-    def reset(self) -> None:
-        self.chains = {}
-        self.current_steps = {}
+    # ---- the strategy contract ----
 
-    def to_json(self) -> dict:
-        chains_list = list(self.chains.values()) if isinstance(self.chains, dict) else self.chains
-        return {
-            "finish": [c.info.get("status_code") == "success" for c in chains_list],
-            "chains": [c.to_json() for c in chains_list],
-        }
+    def new_state(self, agent, messages: List[Dict], *, episode_id: str, info: Dict[str, Any]) -> ChainState:
+        """A chain whose root step holds ``messages``; ``info`` becomes the chain's info."""
+        chain = Chain(info)
+        root = chain.add_step(type="Action Input", messages=messages)
+        return ChainState(episode_id=episode_id, info=info, chain=chain, current_step=root)
 
-    def initialize_chains(self, specs: List[EpisodeSpec]) -> Tuple[Dict[str, Chain], Dict[str, Step]]:
-        """A :class:`Chain` (whose ``info`` is the spec's task metadata and ids) and its
-        root step for each spec, keyed by ``episode_id``."""
-        chains = {}
-        start_steps = {}
-        for spec in specs:
-            ch = Chain(spec.info)
-            root = ch.add_step(type="Action Input", messages=deepcopy(spec.messages.messages))
-            chains[spec.episode_id] = ch
-            start_steps[spec.episode_id] = root
-        return chains, start_steps
+    def transcript(self, state: ChainState) -> List[List[Dict]]:
+        """The views context folding stored, then the current one."""
+        return [*state.chain.histories, state.current_step.messages.messages]
 
-    async def run(
-        self,
-        agent,
-        messages: List[Dict],
-        max_turns: int,
-        group_size: int,
-        generation_config: Optional[Dict[str, Any]] = None,
-        max_concurrent_episodes: Optional[int] = None,
-        context_config: Optional[ContextConfig] = None,
-        global_step: Optional[int] = None,
-        use_token_ids: bool = True,
-        show_progress: bool = True,
-        **kwargs,
-    ) -> RunResult:
-        """Drive the chain-based rollout and return its :class:`RunResult`.
+    def segments(self, state: ChainState) -> List[Segment]:
+        """One segment per view of :meth:`transcript` (several when context tools fold)."""
+        return [Segment(messages=messages) for messages in self.transcript(state)]
 
-        The transient run-state is rebuilt each call.
-        ``global_step`` sets the metrics x-axis (see ``Rollout.resolve_global_step``).
-        ``use_token_ids`` see ``Rollout.run``. ``show_progress`` renders a progress bar
-        over finished chains.
-        """
-        self.use_token_ids = bool(use_token_ids)
-        # Drain the rollout event stream. Training ignores the events themselves; the
-        # final state (``self.chains`` / ``self.current_steps``) is populated by each
-        # chain as it ends. We build the RunResult from that state afterwards.
-        async for _ev in self.stream(
-            agent,
-            messages,
-            max_turns=max_turns,
-            group_size=group_size,
-            generation_config=generation_config,
-            max_concurrent_episodes=max_concurrent_episodes,
-            context_config=context_config,
-            global_step=global_step,
-            show_progress=show_progress,
-        ):
-            pass
-        return RunResult(trajectories=self.build_trajectories(agent), rollout="chain")
+    def records(self, state: ChainState) -> List[Step]:
+        """The chain's steps that carry a tool result."""
+        return [step for step in state.chain.steps() if step.tool_result is not None]
 
-    async def stream(
-        self,
-        agent,
-        messages: List[Dict],
-        max_turns: int,
-        group_size: int,
-        generation_config: Optional[Dict[str, Any]] = None,
-        max_concurrent_episodes: Optional[int] = None,
-        context_config: Optional[ContextConfig] = None,
-        global_step: Optional[int] = None,
-        show_progress: bool = True,
-    ):
-        """Run all chains concurrently and yield their merged :mod:`.events` stream.
-
-        This is the single shared rollout path: the per-chain generator :meth:`run_episode` is the loop,
-        and :meth:`Rollout.run_episodes` fans the per-chain event streams into one ``episode_id``-tagged
-        stream. Each chain populates ``self.chains`` / ``self.current_steps``
-        as it ends; this method just relays events and, when drained, emits step metrics.
-        The metrics x is resolved before any chain starts so per-chain records and the
-        end-of-run summaries share one step.
-
-        Args:
-            show_progress: render a ``tqdm`` bar over chain completion. Disable when a
-                consumer owns the terminal (e.g. the Textual console).
-        """
-        self.validate_run_args(max_turns, group_size, max_concurrent_episodes)
-        Monitor.ensure_started()
-        self.reset()
-        step = self.resolve_global_step(global_step)
-
-        specs = self.make_specs(messages, group_size)
-        chains, first_steps = self.initialize_chains(specs)
-        # Prompt tools come from the agent's single source of truth (also used by
-        # tokenize_trajectories), so generation and training render one prompt.
-        tool_schemas = agent.prompt_tools()
-
-        def run_episode(spec: EpisodeSpec):
-            return self.run_episode(
-                agent,
-                spec.episode_id,
-                first_steps[spec.episode_id],
-                chains[spec.episode_id],
-                tool_schemas,
-                max_turns,
-                generation_config,
-                context_config,
-            )
-
-        async for ev in self.run_episodes(
-            specs,
-            run_episode,
-            max_concurrent_episodes=max_concurrent_episodes,
-            show_progress=show_progress,
-        ):
-            yield ev
-
-        self.metrics.record_step(
-            global_step=step,
-            trajectories=self.build_trajectories(agent),
+    def result(self, state: ChainState) -> SessionResult:
+        return self.session_result(
+            state,
+            finish_reason=state.info.get("finish_reason"),
+            turns=sum(step.type == "Thought" for step in state.chain.steps()),
         )
-
-    async def run_episode(
-        self,
-        agent,
-        episode_id: str,
-        first_step: Step,
-        chain: Chain,
-        tools: List[Dict],
-        max_turns: int,
-        generation_config: Dict[str, Any],
-        context_config: Optional[ContextConfig] = None,
-    ):
-        """Run a single chain as an async generator, yielding :mod:`.events`.
-
-        Sets up the episode (context, first-step hook), runs the turns with
-        :meth:`run_loop`, then finalizes it (reward, release, metrics). Populates
-        ``self.chains`` / ``self.current_steps`` on completion (the fan-in in
-        :meth:`stream` reads final state from there, not from the events).
-        """
-        started_at = time.monotonic()
-
-        # Build Context from rollout data for tools that need it
-        context = self.make_context(
-            agent=agent,
-            episode_id=episode_id,
-            group_id=chain.info.get("group_id"),
-            metadata=chain.info,
-            context_config=context_config,
-        )
-
-        yield EpisodeStarted(episode_id=episode_id, group_id=chain.info.get("group_id"))
-
-        await self.run_first_step_hook(agent, context, first_step, episode_id)
-
-        state = ChainState(episode_id=episode_id, chain=chain, current_step=first_step)
-        async for event in self.run_loop(
-            agent=agent,
-            context=context,
-            state=state,
-            tools=tools,
-            max_turns=max_turns,
-            generation_config=generation_config,
-        ):
-            yield event
-        current_step = state.current_step
-
-        # Loop-only state; chain.info becomes the trajectory's metadata.
-        chain.info.pop("no_tool_call_streak", None)
-
-        # Finalize chain (reward + cleanup).
-        await self.finalize_chain(agent, episode_id, chain, current_step, state.depth, context)
-
-        chain.info["rollout_time_sec"] = time.monotonic() - started_at
-
-        # This chain owns its final state; stream reads from here, not from events.
-        self.chains[episode_id] = chain
-        self.current_steps[episode_id] = current_step
-
-        self.metrics.record_episode(
-            global_step=self.global_step,
-            trajectory=chain.histories,
-            info=chain.info,
-        )
-
-        yield EpisodeEnded(episode_id=episode_id, finish_reason=chain.info.get("finish_reason"))
 
     async def run_loop(
         self,
@@ -377,9 +201,9 @@ class ChainRollout(Rollout):
 
         Only the turns: no context set-up, first-step hook, reward, resource release or
         metrics. ``state`` is updated in place (current step, depth, resources flag) and
-        ``state.chain.info["finish_reason"]`` is set when the loop stops (``max_turns``
-        unless a turn ended it). ``max_turns`` counts the turns of this call; calling
-        again on the same state continues the same conversation.
+        ``state.info["finish_reason"]`` is set when the loop stops (``max_turns`` unless
+        a turn ended it). ``max_turns`` counts the turns of this call; calling again on
+        the same state continues the same conversation.
         """
         turns = 0
         while not state.current_step.is_terminal and turns < max_turns:
@@ -406,8 +230,11 @@ class ChainRollout(Rollout):
             state.depth += 1
             turns += 1
 
-        if "finish_reason" not in state.chain.info:
-            state.chain.info["finish_reason"] = FinishReason.MAX_TURNS
+        if "finish_reason" not in state.info:
+            state.info["finish_reason"] = FinishReason.MAX_TURNS
+        # The no-tool-call streak only counts within a run; the rest of info becomes
+        # the trajectory's metadata.
+        state.info.pop("no_tool_call_streak", None)
 
     def generation_filled_budget(
         self, agent, new_msg: Dict[str, Any], current_step: Step, tools, generation_config
@@ -736,7 +563,7 @@ class ChainRollout(Rollout):
 
             # The per-turn tool result is carried on the Step it produced
             # (``action_input_step.tool_result``) — the single per-turn source for
-            # metric-averaging (logging, in finalize_chain) and feature harvesting
+            # metric-averaging (logging, in Rollout.finish_episode) and feature harvesting
             # (Trajectory.steps). One Step per tool call (== one turn for action agents).
             action_input_step = chain.add_step(
                 type="Action Input",
@@ -853,66 +680,3 @@ class ChainRollout(Rollout):
         turns = messages.messages + [tool_turn]
         meta = messages.meta
         return Messages.from_turns(turns, **meta), False
-
-    async def finalize_chain(self, agent, episode_id, chain, current_step, depth, context):
-        """Finalize the chain with reward calculation and cleanup."""
-        # Folding is the only thing that stores earlier views before this point, so it
-        # decides the format the reward reads from ``context.trajectory_format``.
-        context.trajectory_format = "segmented" if chain.histories else "flat"
-        # Always record the final trajectory segment so that histories capture
-        chain.histories.append(current_step.messages.messages)
-
-        # The reward sees the whole conversation (every segment when context folding
-        # split it); a flat trajectory passes its single segment.
-        full_trajectory = [message for segment in chain.histories for message in segment]
-        chain.info["reward"] = await self.compute_reward(
-            agent,
-            context,
-            episode_id=episode_id,
-            trajectory=chain.histories[0] if context.trajectory_format == "flat" else chain.histories,
-            final_messages=full_trajectory,
-            reward_args=chain.info,
-        )
-
-        # Both strategies aggregate actual ToolResults, independent of Step layout.
-        chain.info["tool_metrics"] = aggregate_tool_metrics(step.tool_result for step in chain.steps())
-
-        await self.release_resources(context)
-
-    def build_trajectories(self, agent) -> List[Trajectory]:
-        """Build :class:`Trajectory` objects for every finished chain, in
-        ``(group_idx, episode_idx)`` order.
-
-        Reads ``chain.info``: ``reward`` and ``tool_metrics`` (set by
-        :meth:`finalize_chain`), ``finish_reason``, ``rollout_time_sec``, the ids, and
-        the task metadata (see :meth:`Rollout.make_trajectory`). Execution counts come
-        from the full chain's records, before filtering the internal
-        ``Trajectory.steps`` channel to tool-result steps.
-        """
-        items = list(self.current_steps.items())
-        items.sort(
-            key=lambda item: (
-                self.chains[item[0]].info.get("group_idx", 0),
-                self.chains[item[0]].info.get("episode_idx", 0),
-            )
-        )
-        trajectories: List[Trajectory] = []
-        for episode_id, _ in items:
-            chain = self.chains[episode_id]
-            info = chain.info
-            chain_steps = chain.steps()
-            trajectories.append(
-                self.make_trajectory(
-                    info=info,
-                    # Histories may contain multiple segments when context tools fold.
-                    segments=[Segment(messages=messages) for messages in chain.histories],
-                    reward=info.get("reward"),
-                    tool_metrics=info.get("tool_metrics"),
-                    finish_reason=info.get("finish_reason"),
-                    rollout_time_sec=info.get("rollout_time_sec"),
-                    num_turns=sum(s.type == "Thought" for s in chain_steps),
-                    tool_call_counts=count_tool_calls(s.tool_result for s in chain_steps),
-                    steps=[s for s in chain_steps if s.tool_result is not None],
-                )
-            )
-        return trajectories
