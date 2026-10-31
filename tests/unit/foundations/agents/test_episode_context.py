@@ -37,7 +37,7 @@ def test_make_context_records_the_main_agent_and_the_strategy(strategy_cls):
 
 def test_session_is_plain_data():
     session = Session(id=1, parent_id=0, agent="A", state="S")
-    assert (session.spawned_at, session.info, session.task) == (None, {}, None)
+    assert (session.spawned_at, session.stats) == (None, {})
 
 
 class RecordingAgent:

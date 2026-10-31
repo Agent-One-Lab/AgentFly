@@ -32,9 +32,17 @@ class Segment(BaseModel):
     Its position alone does not specify training targets or reward assignment.
     Empty or context-only views are valid rollout data. Training conversion
     selects views with policy-token targets without removing any from the result.
+
+    A segment from a subagent's session records that session and the settings its agent
+    used (``agent`` name, prompt ``tools``, ``max_model_len``). The main agent's segments
+    (session 0) leave them ``None``: they use the settings of the agent that ran.
     """
 
     messages: List[Dict[str, Any]]
+    session_id: int = 0
+    agent: Optional[str] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    max_model_len: Optional[int] = None
 
 
 class Trajectory(BaseModel):
@@ -154,6 +162,12 @@ class RunResult(BaseModel):
     The identifier is preserved in serialization; runtime ``Trajectory.steps``
     remain excluded, so serialization alone is not a complete training snapshot.
     """
+
+    session: Optional[Any] = Field(default=None, exclude=True)
+    """For a run inside an episode (``agent.run(..., context=...)``): where the session
+    stopped, a :class:`~agentfly.agents.rollout.sessions.SessionResult`. Its
+    ``trajectories`` is then empty; the episode's trajectory holds every session's
+    segments. Not serialized."""
 
     # ---- Convenience accessors ----
 

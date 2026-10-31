@@ -46,6 +46,8 @@ class Context:
     It holds the episode's ids, task metadata and resources (the environment), and, when a
     rollout strategy made it, the episode's main agent (``agent``), the strategy running it
     (``rollout``) and its sessions (``sessions``: each agent's work in this episode, by id).
+    ``running`` lists the sessions whose loops are running, outermost first: a subagent runs
+    inside its parent's tool call, so the last one is the session that is acting now.
     """
 
     def __init__(
@@ -79,6 +81,7 @@ class Context:
         self.agent: Optional[BaseAgent] = None
         self.rollout: Optional[Rollout] = None
         self.sessions: Dict[int, Session] = {}
+        self.running: List[int] = []
         self.context_config: ContextConfig = _coerce_context_config(context_config)
         self.rollout_resource_ids: List[str] = []
         self.global_resource_ids: Set[str] = set()

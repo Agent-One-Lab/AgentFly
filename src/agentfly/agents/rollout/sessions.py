@@ -2,11 +2,11 @@
 
 An episode (:class:`~agentfly.core.context.Context`) keeps its sessions in
 ``context.sessions``, by id. Session 0 is the episode's main agent; later sessions are
-subagents it started. A session can be run several times (for example, a subagent that is
-spawned and later asked again), and keeps its agent and its loop state between runs.
+subagents started from a tool call (``agent.run(..., context=context)``). A session can be
+run several times (for example, a subagent that is spawned and later asked again), and keeps
+its agent and its loop state between runs.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -44,12 +44,14 @@ class SessionResult:
         turns: The model's turns (generations) so far.
         last_assistant: The last assistant message, if any.
         last_tool_result: The last tool result, if any.
+        session_id: The session's id, set by a run inside an episode.
     """
 
     finish_reason: Optional[str]
     turns: int
     last_assistant: Optional[Dict[str, Any]] = None
     last_tool_result: Optional["ToolResult"] = None
+    session_id: Optional[int] = None
 
 
 @dataclass
@@ -62,9 +64,9 @@ class Session:
         agent: The agent that runs this session.
         state: The rollout strategy's loop state (a :class:`LoopState`), which holds
             the conversation.
-        spawned_at: The parent session's turn when this session was started.
-        info: Free space for tools, e.g. per-session stats.
-        task: The running loop when the session runs in the background.
+        spawned_at: The parent session's turn (its ``state.depth``) when this session
+            was started.
+        stats: Free space for tools, e.g. per-session counts.
     """
 
     id: int
@@ -72,5 +74,4 @@ class Session:
     agent: "BaseAgent"
     state: Any
     spawned_at: Optional[int] = None
-    info: Dict[str, Any] = field(default_factory=dict)
-    task: Optional[asyncio.Task] = None
+    stats: Dict[str, Any] = field(default_factory=dict)
