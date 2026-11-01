@@ -1,23 +1,12 @@
-FROM python:3.11-slim
+# bookworm: trixie (the newer default for python:*-slim) has no openjdk-17.
+FROM python:3.11.14-slim-bookworm
 # Install Java
 RUN apt-get update && \
     apt-get install -y openjdk-17-jdk && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install git
-RUN apt-get update && \
-    apt-get install -y git && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Clone and install ScienceWorld
-RUN cd /srv && \
-    git clone https://github.com/allenai/ScienceWorld.git && \
-    cd ScienceWorld && \
-    pip install .
-
-# install deps
+# ScienceWorld (pinned release) and the server's dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

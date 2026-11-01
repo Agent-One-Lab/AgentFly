@@ -1,3 +1,4 @@
-py4j
-fastapi
-uvicorn
+scienceworld==1.2.3
+py4j==0.10.9.9
+fastapi==0.162.0
+uvicorn==0.54.0

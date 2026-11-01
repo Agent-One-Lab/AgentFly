@@ -26,7 +26,7 @@ TRANSIENT_ERRORS = (
 
 ScienceWorldSpec = ContainerResourceSpec(
     category="scienceworld",
-    image="rifoag/scienceworld-env:latest",
+    image="reasonwang/scienceworld-env:latest",
     ports={"2700/tcp": None},
     container_port=2700,
     start_timeout=10.0,
