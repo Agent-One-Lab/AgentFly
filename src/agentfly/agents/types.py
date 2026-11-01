@@ -121,8 +121,8 @@ class Trajectory(BaseModel):
 
     sessions: List[Dict[str, Any]] = Field(default_factory=list)
     """One entry per session of the episode, in id order: ``session_id``, ``parent_id``,
-    ``agent``, ``spawned_at``, ``finish_reason``, ``turns``, ``tool_call_counts`` and
-    ``tool_metrics``. Session 0 is the main agent, whose stats are also the trajectory's
+    ``agent``, ``spawned_at``, ``finish_reason``, ``turns``, ``tool_call_counts``,
+    ``tool_metrics`` and ``stats`` (a copy of ``Session.stats``, what tools recorded). Session 0 is the main agent, whose stats are also the trajectory's
     own fields; later sessions are subagents."""
 
     steps: List[Any] = Field(default_factory=list, exclude=True)

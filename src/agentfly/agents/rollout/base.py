@@ -778,7 +778,8 @@ class Rollout:
 
     def session_entries(self, context: Context, state: LoopState, result: SessionResult) -> List[Dict[str, Any]]:
         """One entry per session, in id order: its place in the episode (id, parent,
-        agent name, ``spawned_at``) and its stats from :meth:`result`. The main session's
+        agent name, ``spawned_at``), its stats from :meth:`result`, and a copy of its
+        ``Session.stats`` (what tools recorded about it). The main session's
         are ``state`` and ``result``; like its segments, it has no agent name."""
         entries = []
         for session_id in sorted(set(context.sessions) | {0}):
@@ -794,6 +795,7 @@ class Rollout:
                     "turns": session_result.turns,
                     "tool_call_counts": session_result.tool_call_counts,
                     "tool_metrics": session_result.tool_metrics,
+                    "stats": dict(session.stats) if session else {},
                 }
             )
         return entries

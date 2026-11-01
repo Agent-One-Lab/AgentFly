@@ -60,6 +60,7 @@ class MainAgent(FakeAgent):
             subagent = self.subagents.pop(0)
             result = await subagent.run([{"role": "user", "content": "brief"}], max_turns=2, context=context)
         elif name == "ask":
+            context.sessions[1].stats["asks"] = context.sessions[1].stats.get("asks", 0) + 1
             subagent = context.sessions[1].agent
             result = await subagent.run([{"role": "user", "content": "Q2"}], max_turns=1, context=context, session_id=1)
         else:
@@ -154,6 +155,8 @@ async def test_spawn_spawn_ask_finish(strategy_cls, isolated_runtime):
         {"look": 1},
     ]
     assert trajectory.sessions[0]["finish_reason"] == trajectory.finish_reason
+    # What tools recorded on a session (Session.stats) is kept with its entry.
+    assert [e["stats"] for e in trajectory.sessions] == [{}, {"asks": 1}, {}]
 
     # Per-agent metrics from the outer run only.
     metrics = {e.name: e.value for e in isolated_runtime if e.kind == "scalar"}
