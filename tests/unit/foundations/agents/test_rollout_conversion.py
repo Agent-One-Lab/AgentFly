@@ -120,6 +120,8 @@ def test_exporter_batch_contract(strategy_cls, multiple, entrypoint, fake_verl, 
                                rtol=0, atol=0)
     assert inputs["uid"].tolist() == ["G1", "G1"] + ["G2"] * (len(rows) - 2)
     assert inputs["uid"].dtype == object
+    # Main-agent rows: session 0, no agent name.
+    assert inputs["session_id"].tolist() == [0] * len(rows) and inputs["agent_name"].tolist() == [""] * len(rows)
 
     is_step = strategy_cls is StepRollout
     missing = 0.0 if is_step else None
@@ -140,7 +142,7 @@ def test_exporter_batch_contract(strategy_cls, multiple, entrypoint, fake_verl, 
         np.testing.assert_array_equal(inputs[f"rm_{key}"], expected)
         assert inputs[f"rm_{key}"].dtype == expected.dtype
 
-    common_keys = set(original) | {"uid", "rm_scores"} | {f"rm_{k}" for k in columns}
+    common_keys = set(original) | {"uid", "session_id", "agent_name", "rm_scores"} | {f"rm_{k}" for k in columns}
     if is_step:
         assert set(inputs) == common_keys | {
             "traj_uid", "anchor_obs", "step_env_reward", "is_action_valid", "active_masks",

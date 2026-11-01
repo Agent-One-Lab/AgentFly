@@ -5,6 +5,7 @@ runtime-step projections and trainer-specific fields differ. No converter reads
 the agent's last-run caches or constructs a rollout strategy.
 """
 
+import json
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -50,6 +51,80 @@ def result_to_dataproto(
     )
 
 
+# Padding values of the tokenized fields (chat-bricks pads on the right with these).
+LABEL_PAD = -100
+
+
+def tokenize_rows(agent, segments, conversations, *, tokenize: Callable, train_on_last_turn: bool):
+    """Tokenize each row with its own agent's settings: a subagent segment's ``tools`` and
+    ``max_model_len``, else the main agent's. Rows with the same settings are tokenized together;
+    with one group the call is the plain one (custom tokenize hooks keep working). Several groups
+    are padded to one width and put back in row order."""
+    common = dict(
+        tokenizer=agent.tokenizer,
+        processor=agent.processor,
+        return_reward_mask=True,
+        concatenate_mm_inputs=False,
+        train_on_last_turn=train_on_last_turn,
+    )
+    if all(segment.tools is None and segment.max_model_len is None for segment in segments):
+        return dict(tokenize(agent, messages_list=conversations, **common))  # no subagent rows: as before
+    main_tools = agent.prompt_tools() or []
+    groups: Dict[Tuple[str, Any], List[int]] = {}
+    settings: Dict[Tuple[str, Any], Tuple[List[Dict], Any]] = {}
+    for i, segment in enumerate(segments):
+        tools = main_tools if segment.tools is None else segment.tools
+        max_length = agent.max_model_len if segment.max_model_len is None else segment.max_model_len
+        key = (json.dumps(tools, sort_keys=True), max_length)
+        groups.setdefault(key, []).append(i)
+        settings[key] = (tools, max_length)
+    if len(groups) == 1:
+        return dict(tokenize(agent, messages_list=conversations, **common))
+    parts = []
+    for key, rows in groups.items():
+        tools, max_length = settings[key]
+        part = tokenize(
+            agent,
+            messages_list=[conversations[i] for i in rows],
+            tools=tools,
+            max_length=max_length,
+            **common,
+        )
+        parts.append((rows, dict(part)))
+    return merge_tokenized(parts, len(segments), pad_token_id=getattr(agent.tokenizer, "pad_token_id", 0) or 0)
+
+
+def merge_tokenized(parts, num_rows: int, *, pad_token_id: int) -> Dict[str, Any]:
+    """Merge tokenized groups ``[(row_positions, inputs), ...]`` into one batch in row order:
+    2-D tensors are right-padded to the widest group (input ids with the pad token, labels with
+    -100, masks with 0); per-row lists (multimodal metadata) are reordered; ``position_ids`` are
+    recomputed from the merged attention mask."""
+    import torch
+
+    merged: Dict[str, Any] = {}
+    keys = parts[0][1].keys()
+    for key in keys:
+        values = [inputs[key] for _, inputs in parts]
+        if isinstance(values[0], torch.Tensor):
+            if any(v.ndim != 2 for v in values):
+                raise ValueError(f"Cannot merge tokenized field {key!r} with shape {values[0].shape}: only [rows, tokens].")
+            width = max(v.shape[1] for v in values)
+            fill = pad_token_id if key == "input_ids" else LABEL_PAD if key == "labels" else 0
+            out = torch.full((num_rows, width), fill, dtype=values[0].dtype)
+            for (rows, _), value in zip(parts, values):
+                out[rows, : value.shape[1]] = value
+            merged[key] = out
+        else:
+            out = [None] * num_rows
+            for (rows, _), value in zip(parts, values):
+                for row, item in zip(rows, value):
+                    out[row] = item
+            merged[key] = out
+    if "position_ids" in merged:
+        merged["position_ids"] = torch.clip(torch.cumsum(merged["attention_mask"], dim=-1) - 1, min=0, max=None)
+    return merged
+
+
 def build_segment_batch(
     agent,
     run_result: RunResult,
@@ -87,16 +162,12 @@ def build_segment_batch(
     if not row_indices:
         raise ValueError("No trainable segments: the result contains no assistant messages.")
     conversations = [trajectories[b].segments[s].messages for b, s in row_indices]
-    inputs = dict(
-        tokenize(
-            agent,
-            messages_list=conversations,
-            tokenizer=agent.tokenizer,
-            processor=agent.processor,
-            return_reward_mask=True,
-            concatenate_mm_inputs=False,
-            train_on_last_turn=train_on_last_turn,
-        )
+    inputs = tokenize_rows(
+        agent,
+        [trajectories[b].segments[s] for b, s in row_indices],
+        conversations,
+        tokenize=tokenize,
+        train_on_last_turn=train_on_last_turn,
     )
     if inputs["input_ids"].shape[0] != len(row_indices):
         raise ValueError("Segment tokenization must return one row per segment.")
@@ -154,6 +225,10 @@ def build_segment_batch(
 
     row_trajectories = [trajectories[b] for b, _ in row_indices]
     inputs["uid"] = np.array([t.group_id for t in row_trajectories], dtype=object)
+    # Which session and agent each row comes from (0 / "" for the main agent).
+    row_segments = [trajectories[b].segments[s] for b, s in row_indices]
+    inputs["session_id"] = np.array([seg.session_id for seg in row_segments], dtype=np.int32)
+    inputs["agent_name"] = np.array([seg.agent or "" for seg in row_segments], dtype=object)
     metric_keys = sorted({key for t in trajectories for key in t.metrics})
     for key in metric_keys:
         inputs[f"rm_{key}"] = np.array(

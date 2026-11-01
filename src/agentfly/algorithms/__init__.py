@@ -11,6 +11,7 @@ reference (``"pkg.mod:fn"`` or ``"/path/file.py:fn"``; see :func:`.registry.reso
 """
 
 from . import gigpo  # noqa: F401  (registers the GiGPO estimators)
+from . import grpo_episode  # noqa: F401  (registers GRPO with episode-level group stats)
 from .opd import (  # teacher step, OPD estimator + metrics
     compute_opd_metrics,
     compute_teacher_log_probs,

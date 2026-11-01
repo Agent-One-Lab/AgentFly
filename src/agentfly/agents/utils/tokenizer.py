@@ -63,7 +63,11 @@ def tokenize_trajectories(
     return_reward_mask: bool = False,
     concatenate_mm_inputs: bool = True,
     train_on_last_turn: bool = False,
+    tools=None,
+    max_length=None,
 ):
+    """Tokenize conversations for training. ``tools`` and ``max_length`` default to the agent's
+    (``agent.prompt_tools()``, ``agent.max_model_len``); a subagent's rows pass their own."""
     import torch  # lazy: heavy import, only needed when building tensors
 
     # TODO: we will remove this argument in the future
@@ -74,12 +78,12 @@ def tokenize_trajectories(
         tokenizer=tokenizer,
         template=template or agent.template,
         processor=processor or agent.processor,
-        max_length=agent.max_model_len,
+        max_length=agent.max_model_len if max_length is None else max_length,
         return_reward_mask=return_reward_mask,
         add_generation_prompt=True,
         # Render exactly the tools generation rendered (agent.prompt_tools is
         # the single source for both), so training tokens match the sampled prompt.
-        tools=agent.prompt_tools() or None,
+        tools=(agent.prompt_tools() if tools is None else tools) or None,
         concatenate_mm_inputs=concatenate_mm_inputs,
         ignore_tool_calls=True,
         train_on_last_turn_only=train_on_last_turn,
