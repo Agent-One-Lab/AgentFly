@@ -14,10 +14,17 @@ from ...core.context import Context
 from ..agent_base import BaseAgent
 from ..rollout.structures import Step
 
-# Matches both <action>...</action> and <summarize>...</summarize> blocks.
-TOOL_TAG_PATTERN = re.compile(r"<(action|summarize)>\s*(.*?)\s*</\1>", re.DOTALL | re.IGNORECASE)
-# First closing tag (any case): strip everything after it; keep the tag itself.
-CLOSE_TOOL_TAG_PATTERN = re.compile(r"</(action|summarize)>", re.IGNORECASE)
+# Tool tags: <action>, <summarize> and <tool attr="v">body</tool> for the agent's tools. Each
+# agent builds its pattern from its own tag names (``tool_tag_pattern``).
+# Attributes of a tag: name="v", name='v' or name=v.
+ATTRS = r"((?:\s+[\w-]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+))*)"
+ATTR_PATTERN = re.compile(r"([\w-]+)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))")
+# Any closing tag; the first one of a tool tag ends the parsed text.
+CLOSE_TAG_PATTERN = re.compile(r"</([A-Za-z_][\w-]*)\s*>")
+# Short tag names for tools (used only when the agent has that tool).
+TAG_ALIASES = {"spawn": "spawn_subagent", "ask": "ask_subagent", "return": "return_to_parent"}
+# Tags with their own handling below; never generic tool tags.
+RESERVED_TAGS = frozenset({"action", "summarize", "think"})
 
 CONTEXT_TRIGGER_MESSAGE_DICT = {
     "base": "You have reached the configured assistant-turn limit for this segment. You must now summarize: respond using a single <summarize>...</summarize> block with a concise summary of progress and key results so far (not <action>).",
@@ -139,7 +146,15 @@ class ActionAgent(BaseAgent):
             context_trigger_message_type=context_trigger_message_type,
             truncate_history_at_action=truncate_history_at_action,
         )
-        self.action_tool_name = self.tools[0].name
+        self.action_tool_name = self._find_action_tool_name()
+        self.tag_tools = self._tag_tools()
+        # Only this agent's tool tags are matched, so text in <think> (or any other tag)
+        # is searched too, as with the original <action>/<summarize> pattern.
+        names = sorted({"action", "summarize", *self.tag_tools}, key=len, reverse=True)  # longest first
+        self.tool_tag_pattern = re.compile(
+            r"<(" + "|".join(map(re.escape, names)) + r")" + ATTRS + r"\s*>\s*(.*?)\s*</\1\s*>",
+            re.DOTALL | re.IGNORECASE,
+        )
         # What the assistant message's ``content`` holds. False (default): the FULL
         # generated text, so the history the model sees next turn equals what it
         # sampled (and what training splices via ``token_ids``) — the on-policy
@@ -234,6 +249,61 @@ class ActionAgent(BaseAgent):
                 return str(first.get("text") or "")
         return ""
 
+    @staticmethod
+    def _parameters(tool) -> Dict[str, Any]:
+        schema = getattr(tool, "schema", None) or {}
+        return (schema.get("function") or {}).get("parameters") or {}
+
+    def _find_action_tool_name(self) -> Optional[str]:
+        """The tool ``<action>`` calls: the first tool, if it takes an ``action`` argument or
+        declares no parameters; otherwise none (e.g. a coordinator whose first tool is
+        ``spawn_subagent``), and an ``<action>`` tag is an invalid call."""
+        if not self.tools:
+            return None
+        properties = self._parameters(self.tools[0]).get("properties")
+        return self.tools[0].name if not properties or "action" in properties else None
+
+    def _tag_tools(self) -> Dict[str, Any]:
+        """Tag name (lowercase) -> tool for the generic ``<name attr="v">body</name>`` format: each tool
+        by its own name, plus the aliases in ``TAG_ALIASES`` for tools the agent has."""
+        by_name = {tool.name: tool for tool in self.tools if tool.name.lower() not in RESERVED_TAGS}
+        tags = {name.lower(): tool for name, tool in by_name.items()}
+        for alias, name in TAG_ALIASES.items():
+            if name in by_name and alias not in tags:
+                tags[alias] = by_name[name]
+        return tags  # keyed by lowercase name: tags match in any case
+
+    def _tag_tool_call(self, tool, attrs: str, body: str) -> Optional[Dict[str, Any]]:
+        """Arguments for ``tool`` from a generic tag: attributes fill the arguments they
+        name, cast by the tool's schema (integer, number, boolean); the body fills the one
+        required string argument left. ``None`` when the body has no argument to go to."""
+        parameters = self._parameters(tool)
+        properties = parameters.get("properties") or {}
+        arguments: Dict[str, Any] = {}
+        for m in ATTR_PATTERN.finditer(attrs or ""):
+            key = m.group(1)
+            value = next(v for v in m.groups()[1:] if v is not None)
+            kind = (properties.get(key) or {}).get("type")
+            try:
+                if kind == "integer":
+                    value = int(value)
+                elif kind == "number":
+                    value = float(value)
+                elif kind == "boolean":
+                    value = value.strip().lower() in ("true", "1", "yes")
+            except ValueError:
+                pass  # left as text; the tool reports the bad argument
+            arguments[key] = value
+        body_names = [
+            name
+            for name in parameters.get("required") or []
+            if name not in arguments and (properties.get(name) or {}).get("type", "string") == "string"
+        ]
+        if len(body_names) != 1:
+            return None
+        arguments[body_names[0]] = body
+        return arguments
+
     def maybe_append_context_trigger_user_message(self, current_step: Step) -> None:
         """After ``context_trigger_turns`` assistant messages, append a user nudge to force summarize."""
         if self.context_trigger_turns is None:
@@ -246,13 +316,16 @@ class ActionAgent(BaseAgent):
                 return
         current_step.messages.add("user", self.context_trigger_message)
 
-    @staticmethod
-    def _truncate_at_first_close_tag(response: str) -> str:
-        """Drop any text after the first ``</action>`` or ``</summarize>`` (tag retained)."""
+    def _truncate_at_first_close_tag(self, response: str) -> str:
+        """Drop any text after the first closing tag of a tool tag (``</action>``,
+        ``</summarize>`` or one of the agent's tool tags), keeping the tag."""
         if not response or not isinstance(response, str):
             return response
-        m = CLOSE_TOOL_TAG_PATTERN.search(response)
-        return response[: m.end()] if m else response
+        tool_tags = {"action", "summarize", *self.tag_tools}
+        for m in CLOSE_TAG_PATTERN.finditer(response):
+            if m.group(1).lower() in tool_tags:
+                return response[: m.end()]
+        return response
 
     def _segment_has_prior_action(self, current_segment: Optional[List[Dict]]) -> bool:
         """True if any prior assistant message in the segment requested the action tool."""
@@ -354,17 +427,26 @@ class ActionAgent(BaseAgent):
                 "status": "terminal" if end_task_terminal else "continue",
             }
 
-        for i, m in enumerate(TOOL_TAG_PATTERN.finditer(response)):
+        for i, m in enumerate(self.tool_tag_pattern.finditer(response)):
             tag = m.group(1).lower()
-            body = m.group(2).strip()
+            attrs = m.group(2)
+            body = m.group(3).strip()
             if not body:
                 continue
 
             if tag == "action":
+                if self.action_tool_name is None:
+                    continue  # no action tool: an invalid call, like an unknown tag
                 if body.lower() == "end task":
                     end_task_terminal = True
                 func_name = self.action_tool_name
                 arguments = {"action": body}
+            elif tag in self.tag_tools:
+                tool = self.tag_tools[tag]
+                arguments = self._tag_tool_call(tool, attrs, body)
+                if arguments is None:
+                    continue
+                func_name = tool.name
             elif tag == "summarize":
                 if body.lower() == "end task":
                     end_task_terminal = True

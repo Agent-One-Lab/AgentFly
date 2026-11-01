@@ -90,7 +90,7 @@ def test_derived_agent_has_its_own_settings_and_the_parent_is_unchanged(stubbed)
     assert main.system_prompt == "MAIN"
     assert main.tool_names == ["calculator"]
     assert main.max_model_len == 4096
-    assert main.action_tool_name == "calculator"
+    assert main.action_tool_name is None  # calculator takes no `action` argument: no <action> tool
 
 
 def test_action_agent_settings_can_be_replaced(stubbed, monkeypatch):
