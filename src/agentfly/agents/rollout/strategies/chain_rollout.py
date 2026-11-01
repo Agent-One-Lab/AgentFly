@@ -18,6 +18,7 @@ from ....core import Context
 from ....tools.types import CONTROL_CONTINUE, CONTROL_END, CONTROL_RAISE
 from ....utils.vision import image_to_data_uri
 from ...types import Segment
+from ...utils.action_format import message_text
 from ...utils.messages import Messages
 from ..base import Rollout
 from ..events import FinishReason, MessageProduced, ToolObserved
@@ -185,6 +186,23 @@ class ChainRollout(Rollout):
             finish_reason=state.info.get("finish_reason"),
             turns=sum(step.type == "Thought" for step in state.chain.steps()),
         )
+
+    def add_message(self, agent, state: ChainState, message: Dict) -> None:
+        """Continue the conversation with ``message``: a new step after the current one,
+        holding its messages plus ``message``, becomes the step the model acts on next.
+        The finish reason of the run that stopped is cleared.
+
+        ``run_loop`` does not advance ``depth`` on the turn that ends a run (its step is
+        terminal), so it is advanced here and the next turn gets a new number."""
+        previous = state.current_step
+        if previous.is_terminal:
+            state.depth += 1
+        step = state.chain.add_step(type="Action Input", messages=[*previous.messages.messages, message])
+        step.total_token_length = (
+            previous.total_token_length + observation_token_length(agent, message_text(message)) + TOOL_OBS_PREFIX_TOKENS
+        )
+        state.current_step = step
+        state.info.pop("finish_reason", None)
 
     async def run_loop(
         self,

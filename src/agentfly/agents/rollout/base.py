@@ -171,6 +171,9 @@ class Rollout:
         self.metrics = RolloutMetrics()
         # The current run's finished episodes, by episode id (filled by run_episode).
         self.trajectories: Dict[str, Trajectory] = {}
+        # The current run's generation settings; sessions run inside an episode use them
+        # unless given their own (see run_session).
+        self.generation_config: Optional[Dict[str, Any]] = None
 
     def resolve_global_step(self, global_step: Optional[int] = None) -> int:
         """Fix this run's metrics x value, *before* any metric is recorded.
@@ -324,6 +327,7 @@ class Rollout:
         """
         self.validate_run_args(max_turns, group_size, max_concurrent_episodes)
         self.use_token_ids = bool(use_token_ids)
+        self.generation_config = generation_config
         Monitor.ensure_started()
         self.trajectories = {}
         step = self.resolve_global_step(global_step)
@@ -487,28 +491,111 @@ class Rollout:
 
         # Prompt tools come from the agent's single source of truth (also used by
         # tokenize_trajectories), so generation and training render one prompt.
-        async for event in self.run_loop(
-            agent=agent,
-            context=context,
-            state=session.state,
-            tools=agent.prompt_tools(),
-            max_turns=max_turns,
-            generation_config=generation_config,
-        ):
-            yield event
+        context.running.append(session.id)
+        try:
+            async for event in self.run_loop(
+                agent=agent,
+                context=context,
+                state=session.state,
+                tools=agent.prompt_tools(),
+                max_turns=max_turns,
+                generation_config=generation_config,
+            ):
+                yield event
+        finally:
+            context.running.pop()
 
         trajectory = await self.finish_episode(agent, context, session.state, started_at=started_at)
         self.trajectories[spec.episode_id] = trajectory
         yield EpisodeEnded(episode_id=spec.episode_id, finish_reason=trajectory.finish_reason)
 
-    def add_session(self, context: Context, agent, messages: List[Dict], *, info: Dict[str, Any]) -> Session:
+    def add_session(
+        self,
+        context: Context,
+        agent,
+        messages: List[Dict],
+        *,
+        info: Dict[str, Any],
+        parent_id: Optional[int] = None,
+        spawned_at: Optional[int] = None,
+    ) -> Session:
         """Start a session in ``context``'s episode: a new loop state (:meth:`new_state`)
         for ``agent`` from ``messages``, registered under the next id (the first is 0,
-        the main agent)."""
+        the main agent). ``parent_id`` / ``spawned_at``: the session that started it and
+        that session's turn then (``None`` for session 0)."""
         state = self.new_state(agent, messages, episode_id=context.rollout_id, info=info)
-        session = Session(id=len(context.sessions), parent_id=None, agent=agent, state=state)
+        session = Session(
+            id=len(context.sessions),
+            parent_id=parent_id,
+            agent=agent,
+            state=state,
+            spawned_at=spawned_at,
+        )
         context.sessions[session.id] = session
         return session
+
+    async def run_session(
+        self,
+        agent,
+        context: Context,
+        messages: List[Dict],
+        *,
+        session_id: Optional[int],
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]] = None,
+    ) -> SessionResult:
+        """Run one session inside ``context``'s episode; ``agent.run(..., context=...)``
+        calls this.
+
+        ``session_id=None`` starts a session for ``agent`` from ``messages``; its parent is
+        the session acting now (the last of ``context.running``). ``session_id=k``
+        continues session ``k`` (run by ``agent``) with the one message in ``messages``
+        (:meth:`add_message`). Runs up to ``max_turns`` turns: no env reset or release, no
+        reward, no metrics. ``generation_config=None`` uses the current run's. Returns
+        where the session stopped, with its ``session_id``.
+        """
+        if session_id is None:
+            if not context.running:
+                raise RuntimeError(
+                    "No session is running in this episode: a subagent is started from a tool call of a running session."
+                )
+            parent = context.sessions[context.running[-1]]
+            session = self.add_session(
+                context,
+                agent,
+                deepcopy(list(messages)),
+                info={"episode_id": context.rollout_id},
+                parent_id=parent.id,
+                spawned_at=self.result(parent.state).turns - 1,
+            )
+        else:
+            session = context.sessions.get(session_id)
+            if session is None:
+                raise ValueError(f"No session {session_id} in this episode. Sessions: {sorted(context.sessions)}.")
+            if session_id == 0:
+                raise ValueError("Session 0 is the episode's main agent; run(context=...) does not continue it.")
+            if session_id in context.running:
+                raise RuntimeError(f"Session {session_id} is running; it can be continued once it stops.")
+            if agent is not session.agent:
+                raise ValueError(f"Session {session_id} is run by its own agent: call run() on context.sessions[{session_id}].agent.")
+            self.add_message(session.agent, session.state, deepcopy(messages[0]))
+
+        context.running.append(session.id)
+        try:
+            async for _event in self.run_loop(
+                agent=session.agent,
+                context=context,
+                state=session.state,
+                tools=session.agent.prompt_tools(),
+                max_turns=max_turns,
+                generation_config=self.generation_config if generation_config is None else generation_config,
+            ):
+                pass
+        finally:
+            context.running.pop()
+        result = self.result(session.state)
+        result.session_id = session.id
+        return result
 
     def make_context(
         self,
@@ -598,6 +685,7 @@ class Rollout:
         num_turns: int,
         tool_call_counts: Dict[str, int],
         steps: List[Any],
+        sessions: Optional[List[Dict[str, Any]]] = None,
     ) -> Trajectory:
         """Build the :class:`Trajectory` for one finished episode.
 
@@ -623,17 +711,22 @@ class Rollout:
             group_idx=info.get("group_idx"),
             metadata={k: v for k, v in info.items() if k not in self.RESERVED_INFO_KEYS},
             steps=steps,
+            sessions=sessions or [],
         )
 
     async def finish_episode(self, agent, context: Context, state: LoopState, *, started_at: float) -> Trajectory:
         """End an episode from its main session's ``state``: reward, tool metrics,
         resource release, the per-episode log, and the :class:`Trajectory`.
 
-        The reward reads :meth:`transcript`: one message list is a "flat" trajectory,
-        several (context folding split the conversation) a "segmented" one, which
-        ``context.trajectory_format`` tells the reward. The outcome is written into
-        ``state.info`` (``reward``, ``tool_metrics``, ``rollout_time_sec``), which the
-        per-episode log records.
+        The reward reads the main session's :meth:`transcript`: one message list is a
+        "flat" trajectory, several (context folding split the conversation) a
+        "segmented" one, which ``context.trajectory_format`` tells the reward. The
+        outcome is written into ``state.info`` (``reward``, ``tool_metrics``,
+        ``rollout_time_sec``), which the per-episode log records.
+
+        The trajectory's segments come from every session (:meth:`episode_segments`) and
+        ``sessions`` lists each session's stats (:meth:`session_entries`); its own
+        stats and ``steps`` are the main session's.
         """
         info = state.info
         transcript = self.transcript(state)
@@ -646,24 +739,64 @@ class Rollout:
             final_messages=[message for messages in transcript for message in messages],
             reward_args=info,
         )
-        records = self.records(state)
-        info["tool_metrics"] = aggregate_tool_metrics(record.tool_result for record in records)
+        result = self.result(state)
+        info["tool_metrics"] = result.tool_metrics
         await self.release_resources(context)
         info["rollout_time_sec"] = time.monotonic() - started_at
 
         self.metrics.record_episode(global_step=self.global_step, trajectory=transcript, info=info)
-        result = self.result(state)
         return self.make_trajectory(
             info=info,
-            segments=self.segments(state),
+            segments=self.episode_segments(context, state),
             reward=info["reward"],
             tool_metrics=info["tool_metrics"],
             finish_reason=result.finish_reason,
             rollout_time_sec=info["rollout_time_sec"],
             num_turns=result.turns,
-            tool_call_counts=count_tool_calls(record.tool_result for record in records),
-            steps=records,
+            tool_call_counts=result.tool_call_counts,
+            steps=self.records(state),
+            sessions=self.session_entries(context, state, result),
         )
+
+    def episode_segments(self, context: Context, state: LoopState) -> List[Segment]:
+        """The episode's training segments, session by session: the main session's
+        (``state``) as they are, then each subagent session's, recording the session and
+        its agent's settings (``agent`` name, prompt ``tools``, ``max_model_len``)."""
+        segments = list(self.segments(state))
+        for session_id in sorted(context.sessions):
+            if session_id == 0:
+                continue
+            session = context.sessions[session_id]
+            settings = {
+                "session_id": session_id,
+                "agent": session.agent.name,
+                "tools": session.agent.prompt_tools(),
+                "max_model_len": session.agent.max_model_len,
+            }
+            segments.extend(segment.model_copy(update=settings) for segment in self.segments(session.state))
+        return segments
+
+    def session_entries(self, context: Context, state: LoopState, result: SessionResult) -> List[Dict[str, Any]]:
+        """One entry per session, in id order: its place in the episode (id, parent,
+        agent name, ``spawned_at``) and its stats from :meth:`result`. The main session's
+        are ``state`` and ``result``; like its segments, it has no agent name."""
+        entries = []
+        for session_id in sorted(set(context.sessions) | {0}):
+            session = context.sessions.get(session_id)
+            session_result = result if session_id == 0 else self.result(session.state)
+            entries.append(
+                {
+                    "session_id": session_id,
+                    "parent_id": session.parent_id if session else None,
+                    "agent": session.agent.name if session_id > 0 else None,
+                    "spawned_at": session.spawned_at if session else None,
+                    "finish_reason": session_result.finish_reason,
+                    "turns": session_result.turns,
+                    "tool_call_counts": session_result.tool_call_counts,
+                    "tool_metrics": session_result.tool_metrics,
+                }
+            )
+        return entries
 
     # ---- L3: the strategy contract (each strategy implements these) ----
 
@@ -689,6 +822,12 @@ class Rollout:
         or resource release. ``state`` is updated in place."""
         raise self.not_implemented("run_loop")
 
+    def add_message(self, agent, state: LoopState, message: Dict) -> None:
+        """Continue a stopped session of ``agent``: add ``message`` (e.g. the parent's
+        next question) to ``state`` so the next :meth:`run_loop` acts on it. Strategies
+        without it do not support subagents."""
+        raise NotImplementedError(f"{type(self).__name__} does not support subagents (no add_message()).")
+
     def segments(self, state: LoopState) -> List[Segment]:
         """The training segments (model-context views) recorded in ``state``."""
         raise self.not_implemented("segments")
@@ -710,7 +849,8 @@ class Rollout:
     def session_result(self, state: LoopState, *, finish_reason: Optional[str], turns: int) -> SessionResult:
         """A :class:`SessionResult` for :meth:`result`: the strategy gives the finish
         reason and turn count; the last assistant message is read from
-        :meth:`transcript` and the last tool result from :meth:`records`."""
+        :meth:`transcript`, and the last tool result, tool call counts and tool metrics
+        from :meth:`records`."""
         assistant = [m for messages in self.transcript(state) for m in messages if m.get("role") == "assistant"]
         tool_results = [record.tool_result for record in self.records(state) if record.tool_result is not None]
         return SessionResult(
@@ -718,6 +858,8 @@ class Rollout:
             turns=turns,
             last_assistant=assistant[-1] if assistant else None,
             last_tool_result=tool_results[-1] if tool_results else None,
+            tool_call_counts=count_tool_calls(tool_results),
+            tool_metrics=aggregate_tool_metrics(tool_results),
         )
 
     def after_first_step_hook(self, state: LoopState, context: Context) -> None:

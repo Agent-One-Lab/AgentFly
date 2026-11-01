@@ -44,6 +44,8 @@ class SessionResult:
         turns: The model's turns (generations) so far.
         last_assistant: The last assistant message, if any.
         last_tool_result: The last tool result, if any.
+        tool_call_counts: Tool calls so far, by tool name.
+        tool_metrics: The tools' numeric metrics so far, averaged under ``tool/<name>/<key>``.
         session_id: The session's id, set by a run inside an episode.
     """
 
@@ -51,6 +53,8 @@ class SessionResult:
     turns: int
     last_assistant: Optional[Dict[str, Any]] = None
     last_tool_result: Optional["ToolResult"] = None
+    tool_call_counts: Dict[str, int] = field(default_factory=dict)
+    tool_metrics: Dict[str, float] = field(default_factory=dict)
     session_id: Optional[int] = None
 
 
@@ -64,8 +68,8 @@ class Session:
         agent: The agent that runs this session.
         state: The rollout strategy's loop state (a :class:`LoopState`), which holds
             the conversation.
-        spawned_at: The parent session's turn (its ``state.depth``) when this session
-            was started.
+        spawned_at: The parent session's turn (0-based, counted like
+            ``SessionResult.turns``) in which this session was started.
         stats: Free space for tools, e.g. per-session counts.
     """
 

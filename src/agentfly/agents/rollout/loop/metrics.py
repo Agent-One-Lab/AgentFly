@@ -179,6 +179,51 @@ def rollout_summary(
     return " ".join(parts)
 
 
+def emit_turn_and_tool_averages(
+    *,
+    global_step: int,
+    prefix: str,
+    turn_counts: List[int],
+    tool_counts: List[Dict[str, int]],
+) -> None:
+    """Emit ``<prefix>/avg_turns``, ``<prefix>/avg_tool_calls`` and
+    ``<prefix>/tool_calls/<tool>``: per-run averages of turns and tool calls. Empty
+    inputs emit nothing."""
+    if turn_counts:
+        emit(
+            MetricEvent(
+                kind="scalar",
+                name=f"{prefix}/avg_turns",
+                value=sum(turn_counts) / len(turn_counts),
+                x=global_step,
+                x_name="agent/rollout/step",
+            )
+        )
+    if tool_counts:
+        tool_calls_by_name: Counter[str] = Counter()
+        for counts in tool_counts:
+            tool_calls_by_name.update(counts)
+        emit(
+            MetricEvent(
+                kind="scalar",
+                name=f"{prefix}/avg_tool_calls",
+                value=sum(tool_calls_by_name.values()) / len(tool_counts),
+                x=global_step,
+                x_name="agent/rollout/step",
+            )
+        )
+        for tool_name, tool_call_count in tool_calls_by_name.items():
+            emit(
+                MetricEvent(
+                    kind="scalar",
+                    name=f"{prefix}/tool_calls/{tool_name}",
+                    value=tool_call_count / len(tool_counts),
+                    x=global_step,
+                    x_name="agent/rollout/step",
+                )
+            )
+
+
 class RolloutMetrics:
     """Emit each report from its supplied data without accumulating chain state."""
 
@@ -280,38 +325,33 @@ class RolloutMetrics:
         )
         emit(ent)
 
-        if turn_counts:
-            evt = MetricEvent(
-                kind="scalar",
-                name="agent/rollout/avg_turns",
-                value=sum(turn_counts) / len(turn_counts),
-                x=global_step,
-                x_name="agent/rollout/step",
-            )
-            emit(evt)
+        emit_turn_and_tool_averages(
+            global_step=global_step, prefix="agent/rollout", turn_counts=turn_counts, tool_counts=tool_counts
+        )
 
-        if tool_counts:
-            tool_calls_by_name: Counter[str] = Counter()
-            for counts in tool_counts:
-                tool_calls_by_name.update(counts)
-            evt = MetricEvent(
-                kind="scalar",
-                name="agent/rollout/avg_tool_calls",
-                value=sum(tool_calls_by_name.values()) / len(tool_counts),
-                x=global_step,
-                x_name="agent/rollout/step",
-            )
-            emit(evt)
-
-            for tool_name, tool_call_count in tool_calls_by_name.items():
-                evt = MetricEvent(
+        # Subagent sessions (Trajectory.sessions after the main agent's): the same averages
+        # per agent name, and how many subagents an episode started. Nothing without them.
+        subagent_sessions = [entry for t in trajectories for entry in t.sessions[1:]]
+        if subagent_sessions:
+            emit(
+                MetricEvent(
                     kind="scalar",
-                    name=f"agent/rollout/tool_calls/{tool_name}",
-                    value=tool_call_count / len(tool_counts),
+                    name="agent/rollout/avg_subagents",
+                    value=len(subagent_sessions) / len(trajectories),
                     x=global_step,
                     x_name="agent/rollout/step",
                 )
-                emit(evt)
+            )
+            by_agent: Dict[str, List[Dict[str, Any]]] = {}
+            for entry in subagent_sessions:
+                by_agent.setdefault(entry.get("agent") or "subagent", []).append(entry)
+            for agent_name, entries in by_agent.items():
+                emit_turn_and_tool_averages(
+                    global_step=global_step,
+                    prefix=f"agent/rollout/{agent_name}",
+                    turn_counts=[e["turns"] for e in entries if e.get("turns") is not None],
+                    tool_counts=[e["tool_call_counts"] for e in entries if e.get("tool_call_counts") is not None],
+                )
 
         sample_trajectory_json = json.dumps(serialize_for_json(random.choice(trajectories)), indent=2)
         evt = MetricEvent(

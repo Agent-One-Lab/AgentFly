@@ -46,7 +46,8 @@ class WindowState(LoopState):
     ``current`` is the state the model acts on next and ``history`` the earlier
     ``(obs, action)`` turns (oldest first); the prompt builder renders a bounded window
     of them. ``full_messages`` is the whole conversation (for the outcome reward) and
-    ``steps`` holds one :class:`Step` per generation.
+    ``steps`` holds one :class:`Step` per generation. ``pending_turn`` is the turn that
+    ended the last run (see :meth:`StepRollout.add_message`).
     """
 
     current: Dict[str, Any]
@@ -55,6 +56,8 @@ class WindowState(LoopState):
     history: List[Dict[str, Any]] = field(default_factory=list)
     steps: List[Step] = field(default_factory=list)
     finish_reason: Optional[FinishReason] = None
+    # The turn that ended the last run, not yet in ``history``; ``add_message`` adds it.
+    pending_turn: Optional[Dict[str, Any]] = None
 
 
 class StepRollout(Rollout):
@@ -155,6 +158,24 @@ class StepRollout(Rollout):
     def result(self, state: WindowState) -> SessionResult:
         return self.session_result(state, finish_reason=state.finish_reason, turns=len(state.steps))
 
+    def add_message(self, agent, state: WindowState, message: Dict) -> None:
+        """Continue the session with ``message``: the turn that ended the last run joins
+        the history window, and ``message`` becomes the current observation (it replaces
+        the last observation when the run stopped at ``max_turns``). The finish reason is
+        cleared."""
+        if state.pending_turn is not None:
+            state.history.append(state.pending_turn)
+            state.pending_turn = None
+        text = message_text(message)
+        state.current = {
+            "raw_obs": text,
+            "obs": text,
+            "admissible": [],
+            "task_description": state.task_description,
+        }
+        state.full_messages.append(message)
+        state.finish_reason = None
+
     async def run_loop(
         self,
         *,
@@ -235,6 +256,7 @@ class StepRollout(Rollout):
                     )
                 if control == CONTROL_END:
                     state.finish_reason = FinishReason.NO_TOOL_CALLS
+                    state.pending_turn = self.history_entry(state, action_msg, action="")
                     break
                 # 'continue': no tool ran this turn (no observation to advance on); loop
                 # to the next generation. The generation is already recorded as a step.
@@ -245,6 +267,7 @@ class StepRollout(Rollout):
                 # ``project_actions`` verl-agent has no such sentinel: it always steps and
                 # ends only on env done / max_turns, so this early end is skipped.
                 state.finish_reason = FinishReason.TERMINAL
+                state.pending_turn = self.history_entry(state, action_msg, action=self.extract_action(tool_calls[0]))
                 break
 
             tool_call = tool_calls[0]
@@ -285,19 +308,12 @@ class StepRollout(Rollout):
                 self.raise_for_result(result)
             if control == CONTROL_END:
                 state.finish_reason = self.tool_finish_reason(result)
+                state.pending_turn = self.history_entry(state, action_msg, action=self.extract_action(tool_call))
                 break
 
             # Record the just-acted step into history (pre-action obs + the action taken),
             # then advance ``current`` to the resulting state.
-            state.history.append(
-                {
-                    "raw_obs": state.current["raw_obs"],
-                    "obs": state.current["obs"],
-                    "response": message_text(action_msg),  # full text (chat window)
-                    "action": self.extract_action(tool_call),  # clean action (flat builder)
-                    "admissible": state.current["admissible"],
-                }
-            )
+            state.history.append(self.history_entry(state, action_msg, action=self.extract_action(tool_call)))
             state.current = {
                 "raw_obs": result.anchor if result.anchor is not None else obs_text,
                 "obs": obs_text,
@@ -308,6 +324,19 @@ class StepRollout(Rollout):
             state.finish_reason = FinishReason.MAX_TURNS
 
     # ---- helpers ----------------------------------------------------------
+
+    @staticmethod
+    def history_entry(state: WindowState, action_msg: Dict, *, action: str) -> Dict[str, Any]:
+        """A history-window entry for the turn that acted on ``state.current``: the
+        pre-action observation, the full response text (chat window) and the clean
+        ``action`` (flat builder)."""
+        return {
+            "raw_obs": state.current["raw_obs"],
+            "obs": state.current["obs"],
+            "response": message_text(action_msg),
+            "action": action,
+            "admissible": state.current["admissible"],
+        }
     # ``message_text`` / ``action_format_valid`` (utils.action_format) and
     # ``Rollout.projected_tool_call`` give StepRollout and ChainRollout one definition of
     # validity and projection.

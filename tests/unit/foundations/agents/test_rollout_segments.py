@@ -29,6 +29,7 @@ class FakeContext:
         self.metadata = dict(metadata)
         self.trajectory_format = "flat"
         self.sessions = {}
+        self.running = []
 
     async def release_resource(self, **kwargs):
         pass

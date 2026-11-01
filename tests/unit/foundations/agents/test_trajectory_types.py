@@ -40,7 +40,7 @@ class TestSegment:
         assert isinstance(segment, Segment)
         assert segment.messages == messages
         assert result.model_dump()["trajectories"][0]["segments"] == [
-            {"messages": messages},
+            {"messages": messages, "session_id": 0, "agent": None, "tools": None, "max_model_len": None},
         ]
 
     def test_bare_message_lists_are_not_a_second_segment_representation(self):

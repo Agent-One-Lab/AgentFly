@@ -180,6 +180,9 @@ class BaseAgent(ABC):
 
         super().__init__()
 
+        # The subagent name this agent was built under (see create_subagent); None for a main agent.
+        self.name: Optional[str] = None
+
         # ---- This agent's own settings ----
         self.configure(**settings)
 
@@ -332,10 +335,12 @@ class BaseAgent(ABC):
 
     def create_subagent(self, name: str) -> "BaseAgent":
         """Build the subagent declared as ``name`` (see ``subagents``): a new agent on every call,
-        sharing this agent's engine and tokenizer (see :meth:`derive`)."""
+        sharing this agent's engine and tokenizer (see :meth:`derive`). Its ``name`` is ``name``."""
         if name not in self.subagents:
             raise ValueError(f"No subagent named {name!r}. Declared subagents: {sorted(self.subagents)}.")
-        return self.derive(**self.subagents[name])
+        child = self.derive(**self.subagents[name])
+        child.name = name
+        return child
 
     def _bind_method_tools(self, tools: List) -> List:
         """Give this agent its own instance of each ``@tool``-decorated method of its class.
@@ -481,6 +486,8 @@ class BaseAgent(ABC):
         context_config: Optional[ContextConfig] = None,
         global_step: Optional[int] = None,
         use_token_ids: bool = True,
+        context: Optional[Context] = None,
+        session_id: Optional[int] = None,
         **kwargs,
     ) -> RunResult:
         """Run the agent on a batch of messages and return the rollout result.
@@ -510,6 +517,16 @@ class BaseAgent(ABC):
                 re-encoding the text — the sampling prompts and training rows then use
                 exactly the sampled tokens. False leaves them off: every turn is
                 re-encoded from text (sampling and training still render alike).
+            context: Run one session inside this episode instead of starting new episodes
+                (a tool starting or asking a subagent). ``messages`` is then one
+                conversation; a new session gets this agent's system prompt and its parent
+                is the session acting now. The episode's strategy runs it, with no env
+                reset or release, reward or metrics; ``generation_config`` left empty uses
+                the episode's run's. The result has no trajectories (the episode's
+                trajectory holds every session's segments) and ``session`` is where the
+                session stopped.
+            session_id: With ``context``: continue this session with the one message in
+                ``messages``.
             **kwargs: Additional keyword arguments forwarded to the rollout strategy
                 (e.g. ``group_size``, ``max_concurrent_episodes`` for the chain rollout).
 
@@ -519,6 +536,35 @@ class BaseAgent(ABC):
             explicitly to :meth:`to_verl_dataproto` for training conversion.
             Latest-run caches are retained only for inspection and timing helpers.
         """
+        if context is not None:
+            # Inside an episode (a tool starting or asking a subagent): the episode's own
+            # strategy runs one session. No env reset or release, no reward, no metrics.
+            if kwargs:
+                raise TypeError(f"run(context=...) takes no rollout arguments, got {sorted(kwargs)}.")
+            if context.rollout is None:
+                raise ValueError("run(context=...) needs an episode context made by a rollout strategy.")
+            if not isinstance(rollout, str) and rollout is not context.rollout:
+                raise ValueError("run(context=...) runs on the episode's own rollout strategy.")
+            if session_id is None:
+                messages = self._preprocess_messages(messages)
+            conversations = MessagesList.from_data(messages)
+            if len(conversations) != 1:
+                raise ValueError(f"run(context=...) takes one conversation, got {len(conversations)}.")
+            turns = conversations[0].messages
+            if session_id is not None and len(turns) != 1:
+                raise ValueError(f"Continuing a session takes one message, got {len(turns)}.")
+            session = await context.rollout.run_session(
+                self,
+                context,
+                turns,
+                session_id=session_id,
+                max_turns=max_turns,
+                generation_config=generation_config or None,
+            )
+            return RunResult(trajectories=[], rollout=context.rollout.name, session=session)
+        if session_id is not None:
+            raise ValueError("session_id needs a context: it names a session of that episode.")
+
         processed_messages = self._preprocess_messages(messages)
         self._preprocess_backends()
 
