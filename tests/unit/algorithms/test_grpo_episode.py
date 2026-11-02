@@ -59,3 +59,24 @@ def test_registered_for_per_segment_only():
     assert get_estimator("grpo_episode", "per_segment").__name__ == "grpo_episode_per_segment"
     with pytest.raises(Exception, match="per_segment"):
         get_estimator("grpo_episode", "per_step")
+
+
+def test_zero_variance_groups_leave_the_loss():
+    import types
+
+    from agentfly.algorithms.grpo_episode import grpo_episode_per_segment
+
+    rewards, mask = rows([1.0, 1.0, 0.0, 1.0, 1.0])
+    batch = {"token_level_rewards": rewards, "action_mask": mask.clone()}
+    non_tensor = {
+        "uid": np.array(["A", "A", "B", "B", "C"], dtype=object),  # A: all 1; B: 0 and 1; C: one episode
+        "batch_idx": np.array([0, 1, 2, 3, 4]),
+    }
+    data = types.SimpleNamespace(batch=batch, non_tensor_batch=non_tensor)
+    config = {"estimator_kwargs": {"filter_zero_variance_groups": True}, "norm_adv_by_std_in_grpo": False}
+    grpo_episode_per_segment(data, config)
+    assert batch["action_mask"].sum(dim=-1).tolist() == [0.0, 0.0, 3.0, 3.0, 0.0]
+
+    batch["action_mask"] = mask.clone()
+    grpo_episode_per_segment(data, {"norm_adv_by_std_in_grpo": False})  # off by default
+    assert batch["action_mask"].sum(dim=-1).tolist() == [3.0] * 5

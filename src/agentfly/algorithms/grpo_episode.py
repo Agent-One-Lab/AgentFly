@@ -5,6 +5,10 @@ into segments, subagent sessions add their own rows, and the converter pads with
 last row. verl's GRPO takes the group mean and std over rows, so an episode with more rows counts
 more. Here each episode (``batch_idx``) counts once within its group (``uid``); every row of an
 episode then gets that episode's normalized outcome, broadcast over its policy tokens.
+
+``algorithm.estimator_kwargs.filter_zero_variance_groups`` (default off; as in SERA's training): rows of groups whose
+episodes all got the same reward leave the loss: their policy-token mask (``action_mask``) is set to 0, so
+they add nothing to the policy loss, its averaging or the entropy term. Their advantage is 0 anyway.
 """
 
 from collections import defaultdict
@@ -52,15 +56,30 @@ def compute_grpo_episode_advantage(
     return advantages, advantages
 
 
+def zero_variance_rows(token_level_rewards: torch.Tensor, uid: np.ndarray, episode: np.ndarray) -> torch.Tensor:
+    """``[B]`` bool: rows whose group's episodes all got the same reward (including one-episode groups)."""
+    scores = token_level_rewards.sum(dim=-1)
+    group_scores: Dict[Any, Dict[Any, float]] = defaultdict(dict)
+    for i in range(scores.shape[0]):
+        group_scores[uid[i]].setdefault(episode[i], float(scores[i]))
+    constant = {g: len(set(v.values())) <= 1 for g, v in group_scores.items()}
+    return torch.tensor([constant[uid[i]] for i in range(scores.shape[0])], dtype=torch.bool)
+
+
 @register_estimator("grpo_episode", layout="per_segment")
 def grpo_episode_per_segment(data: Any, config: Any) -> Tuple[torch.Tensor, torch.Tensor]:
     def field(name):
         return batch_field(data, name, "grpo_episode", "per_segment")
 
-    return compute_grpo_episode_advantage(
+    advantages, returns = compute_grpo_episode_advantage(
         token_level_rewards=field("token_level_rewards"),
         response_mask=field("action_mask"),
         uid=field("uid"),
         episode=field("batch_idx"),
         norm_adv_by_std_in_grpo=bool(config_value(config, "norm_adv_by_std_in_grpo", True)),
     )
+    estimator_kwargs = config_value(config, "estimator_kwargs", None) or {}
+    if bool(estimator_kwargs.get("filter_zero_variance_groups", False)):
+        rows = zero_variance_rows(field("token_level_rewards"), field("uid"), field("batch_idx"))
+        data.batch["action_mask"][rows] = 0  # in place: the actor's loss and entropy read this mask
+    return advantages, returns
