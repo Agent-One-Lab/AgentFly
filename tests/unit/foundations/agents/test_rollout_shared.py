@@ -202,6 +202,24 @@ def test_make_trajectory_merges_tool_metrics_last_and_keeps_task_metadata():
     )
     assert trajectory.finish_reason == "max_turns"
     assert trajectory.metadata == {"task_id": "t0", "answer": 0, "capped_turns": 2}
+    assert trajectory.session_rewards is None  # the reward function gave none
+
+
+def test_make_trajectory_keeps_session_rewards():
+    spec = Rollout.make_specs(tasks(1), group_size=1)[0]
+    trajectory = StepRollout().make_trajectory(
+        info=spec.info,
+        segments=[Segment(messages=[])],
+        reward=RewardResult.from_raw({"reward": 1.0, "session_rewards": {1: 0.0}}),
+        tool_metrics={},
+        finish_reason="tool_control_end",
+        rollout_time_sec=1.0,
+        num_turns=1,
+        tool_call_counts={},
+        steps=[],
+    )
+    assert trajectory.reward == 1.0 and trajectory.session_rewards == {1: 0.0}
+    assert "session_rewards" not in trajectory.metrics
 
 
 def test_chain_only_machinery_lives_on_chain_rollout():

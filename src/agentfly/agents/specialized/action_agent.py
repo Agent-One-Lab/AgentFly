@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from ...core.context import Context
 from ..agent_base import BaseAgent
+from ..rollout.loop.generation import CONTENT_IS_PREFIX
 from ..rollout.structures import Step
 
 # Tool tags: <action>, <summarize> and <tool attr="v">body</tool> for the agent's tools. Each
@@ -111,6 +112,7 @@ class ActionAgent(BaseAgent):
         context_trigger_turns: Optional[int] = None,
         context_trigger_message_type: Optional[str] = None,
         truncate_history_at_action: bool = False,
+        close_unclosed_tags: bool = False,
         **kwargs,
     ):
         # The action format puts the environment interface in the prompt text
@@ -124,6 +126,7 @@ class ActionAgent(BaseAgent):
             context_trigger_turns=context_trigger_turns,
             context_trigger_message_type=context_trigger_message_type,
             truncate_history_at_action=truncate_history_at_action,
+            close_unclosed_tags=close_unclosed_tags,
             **kwargs,
         )
 
@@ -137,6 +140,7 @@ class ActionAgent(BaseAgent):
         context_trigger_turns: Optional[int] = None,
         context_trigger_message_type: Optional[str] = None,
         truncate_history_at_action: bool = False,
+        close_unclosed_tags: bool = False,
         **settings,
     ) -> None:
         """The base settings plus the action format's own (see :meth:`BaseAgent.configure`)."""
@@ -145,6 +149,7 @@ class ActionAgent(BaseAgent):
             context_trigger_turns=context_trigger_turns,
             context_trigger_message_type=context_trigger_message_type,
             truncate_history_at_action=truncate_history_at_action,
+            close_unclosed_tags=close_unclosed_tags,
         )
         self.action_tool_name = self._find_action_tool_name()
         self.tag_tools = self._tag_tools()
@@ -155,13 +160,21 @@ class ActionAgent(BaseAgent):
             r"<(" + "|".join(map(re.escape, names)) + r")" + ATTRS + r"\s*>\s*(.*?)\s*</\1\s*>",
             re.DOTALL | re.IGNORECASE,
         )
+        self.open_tag_pattern = re.compile(
+            r"<(" + "|".join(map(re.escape, names)) + r")" + ATTRS + r"\s*>", re.IGNORECASE
+        )
         # What the assistant message's ``content`` holds. False (default): the FULL
         # generated text, so the history the model sees next turn equals what it
-        # sampled (and what training splices via ``token_ids``) — the on-policy
-        # choice, and what verl-agent's format check / fallback also read. True: cut
-        # at the first ``</action>``/``</summarize>`` (an ablation; the tool call is
-        # always parsed from the truncated copy either way).
+        # sampled — what verl-agent's format check / fallback also read. True: cut at
+        # the first closing tool tag (``</action>``, ``</summarize>``, ``</python>``, ...),
+        # as RAO/SERA stop at ``</python>``; the sampled ``token_ids`` are cut to match
+        # (see ``trim_token_ids_to_content``), so the next prompt and the training row
+        # hold the cut text. The tool call is parsed from the cut copy either way.
         self.truncate_history_at_action = truncate_history_at_action
+        # True: a tool tag opened but never closed (e.g. the turn hit its token cap)
+        # is parsed as if closed at the end of the text, so its body still runs, as
+        # RAO/SERA re-add a missing ``</python>``. The stored content stays as sampled.
+        self.close_unclosed_tags = close_unclosed_tags
         self.context_trigger_turns = resolve_context_trigger_turns(context_trigger_turns)
         message_type = context_trigger_message_type
         if message_type is None:
@@ -368,6 +381,25 @@ class ActionAgent(BaseAgent):
         return text
 
     def _parse_single_response(self, response: str, current_segment: List[Dict]) -> Dict:
+        """:meth:`_parse_response`, marking content cut at a closing tool tag
+        (``truncate_history_at_action``) so the rollout cuts the sampled ids to match."""
+        message = self._parse_response(response, current_segment)
+        if (
+            self.truncate_history_at_action
+            and isinstance(response, str)
+            and self._truncate_at_first_close_tag(response) != response
+        ):
+            message[CONTENT_IS_PREFIX] = True
+        return message
+
+    def _close_unclosed_tag(self, response: str) -> str:
+        """``response`` with ``</tag>`` appended when it has no complete tool tag but opens one."""
+        if not self.close_unclosed_tags or self.tool_tag_pattern.search(response):
+            return response
+        opened = self.open_tag_pattern.search(response)
+        return response + f"</{opened.group(1)}>" if opened else response
+
+    def _parse_response(self, response: str, current_segment: List[Dict]) -> Dict:
         """
         Parse a single model response using the action format:
         - <think>...</think> (reasoning)
@@ -427,7 +459,7 @@ class ActionAgent(BaseAgent):
                 "status": "terminal" if end_task_terminal else "continue",
             }
 
-        for i, m in enumerate(self.tool_tag_pattern.finditer(response)):
+        for i, m in enumerate(self.tool_tag_pattern.finditer(self._close_unclosed_tag(response))):
             tag = m.group(1).lower()
             attrs = m.group(2)
             body = m.group(3).strip()

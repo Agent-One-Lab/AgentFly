@@ -36,6 +36,10 @@ class Segment(BaseModel):
     A segment from a subagent's session records that session and the settings its agent
     used (``agent`` name, prompt ``tools``, ``max_model_len``). The main agent's segments
     (session 0) leave them ``None``: they use the settings of the agent that ran.
+
+    ``repeats_turns`` marks a view that repeats assistant turns of the view before it as context:
+    a chain that dropped its oldest turns to fit its context (``on_context_overflow="drop_oldest"``).
+    Training on it would train those turns twice, so conversion rejects it.
     """
 
     messages: List[Dict[str, Any]]
@@ -43,6 +47,10 @@ class Segment(BaseModel):
     agent: Optional[str] = None
     tools: Optional[List[Dict[str, Any]]] = None
     max_model_len: Optional[int] = None
+    repeats_turns: bool = False
+    trained_from_turn: int = 0
+    """Branching: the first ``trained_from_turn`` assistant turns of this view are context only (they were
+    generated in the source episode, or replayed), so conversion masks them out of the policy tokens."""
 
 
 class Trajectory(BaseModel):
@@ -67,6 +75,11 @@ class Trajectory(BaseModel):
     segment_rewards: Optional[List[float]] = None
     """Per-segment rewards. Populated only when the reward function returns
     segment-level scores; ``None`` for trajectories where reward is per-rollout."""
+
+    session_rewards: Optional[Dict[int, float]] = None
+    """Per-session rewards from the reward function (session id -> reward), e.g. a
+    subagent's own outcome; sessions not listed get ``reward``. ``None`` when the reward
+    function gives none. Training conversion puts them in the ``session_reward`` column."""
 
     metrics: Dict[str, Any] = Field(default_factory=dict)
     """Reward-function extras plus aggregated numeric tool metrics.
@@ -108,6 +121,18 @@ class Trajectory(BaseModel):
     group_id: Optional[str] = None
     episode_idx: Optional[int] = None
     group_idx: Optional[int] = None
+
+    # Tree of leaves (branching): an ordinary episode is a one-leaf tree (``tree_id`` = its episode id,
+    # ``leaf_id`` 0). A branch episode shares the source's ``tree_id``, names the source in ``branch_of``,
+    # and ``branch_turn`` says where its text starts being new: ``{"session_id": s, "turn": k}`` means the
+    # branching session's turns up to and including turn ``k`` (0-based) are the shared prefix.
+    tree_id: Optional[str] = None
+    leaf_id: int = 0
+    branch_of: Optional[str] = None
+    branch_turn: Optional[Dict[str, int]] = None
+    branch_point: Optional[Dict[str, Any]] = None
+    """On the source episode: where it was branched (``session_id``, ``turn``, the tool's payload), without the
+    environment snapshot itself."""
 
     # Free-form bags
     metadata: Dict[str, Any] = Field(default_factory=dict)

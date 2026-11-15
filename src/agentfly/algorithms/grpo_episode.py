@@ -11,13 +11,12 @@ episodes all got the same reward leave the loss: their policy-token mask (``acti
 they add nothing to the policy loss, its averaging or the entropy term. Their advantage is 0 anyway.
 """
 
-from collections import defaultdict
-from typing import Any, Dict, Tuple
+from typing import Any, Tuple
 
 import numpy as np
 import torch
 
-from .common import batch_field, config_value
+from .common import batch_field, config_value, episode_outcomes
 from .registry import register_estimator
 
 
@@ -32,21 +31,14 @@ def compute_grpo_episode_advantage(
     """Advantages ``[B, L]``: ``(score - mean) / (std + epsilon)`` (or ``score - mean``), with mean
     and std over the group's episodes, one score per episode. A group with one episode gets 0, as
     in verl's GRPO. Returns ``(advantages, returns)``; they are equal, as in verl."""
-    scores = token_level_rewards.sum(dim=-1)
-    episode_score: Dict[Any, torch.Tensor] = {}
-    group_episodes: Dict[Any, list] = defaultdict(list)
-    for i in range(scores.shape[0]):
-        key = (uid[i], episode[i])
-        if key not in episode_score:  # every row of an episode carries the same outcome
-            episode_score[key] = scores[i]
-            group_episodes[uid[i]].append(scores[i])
+    episode_score, group_episodes = episode_outcomes(token_level_rewards, uid, episode)
     stats = {}  # mean and std of groups with more than one episode
-    for group, values in group_episodes.items():
-        if len(values) > 1:
-            stacked = torch.stack(values)
+    for group, keys in group_episodes.items():
+        if len(keys) > 1:
+            stacked = torch.stack([episode_score[key] for key in keys])
             stats[group] = (stacked.mean(), stacked.std())
-    advantages = torch.zeros_like(scores)
-    for i in range(scores.shape[0]):
+    advantages = torch.zeros_like(token_level_rewards[:, 0])
+    for i in range(advantages.shape[0]):
         if uid[i] not in stats:
             continue  # one episode in the group: no comparison, advantage 0
         mean, std = stats[uid[i]]
@@ -58,12 +50,9 @@ def compute_grpo_episode_advantage(
 
 def zero_variance_rows(token_level_rewards: torch.Tensor, uid: np.ndarray, episode: np.ndarray) -> torch.Tensor:
     """``[B]`` bool: rows whose group's episodes all got the same reward (including one-episode groups)."""
-    scores = token_level_rewards.sum(dim=-1)
-    group_scores: Dict[Any, Dict[Any, float]] = defaultdict(dict)
-    for i in range(scores.shape[0]):
-        group_scores[uid[i]].setdefault(episode[i], float(scores[i]))
-    constant = {g: len(set(v.values())) <= 1 for g, v in group_scores.items()}
-    return torch.tensor([constant[uid[i]] for i in range(scores.shape[0])], dtype=torch.bool)
+    outcome, group_episodes = episode_outcomes(token_level_rewards, uid, episode)
+    constant = {g: len({float(outcome[key]) for key in keys}) <= 1 for g, keys in group_episodes.items()}
+    return torch.tensor([constant[uid[i]] for i in range(len(uid))], dtype=torch.bool)
 
 
 @register_estimator("grpo_episode", layout="per_segment")

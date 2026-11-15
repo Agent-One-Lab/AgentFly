@@ -25,6 +25,10 @@ class RewardResult:
 
     reward: float
     metrics: Dict[str, Any] = field(default_factory=dict)
+    session_rewards: Dict[int, float] = field(default_factory=dict)
+    """Rewards of single sessions of the episode (session id -> reward), e.g. a subagent's own
+    outcome, from a ``session_rewards`` key of the returned dict. Sessions not listed get
+    ``reward``. Only estimators that read per-session rewards use them."""
 
     @classmethod
     def from_raw(
@@ -37,7 +41,8 @@ class RewardResult:
         - ``float`` / ``int``: ``reward`` set; ``metrics`` empty.
         - ``dict``: must have a ``reward`` key. Metrics may be given as an
           explicit ``metrics`` sub-dict and/or as extra top-level keys, which
-          are merged into ``metrics`` (explicit wins on collision).
+          are merged into ``metrics`` (explicit wins on collision). An optional
+          ``session_rewards`` key becomes :attr:`session_rewards`, not a metric.
         - ``RewardResult``: returned as-is.
         - ``None``: returns a zero-reward result with empty metrics (matches
           the historical behavior when no reward function was set).
@@ -56,11 +61,12 @@ class RewardResult:
                 raise ValueError(f"reward key required when reward fn returns a dict; got keys: {list(raw.keys())}")
             raw = dict(raw)  # don't mutate caller's dict
             reward = float(raw.pop("reward"))
+            session_rewards = {int(k): float(v) for k, v in (raw.pop("session_rewards", None) or {}).items()}
             # Metrics may be given as an explicit ``metrics`` sub-dict and/or as
             # extra top-level keys; both are merged (explicit wins on collision).
             explicit = raw.pop("metrics", None) or {}
             metrics = {**raw, **explicit}
-            return cls(reward=reward, metrics=metrics)
+            return cls(reward=reward, metrics=metrics, session_rewards=session_rewards)
         raise ValueError(f"reward fn returned {type(raw).__name__}; expected float, int, dict, RewardResult, or None.")
 
 

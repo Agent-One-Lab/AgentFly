@@ -78,6 +78,34 @@ class EpisodeSpec:
         }
 
 
+@dataclass(frozen=True)
+class BranchSpec(EpisodeSpec):
+    """A second leaf of an episode's tree, rolled out from a recorded branch point.
+
+    ``capture`` is what the strategy recorded at the branch point (:meth:`Rollout.capture_branch`): every
+    session's conversation and turn count, and the branching session's response to replay. ``snapshot`` is the
+    environment state then; the branch context carries it as ``env_snapshot`` and the environment hook restores
+    it instead of resetting.
+    """
+
+    branch_of: str = ""
+    tree_id: str = ""
+    leaf_id: int = 1
+    snapshot: Any = None
+    capture: Dict[str, Any] = None  # type: ignore[assignment]
+
+    @property
+    def info(self) -> Dict[str, Any]:
+        branch_turn = {"session_id": self.capture["session_id"], "turn": self.capture["turn"]}
+        return super().info | {
+            "env_snapshot": self.snapshot,
+            "tree_id": self.tree_id,
+            "leaf_id": self.leaf_id,
+            "branch_of": self.branch_of,
+            "branch_turn": branch_turn,
+        }
+
+
 def unwrap_reward(raw_reward: Any) -> Tuple[Optional[float], Dict[str, Any]]:
     """Split a stored reward into ``(reward value, reward metrics)``.
 
@@ -119,6 +147,13 @@ class Rollout:
             "tool_call_counts",
             "reward",
             "tool_metrics",
+            # branching (runtime-only; the trajectory carries them as typed fields)
+            "env_snapshot",
+            "branch",
+            "tree_id",
+            "leaf_id",
+            "branch_of",
+            "branch_turn",
         }
     )
 
@@ -139,6 +174,7 @@ class Rollout:
         on_no_tool_call: str = CONTROL_END,
         on_invalid_tool_call: str = CONTROL_END,
         on_tool_error: str = CONTROL_CONTINUE,
+        branch: bool = True,
     ):
         """Store the run's loop-control policy.
 
@@ -153,6 +189,9 @@ class Rollout:
         A tool that ran cleanly continues; a tool may override any of this by writing an
         explicit ``control`` on its result. Hard limits (context length, max turns) always
         end and are not governed here.
+
+        ``branch`` (default on): episodes that record a branch point get a second leaf (see
+        :meth:`plan_branches`); a validation run turns it off.
         """
         for label, val in (
             ("on_no_tool_call", on_no_tool_call),
@@ -164,6 +203,9 @@ class Rollout:
         self.on_no_tool_call = on_no_tool_call
         self.on_invalid_tool_call = on_invalid_tool_call
         self.on_tool_error = on_tool_error
+        # Branching: whether episodes that record a branch point (Context.record_branch_point) get a second leaf
+        # after the main episodes. Off for validation, where the extra leaves are cost without use.
+        self.branch = bool(branch)
         # Metrics x-axis; see resolve_global_step. A strategy instance is constructed per
         # run, so this counter only ever carries one run's step unless a caller supplies
         # its own — which is why callers that have a step counter should pass it.
@@ -342,6 +384,7 @@ class Rollout:
                 context_config=context_config,
             )
 
+        self.branch_points = {}
         async for event in self.run_episodes(
             specs,
             run_episode,
@@ -349,6 +392,23 @@ class Rollout:
             show_progress=show_progress,
         ):
             yield event
+
+        # Branching: a second leaf for every episode that recorded a branch point (Context.record_branch_point).
+        branch_specs = self.plan_branches(specs) if self.branch else []
+        if branch_specs:
+
+            def run_branch(spec: BranchSpec):
+                return self.run_branch_episode(
+                    agent, spec, max_turns=max_turns, generation_config=generation_config, context_config=context_config
+                )
+
+            async for event in self.run_episodes(
+                branch_specs,
+                run_branch,
+                max_concurrent_episodes=max_concurrent_episodes,
+                show_progress=show_progress,
+            ):
+                yield event
 
         self.metrics.record_step(global_step=step, trajectories=self.trajectories_in_order())
 
@@ -689,17 +749,20 @@ class Rollout:
     ) -> Trajectory:
         """Build the :class:`Trajectory` for one finished episode.
 
-        - ``reward`` (as stored by :meth:`compute_reward`) → ``Trajectory.reward`` and
-          ``Trajectory.metrics``; ``tool_metrics`` are merged into the metrics after it.
+        - ``reward`` (as stored by :meth:`compute_reward`) → ``Trajectory.reward``,
+          ``Trajectory.metrics`` and ``Trajectory.session_rewards``; ``tool_metrics`` are
+          merged into the metrics after it.
         - ``info`` gives the ids (``episode_id``, ``group_id``, ``episode_idx``,
           ``group_idx``); its other non-reserved keys (dataset-row fields like
           ``answer``, ``task_id``) become ``Trajectory.metadata``.
         """
         reward_value, metrics = unwrap_reward(reward)
         metrics.update(tool_metrics or {})
+        session_rewards = reward.session_rewards if isinstance(reward, RewardResult) else None
         return Trajectory(
             segments=segments,
             reward=reward_value,
+            session_rewards=session_rewards or None,
             metrics=metrics,
             finish_reason=finish_reason,
             rollout_time_sec=rollout_time_sec,
@@ -709,6 +772,10 @@ class Rollout:
             group_id=info.get("group_id"),
             episode_idx=info.get("episode_idx"),
             group_idx=info.get("group_idx"),
+            tree_id=info.get("tree_id") or info.get("episode_id"),
+            leaf_id=int(info.get("leaf_id", 0) or 0),
+            branch_of=info.get("branch_of"),
+            branch_turn=info.get("branch_turn"),
             metadata={k: v for k, v in info.items() if k not in self.RESERVED_INFO_KEYS},
             steps=steps,
             sessions=sessions or [],
@@ -745,7 +812,7 @@ class Rollout:
         info["rollout_time_sec"] = time.monotonic() - started_at
 
         self.metrics.record_episode(global_step=self.global_step, trajectory=transcript, info=info)
-        return self.make_trajectory(
+        trajectory = self.make_trajectory(
             info=info,
             segments=self.episode_segments(context, state),
             reward=info["reward"],
@@ -757,12 +824,147 @@ class Rollout:
             steps=self.records(state),
             sessions=self.session_entries(context, state, result),
         )
+        point = getattr(context, "branch_point", None)
+        if point is not None and "capture" in point:
+            self.branch_points[state.episode_id] = point  # the snapshot and capture stay here, out of the trajectory
+            trajectory.branch_point = {
+                "session_id": point["session_id"],
+                "turn": point["capture"]["turn"],
+                "payload": point["payload"],
+            }
+        return trajectory
+
+    # ---- branching ----
+
+    def capture_branch(self, context: Context, session_id: int) -> Dict[str, Any]:
+        """What a branch needs to resume the episode from this moment (called by
+        ``Context.record_branch_point`` from inside a tool call of ``session_id``): every session's conversation
+        (the view the model acts on next, i.e. without the turn being executed), its turns so far and its parent,
+        plus the response the branching session just gave, which the branch replays instead of sampling."""
+        sessions = []
+        for sid in sorted(context.sessions):
+            session = context.sessions[sid]
+            sessions.append(
+                {
+                    "id": sid,
+                    "parent_id": session.parent_id,
+                    "spawned_at": session.spawned_at,
+                    "agent": session.agent,
+                    "messages": deepcopy(self.transcript(session.state)[-1]),
+                    "turns": self.result(session.state).turns,
+                }
+            )
+        branching = context.sessions[session_id]
+        pending = self.pending_response(branching.state)
+        if pending is None:
+            raise RuntimeError("A branch point must be recorded from inside a tool call of the branching session.")
+        turns = self.result(branching.state).turns  # the pending turn counts: it is the last shared one
+        return {"session_id": session_id, "turn": turns - 1, "sessions": sessions, "response": pending}
+
+    def pending_response(self, state: LoopState) -> Optional[str]:
+        """The assistant response of the turn being executed (its tools are running), as text; ``None`` if the
+        session has none. Strategies implement it."""
+        raise NotImplementedError
+
+    def plan_branches(self, specs: List[EpisodeSpec]) -> List[BranchSpec]:
+        """One :class:`BranchSpec` per episode that recorded a branch point, numbered after the group's
+        episodes."""
+        by_id = {spec.episode_id: spec for spec in specs}
+        next_idx: Dict[str, int] = {}
+        for spec in specs:
+            next_idx[spec.group_id] = max(next_idx.get(spec.group_id, 0), spec.episode_idx + 1)
+        branches = []
+        for episode_id, point in self.branch_points.items():
+            spec = by_id.get(episode_id)
+            if spec is None or "capture" not in point:
+                continue
+            idx = next_idx[spec.group_id]
+            next_idx[spec.group_id] = idx + 1
+            branches.append(
+                BranchSpec(
+                    episode_id=str(uuid.uuid4()),
+                    group_id=spec.group_id,
+                    group_idx=spec.group_idx,
+                    episode_idx=idx,
+                    messages=spec.messages,
+                    branch_of=episode_id,
+                    tree_id=episode_id,
+                    leaf_id=1,
+                    snapshot=point["snapshot"],
+                    capture=point["capture"],
+                )
+            )
+        return branches
+
+    async def run_branch_episode(
+        self,
+        agent,
+        spec: BranchSpec,
+        *,
+        max_turns: int,
+        generation_config: Optional[Dict[str, Any]],
+        context_config: Optional[Any] = None,
+    ) -> AsyncIterator[Any]:
+        """Run a branch: a context carrying the environment snapshot, the recorded sessions rebuilt with their
+        original ids (frozen, resumable), the branching session resumed with its recorded response replayed, then
+        its remaining turns sampled; :meth:`finish_episode` as for any episode. Stage 1: the branching session is
+        the main agent (session 0); a deeper branching session is rejected here."""
+        started_at = time.monotonic()
+        capture = spec.capture
+        if capture["session_id"] != 0:
+            raise NotImplementedError("Branching below the main agent is not supported yet (stage 2).")
+        info = spec.info
+        context = self.make_context(
+            agent=agent, episode_id=spec.episode_id, group_id=spec.group_id, metadata=info, context_config=context_config
+        )
+        yield EpisodeStarted(episode_id=spec.episode_id, group_id=spec.group_id)
+        main_state = None
+        for entry in capture["sessions"]:
+            session_info = info if entry["id"] == 0 else {"episode_id": spec.episode_id}
+            session = self.add_session(
+                context, entry["agent"], deepcopy(entry["messages"]), info=session_info,
+                parent_id=entry["parent_id"], spawned_at=entry["spawned_at"],
+            )
+            assert session.id == entry["id"], "sessions must be rebuilt in id order"
+            session.state.depth = entry["turns"]
+            session.stats["context_turns"] = entry["turns"]  # its earlier turns are context in this leaf
+            if entry["id"] == capture["session_id"]:
+                main_state = session.state
+                # the recorded turn is re-executed: same turn index, replayed text (masked by the FORCED mark)
+                session.state.depth = capture["turn"]
+                session.stats["context_turns"] = capture["turn"]
+                self.set_forced_responses(session.state, [capture["response"]])
+        self.after_first_step_hook(main_state, context)
+        context.running.append(0)
+        try:
+            async for event in self.run_loop(
+                agent=agent,
+                context=context,
+                state=main_state,
+                tools=agent.prompt_tools(),
+                max_turns=max(1, max_turns - capture["turn"]),
+                generation_config=generation_config,
+            ):
+                yield event
+        finally:
+            context.running.pop()
+        trajectory = await self.finish_episode(agent, context, main_state, started_at=started_at)
+        trajectory.tree_id, trajectory.leaf_id = spec.tree_id, spec.leaf_id
+        trajectory.branch_of, trajectory.branch_turn = spec.branch_of, info["branch_turn"]
+        self.trajectories[spec.episode_id] = trajectory
+        yield EpisodeEnded(episode_id=spec.episode_id, finish_reason=trajectory.finish_reason)
+
+    def set_forced_responses(self, state: LoopState, responses: List[str]) -> None:
+        """Make the session's next turns replay ``responses`` instead of sampling. Strategies implement it."""
+        raise NotImplementedError
 
     def episode_segments(self, context: Context, state: LoopState) -> List[Segment]:
         """The episode's training segments, session by session: the main session's
         (``state``) as they are, then each subagent session's, recording the session and
         its agent's settings (``agent`` name, prompt ``tools``, ``max_model_len``)."""
-        segments = list(self.segments(state))
+        main = context.sessions.get(0)
+        context_turns = main.stats.get("context_turns", 0) if main is not None else 0
+        segments = [segment.model_copy(update={"trained_from_turn": context_turns}) for segment in self.segments(state)]
         for session_id in sorted(context.sessions):
             if session_id == 0:
                 continue
@@ -772,6 +974,7 @@ class Rollout:
                 "agent": session.agent.name,
                 "tools": session.agent.prompt_tools(),
                 "max_model_len": session.agent.max_model_len,
+                "trained_from_turn": session.stats.get("context_turns", 0),
             }
             segments.extend(segment.model_copy(update=settings) for segment in self.segments(session.state))
         return segments

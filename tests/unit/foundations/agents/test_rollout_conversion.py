@@ -120,8 +120,10 @@ def test_exporter_batch_contract(strategy_cls, multiple, entrypoint, fake_verl, 
                                rtol=0, atol=0)
     assert inputs["uid"].tolist() == ["G1", "G1"] + ["G2"] * (len(rows) - 2)
     assert inputs["uid"].dtype == object
-    # Main-agent rows: session 0, no agent name.
+    # Main-agent rows: session 0, no agent name, depth 0, the trajectory outcome as the session reward.
     assert inputs["session_id"].tolist() == [0] * len(rows) and inputs["agent_name"].tolist() == [""] * len(rows)
+    assert inputs["session_depth"].tolist() == [0] * len(rows)
+    assert inputs["session_reward"].tolist() == outcomes.tolist()
 
     is_step = strategy_cls is StepRollout
     missing = 0.0 if is_step else None
@@ -142,7 +144,9 @@ def test_exporter_batch_contract(strategy_cls, multiple, entrypoint, fake_verl, 
         np.testing.assert_array_equal(inputs[f"rm_{key}"], expected)
         assert inputs[f"rm_{key}"].dtype == expected.dtype
 
-    common_keys = set(original) | {"uid", "session_id", "agent_name", "rm_scores"} | {f"rm_{k}" for k in columns}
+    common_keys = set(original) | {"uid", "session_id", "agent_name", "session_reward", "session_depth", "rm_scores",
+                                   "tree_id", "leaf_id", "branch_boundary"}
+    common_keys |= {f"rm_{k}" for k in columns}
     if is_step:
         assert set(inputs) == common_keys | {
             "traj_uid", "anchor_obs", "step_env_reward", "is_action_valid", "active_masks",
@@ -256,6 +260,24 @@ def test_shared_conversion_uses_segments_without_runtime_steps_or_cached_state()
     assert repeats == [2, 0, 1]
     assert pad_size == 0
     assert result.model_dump() == original
+
+
+def test_rows_carry_their_session_reward_and_depth():
+    # Main agent (0), its subagent 1 (own reward 0), and 1's subagent 2 (no own reward: the outcome).
+    trajectory = Trajectory(
+        segments=[Segment(messages=[{"role": "assistant", "content": f"s{i}"}], session_id=i) for i in (0, 1, 2)],
+        group_id="G", reward=1.0, session_rewards={1: 0.0},
+        sessions=[{"session_id": 0, "parent_id": None}, {"session_id": 1, "parent_id": 0},
+                  {"session_id": 2, "parent_id": 1}],
+    )
+    inputs, indices, _, pad_size = build_segment_batch(
+        types.SimpleNamespace(tokenizer=None, processor=None), RunResult(trajectories=[trajectory]),
+        tokenize=lambda *args, **kwargs: fake_inputs(3), pad_to_multiple_of=4,
+    )
+    assert pad_size == 1 and indices[-1] == (0, 2)  # the padding row copies session 2's row
+    assert inputs["session_reward"].tolist() == [1.0, 0.0, 1.0, 1.0]
+    assert inputs["session_depth"].tolist() == [0, 1, 2, 2]
+    assert inputs["rm_scores"].sum(dim=-1).tolist() == [1.0, 1.0, 1.0, 1.0]  # still the trajectory outcome
 
 
 def test_shared_conversion_rejects_misaligned_token_rows():
@@ -673,3 +695,27 @@ def test_consistency_diagnostics_are_off_by_default(fake_verl, monkeypatch):
     batch = BaseAgent.to_verl_dataproto(types.SimpleNamespace(tokenizer=None, processor=None), result,
                                         pad_to_multiple_of=4)
     assert "token_drift" not in batch.meta_info
+
+
+def test_branch_rows_count_toward_the_groups_last_original_trajectory():
+    """The trainer repeats each task row (one per original episode) by ``repeat_times``; a branch leaf has no task
+    row of its own, so its rows (and any padding after them) count toward the last original episode of its group."""
+    from agentfly.agents.rollout.conversion import repeat_targets
+
+    def traj(group, episode_idx, branch_of=None, rows=1):
+        return Trajectory(
+            segments=[Segment(messages=[{"role": "assistant", "content": f"{group}{i}"}], session_id=0) for i in range(rows)],
+            group_id=group, group_idx=0 if group == "G" else 1, episode_idx=episode_idx, episode_id=f"{group}{episode_idx}",
+            reward=1.0, branch_of=branch_of, tree_id=branch_of or f"{group}{episode_idx}",  # as the rollout sets them
+        )
+
+    trajectories = [traj("G", 0), traj("G", 1, rows=2), traj("G", 2, branch_of="G0"), traj("H", 0), traj("H", 1, branch_of="H0", rows=2)]
+    assert repeat_targets(trajectories) == [0, 1, 1, 2, 2]
+    inputs, indices, repeats, pad_size = build_segment_batch(
+        types.SimpleNamespace(tokenizer=None, processor=None), RunResult(trajectories=trajectories),
+        tokenize=lambda *args, **kwargs: fake_inputs(7), pad_to_multiple_of=4,
+    )
+    assert indices == [(0, 0), (1, 0), (1, 1), (2, 0), (3, 0), (4, 0), (4, 1), (4, 1)] and pad_size == 1
+    assert repeats == [1, 3, 4] and sum(repeats) == len(indices)  # 3 original episodes (G0, G1, H0), 8 rows
+    assert inputs["tree_id"].tolist() == ["G0", "G1", "G1", "G0", "H0", "H0", "H0", "H0"]
+    assert inputs["leaf_id"].tolist() == [0, 0, 0, 0, 0, 0, 0, 0]  # leaf ids are set by the rollout, not inferred

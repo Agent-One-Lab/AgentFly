@@ -88,6 +88,29 @@ class Context:
         self._resource_acquired: Set[str] = set()
         self._default_ids: Dict[str, str] = {}  # spec key -> default resource id in this rollout
         self.last_acquire_was_first: bool = False
+        # Branching: a tool may mark one point of the episode to branch from (``record_branch_point``);
+        # the rollout strategy reads it when the episode ends and rolls out a second leaf from there.
+        self.branch_point: Optional[Dict[str, Any]] = None
+
+    def record_branch_point(self, snapshot: Any, session_id: int, payload: Optional[Dict[str, Any]] = None) -> bool:
+        """Mark the branch point of this episode: ``snapshot`` is the environment's state (``env.snapshot()``)
+        right before the acting session ``session_id`` continues, ``payload`` is whatever the branch needs to
+        know (the strategy copies it into the trajectory). One per episode: a second call is ignored and returns
+        False."""
+        if self.branch_point is not None:
+            return False
+        self.branch_point = {"snapshot": snapshot, "session_id": int(session_id), "payload": dict(payload or {})}
+        capture = getattr(self.rollout, "capture_branch", None)
+        if capture is not None:  # the strategy records the sessions' conversations so the branch can resume them
+            self.branch_point["capture"] = capture(self, int(session_id))
+        return True
+
+    @property
+    def env_snapshot(self) -> Any:
+        """The environment state a branch episode starts from (``None`` for an ordinary episode): the
+        strategy puts it in the metadata under ``env_snapshot``; an environment hook restores it instead of
+        resetting."""
+        return self.metadata.get("env_snapshot")
 
     @property
     def resource_engine(self):

@@ -5,6 +5,7 @@
 """
 
 import abc
+import copy
 from typing import Any
 
 
@@ -49,3 +50,17 @@ class BaseEnv(abc.ABC):
         This is the synchronous version of aclose.
         """
         raise NotImplementedError
+
+    # ---- branching (optional) ----
+    def snapshot(self) -> Any:
+        """The environment's state at this moment, for :meth:`restore` later (a rollout strategy
+        branches an episode from here). The default deep-copies the instance attributes, which fits a
+        pure-Python environment; an environment with external state (a container, a browser) overrides
+        both methods (a filesystem or git snapshot, a checkpoint) or leaves them unsupported.
+        """
+        return copy.deepcopy(self.__dict__)
+
+    def restore(self, state: Any) -> None:
+        """Put the environment back into ``state`` (what :meth:`snapshot` returned)."""
+        self.__dict__.clear()
+        self.__dict__.update(copy.deepcopy(state))

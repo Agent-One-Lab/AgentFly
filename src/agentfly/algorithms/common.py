@@ -243,6 +243,25 @@ def batch_field(data: Any, name: str, estimator: str, layout: str, optional: boo
     )
 
 
+def episode_outcomes(token_level_rewards: torch.Tensor, uid: np.ndarray, episode: np.ndarray):
+    """Each episode's outcome and each group's episodes, for ``per_segment`` batches, where every row
+    of an episode (its segments, subagent sessions, padding copies) carries the episode's outcome.
+
+    Returns ``(outcome, group_episodes)``: ``outcome[(uid, episode)]`` is the reward sum of the
+    episode's first row (a 0-dim tensor); ``group_episodes[uid]`` lists the group's episode keys in
+    batch order.
+    """
+    scores = token_level_rewards.sum(dim=-1)
+    outcome: Dict[Any, torch.Tensor] = {}
+    group_episodes: Dict[Any, list] = defaultdict(list)
+    for i in range(scores.shape[0]):
+        key = (uid[i], episode[i])
+        if key not in outcome:  # every row of an episode carries the same outcome
+            outcome[key] = scores[i]
+            group_episodes[uid[i]].append(key)
+    return outcome, dict(group_episodes)
+
+
 def compute_turn_ids(response_mask: torch.Tensor) -> torch.Tensor:
     """Map each token to its turn index, derived from the response mask.
 

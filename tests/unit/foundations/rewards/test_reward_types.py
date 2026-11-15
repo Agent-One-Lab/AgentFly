@@ -26,6 +26,13 @@ class TestRewardResultFromRaw:
         assert r.reward == 0.5
         assert r.metrics == {"f1": 0.8, "em": 1.0}
 
+    def test_from_raw_session_rewards_are_not_metrics(self):
+        r = RewardResult.from_raw({"reward": 1.0, "acc": 0.5, "session_rewards": {"1": 1, 2: 0.0}})
+        assert r.session_rewards == {1: 1.0, 2: 0.0}
+        assert r.metrics == {"acc": 0.5}
+        assert RewardResult.from_raw({"reward": 1.0}).session_rewards == {}
+        assert RewardResult.from_raw(0.5).session_rewards == {}
+
     def test_from_raw_dict_only_reward(self):
         r = RewardResult.from_raw({"reward": 0.3})
         assert r.reward == 0.3

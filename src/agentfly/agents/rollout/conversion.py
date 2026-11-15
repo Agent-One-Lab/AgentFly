@@ -148,11 +148,17 @@ def build_segment_batch(
     ``tokenize`` is the existing tokenization hook (including overrides), not a
     rollout object. The missing-value and dtype arguments preserve the exporters'
     current boundary behavior; they do not select a rollout or reward layout.
-    Every real segment receives the full trajectory outcome, never a fraction.
+    Every real segment receives the full trajectory outcome (``rm_scores``), never a fraction;
+    ``session_reward`` holds its session's own reward when the reward function gave one.
     """
     import torch  # lazy: importing rollout strategies must not load the trainer
 
     trajectories = run_result.trajectories
+    if any(segment.repeats_turns for trajectory in trajectories for segment in trajectory.segments):
+        raise ValueError(
+            "Cannot train on views that repeat earlier turns (a chain that dropped its oldest turns, "
+            "on_context_overflow='drop_oldest'): those turns would be trained twice. Use it for evaluation."
+        )
     row_indices = [
         (batch_idx, segment_idx)
         for batch_idx, trajectory in enumerate(trajectories)
@@ -181,6 +187,14 @@ def build_segment_batch(
     action_mask = inputs["action_mask"]
     if action_mask.ndim != 2 or action_mask.shape[0] != len(row_indices):
         raise ValueError("Tokenization must return one action-mask row per segment.")
+    # Branching: a view's first ``trained_from_turn`` assistant turns are context (generated in the source
+    # episode, or replayed), so their tokens leave the policy mask; a replayed (``forced``) turn too.
+    boundaries = []
+    for i, (b, s) in enumerate(row_indices):
+        segment = trajectories[b].segments[s]
+        skip = int(segment.trained_from_turn or 0)
+        skip += sum(1 for m in segment.messages if m.get("role") == "assistant" and m.get("forced"))
+        boundaries.append(mask_leading_assistant_turns(action_mask, i, skip))
     kept = action_mask.bool().any(dim=-1).nonzero(as_tuple=True)[0].tolist()
     if not kept:
         raise ValueError("No trainable segments: tokenization produced no action-mask tokens.")
@@ -200,9 +214,12 @@ def build_segment_batch(
         dtype=torch.float32,
     ).unsqueeze(dim=-1)
 
-    repeat_times = [0] * len(trajectories)
+    # ``repeat_times`` has one count per ORIGINAL trajectory (the trainer repeats each task row by it); a branch
+    # leaf's rows count toward the last original trajectory of its group, which they follow in the batch.
+    counts_toward = repeat_targets(trajectories)
+    repeat_times = [0] * sum(1 for t in trajectories if t.branch_of is None)
     for batch_idx, _ in row_indices:
-        repeat_times[batch_idx] += 1
+        repeat_times[counts_toward[batch_idx]] += 1
     align = pad_to_multiple_of
     pad_size = (align - len(row_indices) % align) % align if align and align > 1 else 0
     if pad_size:
@@ -220,15 +237,36 @@ def build_segment_batch(
         # The final trajectory can have no training rows. Padding belongs to
         # the trajectory whose last real row we actually repeat, not the final
         # entry in RunResult (the trainer uses these counts to repeat task data).
-        repeat_times[row_indices[-1][0]] += pad_size
+        repeat_times[counts_toward[row_indices[-1][0]]] += pad_size
         row_indices = row_indices + [row_indices[-1]] * pad_size
 
     row_trajectories = [trajectories[b] for b, _ in row_indices]
     inputs["uid"] = np.array([t.group_id for t in row_trajectories], dtype=object)
+    # Branching: the tree each row's episode belongs to, its leaf, and (on the branching session's rows of a
+    # branched episode) the token offset where the shared prefix ends, for tree-aware estimators.
+    inputs["tree_id"] = np.array([t.tree_id or t.episode_id or "" for t in row_trajectories], dtype=object)
+    inputs["leaf_id"] = np.array([int(t.leaf_id or 0) for t in row_trajectories], dtype=np.int32)
+    inputs["branch_boundary"] = np.array(
+        [branch_boundary(trajectories[b], trajectories[b].segments[s], action_mask, boundaries, i, row_indices)
+         for i, (b, s) in enumerate(row_indices)],
+        dtype=np.int64,
+    )
     # Which session and agent each row comes from (0 / "" for the main agent).
     row_segments = [trajectories[b].segments[s] for b, s in row_indices]
     inputs["session_id"] = np.array([seg.session_id for seg in row_segments], dtype=np.int32)
     inputs["agent_name"] = np.array([seg.agent or "" for seg in row_segments], dtype=object)
+    # Each row's own session reward (else the trajectory outcome) and the session's depth in the
+    # episode's agent tree, for estimators that credit sessions separately. ``rm_scores`` stays the
+    # trajectory outcome on every row.
+    depths = {}
+    for b, _ in row_indices:
+        if b not in depths:
+            depths[b] = session_depths(trajectories[b])
+    rows = list(zip(row_indices, row_segments))
+    inputs["session_reward"] = np.array(
+        [session_reward(trajectories[b], seg.session_id, missing_reward) for (b, _), seg in rows], dtype=np.float32
+    )
+    inputs["session_depth"] = np.array([depths[b].get(seg.session_id, 0) for (b, _), seg in rows], dtype=np.int32)
     metric_keys = sorted({key for t in trajectories for key in t.metrics})
     for key in metric_keys:
         inputs[f"rm_{key}"] = np.array(
@@ -236,6 +274,96 @@ def build_segment_batch(
             dtype=metric_dtype,
         )
     return inputs, row_indices, repeat_times, pad_size
+
+
+def mask_leading_assistant_turns(action_mask, row: int, turns: int) -> int:
+    """Zero the policy mask of the first ``turns`` assistant turns of ``action_mask[row]`` (each assistant turn
+    is one contiguous run of ones) and return the token offset just after the last masked run (0 if none)."""
+    if turns <= 0:
+        return 0
+    mask = action_mask[row]
+    ones = (mask > 0).tolist()
+    runs = 0
+    end = 0
+    i = 0
+    while i < len(ones) and runs < turns:
+        if ones[i]:
+            while i < len(ones) and ones[i]:
+                mask[i] = 0
+                i += 1
+            runs += 1
+            end = i
+        else:
+            i += 1
+    return end
+
+
+def repeat_targets(trajectories) -> List[int]:
+    """For each trajectory (in batch order), the position among the original (non-branch) trajectories whose
+    ``repeat_times`` entry its rows count toward: its own for an original, the group's last original before it for
+    a branch leaf (branch leaves are numbered after their group's episodes, so they follow it in the batch)."""
+    position: Dict[int, int] = {}
+    last_original: Dict[Any, int] = {}
+    targets = []
+    for i, trajectory in enumerate(trajectories):
+        if trajectory.branch_of is None:
+            position[i] = len(position)
+            last_original[trajectory.group_id] = i
+            targets.append(position[i])
+        else:
+            source = last_original.get(trajectory.group_id)
+            if source is None:
+                raise ValueError(f"Branch leaf {trajectory.episode_id} precedes every original episode of its group.")
+            targets.append(position[source])
+    return targets
+
+
+def branch_boundary(trajectory, segment, action_mask, boundaries, i: int, row_indices) -> int:
+    """Where the shared prefix of a branched tree ends in this row: for the branching session's view in the
+    branch leaf, the offset conversion masked up to; in the source leaf, the end of the (turn + 1)-th assistant
+    run of that session; -1 for every other row."""
+    if trajectory.branch_of is not None and trajectory.branch_turn and segment.session_id == trajectory.branch_turn["session_id"]:
+        return int(boundaries[i])
+    if trajectory.branch_point is not None and segment.session_id == trajectory.branch_point["session_id"]:
+        turns = int(trajectory.branch_point["turn"]) + 1
+        ones = (action_mask[i] > 0).tolist()
+        runs = end = 0
+        j = 0
+        while j < len(ones) and runs < turns:
+            if ones[j]:
+                while j < len(ones) and ones[j]:
+                    j += 1
+                runs += 1
+                end = j
+            else:
+                j += 1
+        return end
+    return -1
+
+
+def session_reward(trajectory, session_id: int, missing_reward: Optional[float]) -> float:
+    """The session's own reward (``Trajectory.session_rewards``), else the trajectory outcome."""
+    rewards = trajectory.session_rewards or {}
+    if session_id in rewards:
+        return float(rewards[session_id])
+    return float(trajectory.reward if trajectory.reward is not None else missing_reward)
+
+
+def session_depths(trajectory) -> Dict[int, int]:
+    """Each session's depth in the episode's agent tree (``Trajectory.sessions``): 0 for the main
+    agent, its parent's depth + 1 below it."""
+    parents = {entry["session_id"]: entry.get("parent_id") for entry in trajectory.sessions}
+    depths: Dict[int, int] = {}
+
+    def depth(session_id: int) -> int:
+        if session_id not in depths:
+            parent = parents.get(session_id)
+            depths[session_id] = 0 if session_id == 0 or parent is None else depth(parent) + 1
+        return depths[session_id]
+
+    for session_id in parents:
+        depth(session_id)
+    return depths
 
 
 def mark_reward_extras(inputs: Dict[str, Any]) -> List[str]:

@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 OWNED_MSG_KEYS = frozenset({"role", "content", "tool_calls", "loss", "status"})
 
 
+FORCED = "forced"  # message key: this assistant turn was replayed, not sampled
+
+
 def normalize_generate_response(responses: Any) -> Dict[str, Any]:
     """Unwrap a backend response to a single dict. ``ClientBackend`` returns a list of dicts."""
     if isinstance(responses, list) and len(responses) == 1:
@@ -65,9 +68,8 @@ def attach_token_ids(messages, responses) -> None:
     assistant span instead of re-tokenizing the decoded text, which removes
     retokenization "token drift" (the sampled sequence and the re-encoded text
     can tokenize differently, e.g. ``<think>``) and keeps native tool-call turns
-    exactly as sampled. The ids are the FULL generation even though the parsed
-    ``content`` may be truncated (e.g. at ``</action>``) — that matches training
-    on the sampled response like verl-agent's ``batch['responses']``.
+    exactly as sampled. The ids are the full generation; when the parser kept only a
+    prefix as ``content``, :func:`trim_token_ids_to_content` then cuts them to match.
 
     Only backends that expose ids set ``response_ids`` (the verl training
     backend); when absent nothing is attached and tokenization re-encodes text
@@ -79,6 +81,62 @@ def attach_token_ids(messages, responses) -> None:
     for msg, ids in zip(messages or [], response_ids):
         if isinstance(msg, dict) and ids is not None:
             msg["token_ids"] = list(ids)
+
+
+def _content_text(msg: Dict[str, Any]) -> Optional[str]:
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict) and content[0].get("type") == "text":
+        return content[0].get("text")
+    return None
+
+
+CONTENT_IS_PREFIX = "content_is_prefix"
+
+
+def trim_token_ids_to_content(messages, response_texts, tokenizer) -> int:
+    """Cut a message's sampled ``token_ids`` when its parser kept only a prefix of the response as
+    ``content`` on purpose and marked it with ``CONTENT_IS_PREFIX`` (ActionAgent's
+    ``truncate_history_at_action``), so the next prompt and the training row hold exactly that prefix,
+    not the full generation. The marker is removed here.
+
+    The ids are cut at the shortest prefix whose decoded text covers the kept text, and the content
+    becomes that decoded text, so text and ids agree (a token at the boundary may add a few
+    characters). Unmarked messages are left alone: other parsers' content can be a prefix of the
+    response too (native tool calls move the call text out of ``content``) while their ids must stay
+    whole. Returns the number of ids removed, over all messages."""
+    removed = 0
+    for msg, full in zip(messages or [], response_texts or []):
+        if not isinstance(msg, dict) or not msg.pop(CONTENT_IS_PREFIX, False):
+            continue
+        ids = msg.get("token_ids")
+        kept = _content_text(msg)
+        if tokenizer is None or not ids or not isinstance(full, str) or kept is None:
+            continue
+        if len(kept) >= len(full) or not full.startswith(kept):
+            continue
+
+        def decoded(k):
+            return tokenizer.decode(ids[:k], skip_special_tokens=True)
+
+        lo, hi = 1, len(ids)  # smallest k whose text is at least as long as the kept text
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if len(decoded(mid)) >= len(kept):
+                hi = mid
+            else:
+                lo = mid + 1
+        k = lo
+        while k < len(ids) and not decoded(k).startswith(kept):
+            k += 1  # decoded length is not strictly monotone around multi-byte characters
+        if k >= len(ids) or not decoded(k).startswith(kept):
+            continue
+        text = decoded(k)
+        removed += len(ids) - k
+        msg["token_ids"] = list(ids[:k])
+        msg["content"] = text if isinstance(msg.get("content"), str) else [{"type": "text", "text": text}]
+    return removed
 
 
 def extract_total_length(responses: dict) -> Optional[int]:
@@ -153,17 +211,24 @@ async def generate_response(
     :func:`attach_token_ids`). False leaves them off, so every later render re-encodes
     the message from text.
     """
-    effective_config = prepare_generation_config(agent, generation_config, current_step, tools=tools)
-    skills_payload = agent.skills_payload()
-    extra_kwargs = {"skills": skills_payload} if skills_payload else {}
-    extra_kwargs["tool_call_source"] = getattr(agent, "default_tool_call_source", "parser")
-    raw = await agent.generate_async(
-        [current_step.messages.messages],
-        return_dict=True,
-        tools=tools,
-        **extra_kwargs,
-        **effective_config,
-    )
+    forced = getattr(chain, "forced_responses", None)
+    forced_turn = bool(forced)
+    if forced_turn:
+        # A replayed turn (a branch re-enacts the turn it branches from): no sampling, no token ids.
+        raw = {"response_texts": [forced.pop(0)]}
+        use_token_ids = False
+    else:
+        effective_config = prepare_generation_config(agent, generation_config, current_step, tools=tools)
+        skills_payload = agent.skills_payload()
+        extra_kwargs = {"skills": skills_payload} if skills_payload else {}
+        extra_kwargs["tool_call_source"] = getattr(agent, "default_tool_call_source", "parser")
+        raw = await agent.generate_async(
+            [current_step.messages.messages],
+            return_dict=True,
+            tools=tools,
+            **extra_kwargs,
+            **effective_config,
+        )
     responses = normalize_generate_response(raw)
     response_texts = responses.get("response_texts")
     # The prompt each response was sampled from goes to the parser directly, not through
@@ -175,12 +240,19 @@ async def generate_response(
         trajectory_segments=[current_step.messages.messages],
     )
     overlay_raw_message_fields(new_msg, responses)
+    removed = 0
     if use_token_ids:
         attach_token_ids(new_msg, responses)
+        removed = trim_token_ids_to_content(new_msg, response_texts, getattr(agent, "tokenizer", None))
     else:
         # Also drop ids a server may have returned on the raw message (overlaid above).
         for msg in new_msg or []:
             if isinstance(msg, dict):
                 msg.pop("token_ids", None)
+                msg.pop(CONTENT_IS_PREFIX, None)
     total_length = extract_total_length(responses)
+    if total_length is not None and removed:
+        total_length -= removed
+    if forced_turn and isinstance(new_msg[0], dict):
+        new_msg[0][FORCED] = True  # a replayed turn: conversion treats it as prefix, not as a policy target
     return (new_msg[0], total_length)

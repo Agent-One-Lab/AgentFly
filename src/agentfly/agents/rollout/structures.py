@@ -114,6 +114,12 @@ class Chain:
         self.root: Optional[Step] = None
         self.info: Dict[str, Any] = info
         self.histories: List[List[Dict[str, Any]]] = []
+        # Responses to use instead of sampling, in order (a branch replays the recorded turn it branches from;
+        # tests replay scripts). ``generate_response`` pops the first one; empty means sample.
+        self.forced_responses: List[str] = []
+        # Indices into ``histories`` of the views after which old turns were dropped
+        # (ChainRollout's on_context_overflow="drop_oldest"); the next view repeats turns.
+        self.dropped_after: List[int] = []
 
     def add_step(
         self,

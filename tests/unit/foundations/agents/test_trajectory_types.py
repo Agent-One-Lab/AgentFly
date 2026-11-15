@@ -40,7 +40,8 @@ class TestSegment:
         assert isinstance(segment, Segment)
         assert segment.messages == messages
         assert result.model_dump()["trajectories"][0]["segments"] == [
-            {"messages": messages, "session_id": 0, "agent": None, "tools": None, "max_model_len": None},
+            {"messages": messages, "session_id": 0, "agent": None, "tools": None, "max_model_len": None,
+             "repeats_turns": False, "trained_from_turn": 0},
         ]
 
     def test_bare_message_lists_are_not_a_second_segment_representation(self):
@@ -64,6 +65,7 @@ class TestTrajectoryConstruction:
         t = Trajectory(segments=[Segment(messages=[{"role": "user", "content": "hi"}])])
         assert t.reward is None
         assert t.segment_rewards is None
+        assert t.session_rewards is None
         assert t.metrics == {}
         assert t.metadata == {}
         assert t.runtime_info == {}
@@ -91,6 +93,12 @@ class TestTrajectoryConstruction:
         assert t.metadata == {"answer": "42", "task_id": 7}
         assert t.episode_id == "cid-1"
         assert t.finish_reason == "terminal"
+
+
+    def test_session_rewards_survive_json(self):
+        t = Trajectory(segments=[Segment(messages=[])], reward=1.0, session_rewards={1: 0.0, 2: 1.0})
+        restored = Trajectory.model_validate_json(t.model_dump_json())
+        assert restored.session_rewards == {1: 0.0, 2: 1.0}
 
 
 class TestTrajectoryDerivedProperties:

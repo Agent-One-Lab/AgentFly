@@ -39,6 +39,11 @@ TOOL_OBS_PREFIX_TOKENS = 15
 # that drift. Env-overridable.
 TOKEN_SAFETY_MARGIN = int(os.environ.get("AGENTFLY_TOKEN_SAFETY_MARGIN", "512"))
 
+# What a chain does when its prompt reaches max_model_len - TOKEN_SAFETY_MARGIN.
+CONTEXT_OVERFLOW_END = "end"  # the episode ends (FinishReason.MAX_MODEL_LEN)
+CONTEXT_OVERFLOW_DROP_OLDEST = "drop_oldest"  # the oldest turns are dropped and the chain goes on
+CONTEXT_OVERFLOW_MODES = (CONTEXT_OVERFLOW_END, CONTEXT_OVERFLOW_DROP_OLDEST)
+
 logger = logging.getLogger(__name__)
 
 
@@ -122,8 +127,15 @@ class ChainRollout(Rollout):
         max_consecutive_no_tool_calls: int = 3,
         no_tool_call_message: Optional[str] = NO_TOOL_CALL_MESSAGE_MINISWE,
         project_actions: bool = False,
+        on_context_overflow: str = CONTEXT_OVERFLOW_END,
+        branch: bool = True,
     ):
         """See :meth:`Rollout.__init__` for the loop-control policy.
+
+        ``on_context_overflow`` is what happens when the prompt reaches
+        ``max_model_len - TOKEN_SAFETY_MARGIN``: ``"end"`` (default) ends the episode;
+        ``"drop_oldest"`` drops the oldest turns and goes on (see :meth:`drop_oldest_turns`),
+        as SERA's sliding window. Its views repeat turns, so its results are for evaluation.
 
         Under ``on_no_tool_call="continue"`` the loop mirrors mini-swe-agent's format-error
         handling: a tool-less turn gets a corrective **user** message (the nudge) and the
@@ -135,6 +147,7 @@ class ChainRollout(Rollout):
         any other string is used verbatim, and ``None`` continues silently (no nudge).
         """
         super().__init__(
+            branch=branch,
             on_no_tool_call=on_no_tool_call,
             on_invalid_tool_call=on_invalid_tool_call,
             on_tool_error=on_tool_error,
@@ -159,6 +172,9 @@ class ChainRollout(Rollout):
         # ONLY on env done or max_turns. Keeps the two rollouts' termination identical
         # so step-vs-chain comparisons don't confound rollout type with early exits.
         self.project_actions = project_actions
+        if on_context_overflow not in CONTEXT_OVERFLOW_MODES:
+            raise ValueError(f"on_context_overflow must be one of {CONTEXT_OVERFLOW_MODES}, got {on_context_overflow!r}")
+        self.on_context_overflow = on_context_overflow
 
     # ---- the strategy contract ----
 
@@ -173,8 +189,13 @@ class ChainRollout(Rollout):
         return [*state.chain.histories, state.current_step.messages.messages]
 
     def segments(self, state: ChainState) -> List[Segment]:
-        """One segment per view of :meth:`transcript` (several when context tools fold)."""
-        return [Segment(messages=messages) for messages in self.transcript(state)]
+        """One segment per view of :meth:`transcript` (several when context tools fold, or when
+        old turns were dropped: the view after each drop repeats turns, ``repeats_turns``)."""
+        dropped_after = set(state.chain.dropped_after)
+        return [
+            Segment(messages=messages, repeats_turns=(i - 1) in dropped_after)
+            for i, messages in enumerate(self.transcript(state))
+        ]
 
     def records(self, state: ChainState) -> List[Step]:
         """The chain's steps that carry a tool result."""
@@ -186,6 +207,18 @@ class ChainRollout(Rollout):
             finish_reason=state.info.get("finish_reason"),
             turns=sum(step.type == "Thought" for step in state.chain.steps()),
         )
+
+    def pending_response(self, state: ChainState) -> Optional[str]:
+        """The assistant text of the turn whose tools are running: the chain's last step is the Thought step
+        holding the prompt plus that response (``run_turn`` adds it before executing tools)."""
+        last = state.chain.steps()[-1]
+        messages = last.messages.messages
+        if last.type != "Thought" or not messages or messages[-1].get("role") != "assistant":
+            return None
+        return message_text(messages[-1])
+
+    def set_forced_responses(self, state: ChainState, responses: List[str]) -> None:
+        state.chain.forced_responses = list(responses)
 
     def add_message(self, agent, state: ChainState, message: Dict) -> None:
         """Continue the conversation with ``message``: a new step after the current one,
@@ -339,8 +372,16 @@ class ChainRollout(Rollout):
                         f"slips_through={exact >= 0 and exact > max_model_len and incr < max_model_len}"
                     )
 
-        # 1. Pre-check: stop before generating if already at/over the context limit.
-        if max_model_len is not None and current_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN:
+        # 1. Pre-check: stop before generating if already at/over the context limit
+        # (or, under on_context_overflow="drop_oldest", drop old turns to make room).
+        if (
+            max_model_len is not None
+            and current_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
+            and not (
+                self.on_context_overflow == CONTEXT_OVERFLOW_DROP_OLDEST
+                and self.drop_oldest_turns(agent, chain, current_step, tools)
+            )
+        ):
             current_step.is_terminal = True
             chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
             yield TurnResult(current_step, have_set_resources, False)
@@ -422,8 +463,13 @@ class ChainRollout(Rollout):
         if tool_calls:
             # A tool-carrying turn resets mini-swe's consecutive format-error streak.
             chain.info["no_tool_call_streak"] = 0
-        if max_model_len is not None and thought_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN:
-            # Hard limit: context length exceeded — always end.
+        ends_at_limit = self.on_context_overflow == CONTEXT_OVERFLOW_END
+        if (
+            ends_at_limit
+            and max_model_len is not None
+            and thought_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
+        ):
+            # Hard limit: context length exceeded (drop_oldest makes room before the next turn instead).
             thought_step.is_terminal = True
             chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
         elif not tool_calls:
@@ -477,7 +523,11 @@ class ChainRollout(Rollout):
             nudge_step.total_token_length = (
                 thought_step.total_token_length + observation_token_length(agent, nudge) + TOOL_OBS_PREFIX_TOKENS
             )
-            if max_model_len is not None and nudge_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN:
+            if (
+                ends_at_limit
+                and max_model_len is not None
+                and nudge_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
+            ):
                 nudge_step.is_terminal = True
                 chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
                 yield TurnResult(nudge_step, have_set_resources, False)
@@ -606,7 +656,8 @@ class ChainRollout(Rollout):
 
             # Terminate if context length exceeded after this tool observation
             if (
-                max_model_len is not None
+                self.on_context_overflow == CONTEXT_OVERFLOW_END
+                and max_model_len is not None
                 and action_input_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
             ):
                 action_input_step.is_terminal = True
@@ -655,6 +706,43 @@ class ChainRollout(Rollout):
                 break
 
         yield ToolLoopResult(action_input_step, num_tool_calls, have_set_resources, terminated=False)
+
+    def drop_oldest_turns(self, agent, chain: Chain, step: Step, tools: List[Dict]) -> bool:
+        """Make room in ``step``'s prompt by dropping its oldest turns, as SERA's sliding window.
+
+        The leading system and user messages (the task) stay. Then whole turns (an assistant
+        message and the messages after it) are dropped from the oldest until the prompt is
+        below ``max_model_len - TOKEN_SAFETY_MARGIN``; the newest turn is always kept. The view
+        before dropping is stored in ``chain.histories``, a segment of its own, as context
+        folding does; the next view repeats turns of it (see :meth:`segments`). Returns False,
+        changing nothing, when even the newest turn alone does not fit.
+        """
+        messages = list(step.messages.messages)
+        head = 0
+        while head < len(messages) and messages[head].get("role") in ("system", "user"):
+            head += 1
+        turns: List[List[Dict]] = []
+        for message in messages[head:]:
+            if message.get("role") == "assistant" or not turns:
+                turns.append([message])
+            else:
+                turns[-1].append(message)
+        limit = agent.max_model_len - TOKEN_SAFETY_MARGIN
+        original = step.messages
+        while len(turns) > 1:
+            turns.pop(0)
+            step.messages = Messages.from_turns(
+                messages[:head] + [m for turn in turns for m in turn], **original.meta
+            )
+            tokens = estimate_chat_prompt_tokens(agent, step, tools=tools, cap=False)
+            if tokens < limit:
+                chain.histories.append(original.messages)
+                chain.dropped_after.append(len(chain.histories) - 1)
+                chain.info["context_drops"] = chain.info.get("context_drops", 0) + 1
+                step.total_token_length = tokens
+                return True
+        step.messages = original
+        return False
 
     def apply_context_folding(
         self,
