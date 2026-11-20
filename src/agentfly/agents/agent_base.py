@@ -41,6 +41,7 @@ from .types import RunResult, Trajectory
 from .utils import tool_parser
 from .utils.messages import MessagesList
 from .utils.tokenizer import create_processor, create_tokenizer, get_jinja_template
+from .utils.reasoning_parser import check_reasoning_template, create_reasoning_parser
 from .utils.tool_parser import create_tool_parser
 
 if TYPE_CHECKING:
@@ -82,6 +83,8 @@ class BaseAgent(ABC):
         local_cache_dir: str = None,
         tool_parser: Optional[Any] = None,
         tool_parser_name: Optional[str] = None,
+        reasoning_parser: Optional[Any] = None,
+        reasoning_parser_name: Optional[str] = None,
         default_tool_call_source: str = "parser",
         render_tools_in_prompt: bool = True,
         subagents: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -105,6 +108,8 @@ class BaseAgent(ABC):
                 Defaults to {"backend": "async_vllm"}.
             tool_parser: Optional tool parser instance from vLLM. If provided, will be used for parsing tool calls.
             tool_parser_name: Optional name of the tool parser to use (e.g., "hermes", "pythonic"). If provided and tool_parser is None, will create a parser using this name.
+            reasoning_parser: Optional vLLM reasoning parser instance. With one, each generated turn is stored as ``reasoning_content`` + ``content`` (tool calls are parsed from the content), for chat templates that require a separate reasoning field (e.g. K2-Horizon).
+            reasoning_parser_name: Optional name of the vLLM reasoning parser to use (e.g., "k2_horizon"). If provided and reasoning_parser is None, will create a parser using this name.
             default_tool_call_source: Which tool calls to use when both are available. ``"parser"`` (default) re-parses
                 the response text with the agent's own tool parser (falling back to backend-provided tool calls only
                 when no parser is set); ``"backend"`` prefers tool calls already parsed by the inference backend
@@ -138,6 +143,8 @@ class BaseAgent(ABC):
             reward_fn=reward_fn,
             tool_parser=tool_parser,
             tool_parser_name=tool_parser_name,
+            reasoning_parser=reasoning_parser,
+            reasoning_parser_name=reasoning_parser_name,
             default_tool_call_source=default_tool_call_source,
             render_tools_in_prompt=render_tools_in_prompt,
             subagents=subagents,
@@ -232,6 +239,16 @@ class BaseAgent(ABC):
 
         if settings.get("tool_parser") is not None and settings.get("tool_parser_name") is not None:
             raise ValueError("Cannot specify both tool_parser and tool_parser_name. Use only one.")
+        if settings.get("reasoning_parser") is not None and settings.get("reasoning_parser_name") is not None:
+            raise ValueError("Cannot specify both reasoning_parser and reasoning_parser_name. Use only one.")
+        has_reasoning_parser = (
+            settings.get("reasoning_parser") is not None or settings.get("reasoning_parser_name") is not None
+        )
+        if has_reasoning_parser and settings.get("strip_reasoning"):
+            raise ValueError(
+                "strip_reasoning drops the reasoning from each turn; a reasoning parser keeps it as "
+                "reasoning_content. Use only one."
+            )
 
         # Names and import references ("pkg.mod:tool") are resolved by AutoAgent and the training
         # config; constructing an agent directly takes the objects themselves.
@@ -274,6 +291,8 @@ class BaseAgent(ABC):
         reward_fn: Optional[Callable] = None,
         tool_parser: Optional[Any] = None,
         tool_parser_name: Optional[str] = None,
+        reasoning_parser: Optional[Any] = None,
+        reasoning_parser_name: Optional[str] = None,
         default_tool_call_source: str = "parser",
         render_tools_in_prompt: bool = True,
         subagents: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -297,6 +316,8 @@ class BaseAgent(ABC):
             reward_fn=reward_fn,
             tool_parser=tool_parser,
             tool_parser_name=tool_parser_name,
+            reasoning_parser=reasoning_parser,
+            reasoning_parser_name=reasoning_parser_name,
             default_tool_call_source=default_tool_call_source,
             render_tools_in_prompt=render_tools_in_prompt,
             subagents=subagents,
@@ -315,6 +336,18 @@ class BaseAgent(ABC):
         self.tool_parser = tool_parser
         if self.tool_parser is None and tool_parser_name is not None:
             self.tool_parser = create_tool_parser(tool_parser_name, self.tokenizer)
+        # With a reasoning parser, each generated turn is stored as reasoning_content + content (see
+        # ``utils.reasoning_parser``); without one, as a single text, as before.
+        self.reasoning_parser = reasoning_parser
+        if self.reasoning_parser is None and reasoning_parser_name is not None:
+            self.reasoning_parser = create_reasoning_parser(reasoning_parser_name, self.tokenizer)
+        check_reasoning_template(
+            getattr(self, "template", None),
+            self.tokenizer,
+            self.reasoning_parser,
+            reasoning_parser_name,
+            raw_text_backend=getattr(self, "backend", None) != "client",
+        )
         self.subagents = subagents
 
     def derive(self, **settings) -> "BaseAgent":

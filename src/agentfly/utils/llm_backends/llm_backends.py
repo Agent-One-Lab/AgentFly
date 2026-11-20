@@ -15,7 +15,7 @@ import random
 import time
 import uuid
 from functools import partial
-from typing import TYPE_CHECKING, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Union
 
 import httpx
 import numpy as np
@@ -570,6 +570,7 @@ class AsyncVerlBackend(LLMBackend):
             "tools": tools_list,
             "data_source": data_source_list,
         }
+        routed_starts = None
         if prompt_ids is not None:
             # One object per row (rows differ in length; a plain np.array would try to
             # build a 2-D int array).
@@ -577,6 +578,12 @@ class AsyncVerlBackend(LLMBackend):
             for i, ids in enumerate(prompt_ids):
                 prompt_ids_arr[i] = ids
             data["prompt_ids"] = prompt_ids_arr
+            # Rollout routing replay: the positions whose expert choices earlier turns already returned
+            # (0 when there are none, or when the prompt is no longer the sequence they were recorded for).
+            from ...agents.rollout.loop.routing import held_rows
+
+            routed_starts = [held_rows(messages, ids) for messages, ids in zip(original_messages_list, prompt_ids)]
+            data["routed_experts_prompt_start"] = np.array(routed_starts, dtype=np.int64)
 
         if "temperature" in kwargs:
             generation_config["temperature"] = kwargs["temperature"]
@@ -604,7 +611,7 @@ class AsyncVerlBackend(LLMBackend):
         if return_dict:
             total_lengths = gb["attention_mask"].sum(dim=1)
 
-            return {
+            result = {
                 "response_texts": response_texts,
                 # Generated token ids, verbatim: consumed downstream as the
                 # assistant message's ``token_ids`` so training splices the
@@ -612,8 +619,36 @@ class AsyncVerlBackend(LLMBackend):
                 "response_ids": response_ids,
                 "total_lengths": total_lengths,
             }
+            result.update(self._rollout_signals(gb, prompt_ids, response_ids, routed_starts))
+            return result
 
         return response_texts
+
+
+    @staticmethod
+    def _rollout_signals(gb, prompt_ids, response_ids, routed_starts) -> Dict[str, Any]:
+        """What the engine reported about its sampling, per response (see ``agents.rollout.loop.routing``):
+        ``response_logprobs`` with ``rollout.calculate_log_probs``, and ``routed_experts`` (the rows from each
+        request's start position on) with ``rollout.enable_rollout_routing_replay``."""
+        signals = {}
+        keys = gb.keys()
+        if "rollout_log_probs" in keys:
+            log_probs = gb["rollout_log_probs"]
+            signals["response_logprobs"] = [log_probs[i, : len(ids)].tolist() for i, ids in enumerate(response_ids)]
+        if "routed_experts" in keys and prompt_ids is not None:
+            from ...agents.rollout.loop.routing import RoutedRows, digest
+
+            routed = gb["routed_experts"]
+            prompt_width = gb["prompts"].shape[1]
+            signals["routed_experts"] = []
+            for i, (prompt, sampled) in enumerate(zip(prompt_ids, response_ids)):
+                start = int(routed_starts[i]) if routed_starts is not None else 0
+                count = (len(prompt) - start) + max(len(sampled) - 1, 0)
+                # verl left-pads the prompt and places the returned rows from the prompt's first column on
+                first = prompt_width - len(prompt)
+                rows = routed[i, first : first + count].cpu().numpy().copy()
+                signals["routed_experts"].append(RoutedRows(rows, start, len(prompt), digest(prompt)))
+        return signals
 
 
 class ClientBackend(LLMBackend):

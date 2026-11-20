@@ -527,6 +527,25 @@ def chain_to_dataproto(
         "repeat_times": repeat_times,
         "reward_extra_keys": mark_reward_extras(inputs),
     }
+    # The rollout engine's own log-probabilities and routed-expert choices (rollout routing replay), aligned
+    # with the rows' token ids. A row whose record does not fit its ids trains on nothing rather than with
+    # the wrong experts; if that were every row, the rows are kept and train with free routing instead.
+    from .loop.routing import assemble_batch
+
+    record = assemble_batch(
+        [trajectories[b].segments[s].messages for b, s in row_indices[:n_real]], inputs, len(row_indices)
+    )
+    if record is not None:
+        inputs.update(record["tensors"])
+        mismatched = record["mismatched"]
+        if mismatched and len(mismatched) < n_real:
+            inputs["action_mask"][mismatched] = 0
+        elif mismatched:
+            inputs.pop("routed_experts", None)
+            logger.warning("[ChainRollout] no row's routed-expert record fits its token ids; training with free routing")
+        meta_info["rollout_record"] = {"rows": n_real, "mismatched": len(mismatched), **record["statuses"]}
+        if record["statuses"]:
+            logger.info(f"[ChainRollout] routed-expert record: {record['statuses']}")
     if drift:
         meta_info["token_drift"] = drift
     try:

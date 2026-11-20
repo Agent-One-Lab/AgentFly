@@ -12,6 +12,8 @@ Token estimation lives in :mod:`.tokens`. The pure helpers take only their data.
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from ...utils.reasoning_parser import REASONING_KEYS, split_reasoning
+from .routing import attach_rollout_signals, drop_rollout_signals, sync_rollout_signals
 from .tokens import estimate_chat_prompt_tokens
 
 if TYPE_CHECKING:
@@ -83,6 +85,53 @@ def attach_token_ids(messages, responses) -> None:
             msg["token_ids"] = list(ids)
 
 
+REASONING_UNCLOSED = "reasoning_unclosed"  # message key: the turn ended (token limit) before its reasoning closed
+
+
+def split_reasoning_responses(agent, response_texts, responses) -> Tuple[Any, Optional[List[Optional[Dict[str, Any]]]]]:
+    """With a reasoning parser on the agent, split each raw response into reasoning and answer.
+
+    Returns ``(texts to parse, splits)``. ``splits`` is None without a parser; otherwise one entry per response:
+    None when the response is left whole (the backend already returned a reasoning field for it), or
+    ``{"reasoning", "head", "unclosed"}``. ``head`` is the part of the raw response before the answer (reasoning
+    and its closing tag), or None when the answer is not the tail of the response; the sampled ids cover
+    ``head`` + answer.
+    """
+    parser = getattr(agent, "reasoning_parser", None)
+    if parser is None or not response_texts:
+        return response_texts, None
+    rd = responses.get("response_dict") if isinstance(responses, dict) else None
+    choices = (rd or {}).get("choices") or []
+    end_token = getattr(parser, "end_token", None)
+    texts, splits = [], []
+    for i, text in enumerate(response_texts):
+        raw = ((choices[i] or {}).get("message") or {}) if i < len(choices) else {}
+        if not isinstance(text, str) or any(raw.get(k) is not None for k in REASONING_KEYS):
+            texts.append(text)
+            splits.append(None)
+            continue
+        reasoning, content = split_reasoning(parser, text)
+        texts.append(content)
+        splits.append(
+            {
+                "reasoning": reasoning,
+                "head": text[: len(text) - len(content)] if text.endswith(content) else None,
+                "unclosed": isinstance(end_token, str) and end_token not in text,
+            }
+        )
+    return texts, splits
+
+
+def attach_reasoning(messages, splits) -> None:
+    """Put each split response's reasoning on its assistant message as ``reasoning_content``."""
+    for msg, split in zip(messages or [], splits or []):
+        if not isinstance(msg, dict) or split is None:
+            continue
+        msg["reasoning_content"] = split["reasoning"]
+        if split["unclosed"]:
+            msg[REASONING_UNCLOSED] = True
+
+
 def _content_text(msg: Dict[str, Any]) -> Optional[str]:
     content = msg.get("content")
     if isinstance(content, str):
@@ -95,7 +144,7 @@ def _content_text(msg: Dict[str, Any]) -> Optional[str]:
 CONTENT_IS_PREFIX = "content_is_prefix"
 
 
-def trim_token_ids_to_content(messages, response_texts, tokenizer) -> int:
+def trim_token_ids_to_content(messages, response_texts, tokenizer, splits=None) -> int:
     """Cut a message's sampled ``token_ids`` when its parser kept only a prefix of the response as
     ``content`` on purpose and marked it with ``CONTENT_IS_PREFIX`` (ActionAgent's
     ``truncate_history_at_action``), so the next prompt and the training row hold exactly that prefix,
@@ -105,15 +154,29 @@ def trim_token_ids_to_content(messages, response_texts, tokenizer) -> int:
     becomes that decoded text, so text and ids agree (a token at the boundary may add a few
     characters). Unmarked messages are left alone: other parsers' content can be a prefix of the
     response too (native tool calls move the call text out of ``content``) while their ids must stay
-    whole. Returns the number of ids removed, over all messages."""
+    whole. Returns the number of ids removed, over all messages.
+
+    ``splits`` (see :func:`split_reasoning_responses`): for a response split into reasoning and answer, the
+    ids also cover the reasoning before the answer (``head``), so the kept text is ``head`` + content. When
+    the answer is not the tail of the response the ids cannot be cut to it, and they are dropped (the turn
+    is then re-encoded from its text)."""
     removed = 0
-    for msg, full in zip(messages or [], response_texts or []):
+    splits = splits or []
+    for i, (msg, full) in enumerate(zip(messages or [], response_texts or [])):
         if not isinstance(msg, dict) or not msg.pop(CONTENT_IS_PREFIX, False):
             continue
         ids = msg.get("token_ids")
         kept = _content_text(msg)
+        split = splits[i] if i < len(splits) else None
+        head = ""
+        if split is not None:
+            if split["head"] is None:
+                msg.pop("token_ids", None)
+                continue
+            head = split["head"]
         if tokenizer is None or not ids or not isinstance(full, str) or kept is None:
             continue
+        kept = head + kept
         if len(kept) >= len(full) or not full.startswith(kept):
             continue
 
@@ -133,6 +196,9 @@ def trim_token_ids_to_content(messages, response_texts, tokenizer) -> int:
         if k >= len(ids) or not decoded(k).startswith(kept):
             continue
         text = decoded(k)
+        if not text.startswith(head):
+            continue
+        text = text[len(head):]
         removed += len(ids) - k
         msg["token_ids"] = list(ids[:k])
         msg["content"] = text if isinstance(msg.get("content"), str) else [{"type": "text", "text": text}]
@@ -233,18 +299,26 @@ async def generate_response(
     response_texts = responses.get("response_texts")
     # The prompt each response was sampled from goes to the parser directly, not through
     # ``context.metadata``, which every conversation of the episode shares.
+    # With a reasoning parser, the answer alone is parsed (tool calls are not read out of the reasoning) and
+    # the reasoning is stored beside it; the sampled ids stay whole.
+    parse_texts, splits = split_reasoning_responses(agent, response_texts, responses)
     new_msg = agent.parse(
-        response_texts,
+        parse_texts,
         tool_calls=responses.get("tool_calls"),
         context=context,
         trajectory_segments=[current_step.messages.messages],
     )
     overlay_raw_message_fields(new_msg, responses)
+    attach_reasoning(new_msg, splits)
     removed = 0
     if use_token_ids:
         attach_token_ids(new_msg, responses)
-        removed = trim_token_ids_to_content(new_msg, response_texts, getattr(agent, "tokenizer", None))
+        removed = trim_token_ids_to_content(new_msg, response_texts, getattr(agent, "tokenizer", None), splits)
+        # The engine's log-probabilities and routed-expert rows describe the sampled ids one for one.
+        attach_rollout_signals(new_msg, responses)
+        sync_rollout_signals(new_msg)
     else:
+        drop_rollout_signals(new_msg)
         # Also drop ids a server may have returned on the raw message (overlaid above).
         for msg in new_msg or []:
             if isinstance(msg, dict):
