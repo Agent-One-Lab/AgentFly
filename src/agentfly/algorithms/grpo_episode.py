@@ -32,8 +32,12 @@ def compute_grpo_episode_advantage(
     and std over the group's episodes, one score per episode. A group with one episode gets 0, as
     in verl's GRPO. Returns ``(advantages, returns)``; they are equal, as in verl."""
     episode_score, group_episodes = episode_outcomes(token_level_rewards, uid, episode)
-    stats = {}  # mean and std of groups with more than one episode
+    # A discarded episode has no policy tokens: it has no outcome, so it must not pull down its group's baseline.
+    has_tokens = response_mask.bool().any(dim=-1)
+    valid = {(uid[i], episode[i]) for i in range(len(uid)) if has_tokens[i]}
+    stats = {}  # mean and std of groups with more than one valid episode
     for group, keys in group_episodes.items():
+        keys = [key for key in keys if key in valid]
         if len(keys) > 1:
             stacked = torch.stack([episode_score[key] for key in keys])
             stats[group] = (stacked.mean(), stacked.std())

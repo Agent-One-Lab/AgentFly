@@ -9,6 +9,7 @@ raises) follows the rollout's run policy.
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -42,7 +43,12 @@ TOKEN_SAFETY_MARGIN = int(os.environ.get("AGENTFLY_TOKEN_SAFETY_MARGIN", "512"))
 # What a chain does when its prompt reaches max_model_len - TOKEN_SAFETY_MARGIN.
 CONTEXT_OVERFLOW_END = "end"  # the episode ends (FinishReason.MAX_MODEL_LEN)
 CONTEXT_OVERFLOW_DROP_OLDEST = "drop_oldest"  # the oldest turns are dropped and the chain goes on
-CONTEXT_OVERFLOW_MODES = (CONTEXT_OVERFLOW_END, CONTEXT_OVERFLOW_DROP_OLDEST)
+# The agent works within max_model_len - final_turn_reserve; on reaching it, it gets one last turn (a fixed user
+# message, then one reply in the reserve) and the run ends after it.
+CONTEXT_OVERFLOW_FINAL_TURN = "final_turn"
+CONTEXT_OVERFLOW_MODES = (CONTEXT_OVERFLOW_END, CONTEXT_OVERFLOW_DROP_OLDEST, CONTEXT_OVERFLOW_FINAL_TURN)
+# Under "final_turn", a tool result that would cut into the reserve is replaced by this note.
+FINAL_TURN_OMITTED = "(This result is not shown: it does not fit in your remaining context.)"
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +134,11 @@ class ChainRollout(Rollout):
         no_tool_call_message: Optional[str] = NO_TOOL_CALL_MESSAGE_MINISWE,
         project_actions: bool = False,
         on_context_overflow: str = CONTEXT_OVERFLOW_END,
+        final_turn_message: Optional[str] = None,
+        final_turn_reserve: int = 2048,
+        final_turn_on_max_turns: bool = False,
         branch: bool = True,
+        max_episode_seconds: Optional[float] = None,
     ):
         """See :meth:`Rollout.__init__` for the loop-control policy.
 
@@ -136,6 +146,13 @@ class ChainRollout(Rollout):
         ``max_model_len - TOKEN_SAFETY_MARGIN``: ``"end"`` (default) ends the episode;
         ``"drop_oldest"`` drops the oldest turns and goes on (see :meth:`drop_oldest_turns`),
         as SERA's sliding window. Its views repeat turns, so its results are for evaluation.
+        ``"final_turn"`` keeps ``final_turn_reserve`` tokens free: the agent works within
+        ``max_model_len - TOKEN_SAFETY_MARGIN - final_turn_reserve``, and the first time its prompt
+        reaches that, ``final_turn_message`` is added as a user message and the agent gets one more
+        reply (its tool calls run as usual, so a finish tool still ends the run normally); the run
+        then ends with ``MAX_MODEL_LEN``. A tool result that would cut into the reserve is replaced by
+        a short note, and the next turn is then the final turn. ``final_turn_on_max_turns`` gives the same last turn when a run uses its
+        ``max_turns`` (it then ends with ``MAX_TURNS``). One final turn per run (``run_loop`` call).
 
         Under ``on_no_tool_call="continue"`` the loop mirrors mini-swe-agent's format-error
         handling: a tool-less turn gets a corrective **user** message (the nudge) and the
@@ -166,6 +183,12 @@ class ChainRollout(Rollout):
             raise ValueError(f"no_tool_call_message must be a str or None, got {no_tool_call_message!r}")
         self.max_consecutive_no_tool_calls = max_consecutive_no_tool_calls
         self.no_tool_call_message = no_tool_call_message or None
+        # Wall-clock limit of one episode, all its sessions together (None: no limit). A batch waits for its
+        # slowest episode, so a few very long ones set the time of a whole training step. Past the limit no agent
+        # of the episode takes another turn (``FinishReason.TIME_LIMIT``); the reward still grades what was done.
+        if max_episode_seconds is not None and float(max_episode_seconds) <= 0:
+            raise ValueError(f"max_episode_seconds must be positive or None, got {max_episode_seconds!r}")
+        self.max_episode_seconds = float(max_episode_seconds) if max_episode_seconds is not None else None
         # verl-agent-faithful ALWAYS-STEP rollout (same semantics as StepRollout): a turn
         # with no extractable ``<action>`` steps the env with the last-30-chars garbage
         # fallback (format-invalid, penalized) instead of ending, and the episode ends
@@ -175,6 +198,37 @@ class ChainRollout(Rollout):
         if on_context_overflow not in CONTEXT_OVERFLOW_MODES:
             raise ValueError(f"on_context_overflow must be one of {CONTEXT_OVERFLOW_MODES}, got {on_context_overflow!r}")
         self.on_context_overflow = on_context_overflow
+        if (on_context_overflow == CONTEXT_OVERFLOW_FINAL_TURN or final_turn_on_max_turns) and not (
+            isinstance(final_turn_message, str) and final_turn_message.strip()
+        ):
+            raise ValueError("final_turn_message is required with on_context_overflow='final_turn' or final_turn_on_max_turns")
+        if not isinstance(final_turn_reserve, int) or final_turn_reserve < 0:
+            raise ValueError(f"final_turn_reserve must be a non-negative int, got {final_turn_reserve!r}")
+        self.final_turn_message = final_turn_message
+        self.final_turn_reserve = final_turn_reserve
+        self.final_turn_on_max_turns = bool(final_turn_on_max_turns)
+
+    # ---- the final turn (on_context_overflow="final_turn", final_turn_on_max_turns) ----
+
+    def final_turn_mode(self) -> bool:
+        return self.on_context_overflow == CONTEXT_OVERFLOW_FINAL_TURN
+
+    def final_turn_open(self, chain: Chain) -> bool:
+        """Whether the run's final turn is still available (not yet given)."""
+        return "final_turn" not in chain.info
+
+    def add_final_turn_step(self, agent, chain: Chain, step: Step, reason: str) -> Step:
+        """A step holding ``step``'s messages plus the final-turn message; the next reply is the run's last."""
+        messages = step.messages.copy()
+        messages.append({"role": "user", "content": [{"type": "text", "text": self.final_turn_message}]})
+        final_step = chain.add_step(type="Final Turn", messages=messages, description=self.final_turn_message)
+        final_step.total_token_length = (
+            step.total_token_length + observation_token_length(agent, self.final_turn_message) + TOOL_OBS_PREFIX_TOKENS
+        )
+        chain.info["final_turn"] = "pending"
+        chain.info["final_turn_reason"] = reason
+        chain.info["final_turns"] = chain.info.get("final_turns", 0) + 1
+        return final_step
 
     # ---- the strategy contract ----
 
@@ -257,7 +311,22 @@ class ChainRollout(Rollout):
         the same state continues the same conversation.
         """
         turns = 0
-        while not state.current_step.is_terminal and turns < max_turns:
+        if getattr(context, "episode_started_at", None) is None:
+            context.episode_started_at = time.monotonic()  # the main agent's first run; subagents' runs come later
+        while not state.current_step.is_terminal:
+            if (
+                self.max_episode_seconds is not None
+                and time.monotonic() - context.episode_started_at > self.max_episode_seconds
+            ):
+                state.current_step.is_terminal = True
+                state.info["finish_reason"] = FinishReason.TIME_LIMIT
+                break
+            if turns >= max_turns:
+                if not (self.final_turn_on_max_turns and self.final_turn_open(state.chain)):
+                    break
+                state.current_step = self.add_final_turn_step(
+                    agent, state.chain, state.current_step, FinishReason.MAX_TURNS
+                )
             turn_result: Optional[TurnResult] = None
             async for item in self.run_turn(
                 agent=agent,
@@ -276,6 +345,11 @@ class ChainRollout(Rollout):
                     yield item  # RolloutEvent — relay to consumer
             state.have_set_resources = turn_result.have_set_resources
             state.current_step = turn_result.next_step
+            if turn_result.should_continue and state.info.get("final_turn") == "taken":
+                # the final turn's reply did not end the run: the run ends here
+                state.current_step.is_terminal = True
+                state.info["finish_reason"] = state.info["final_turn_reason"]
+                break
             if not turn_result.should_continue:
                 break
             state.depth += 1
@@ -283,9 +357,12 @@ class ChainRollout(Rollout):
 
         if "finish_reason" not in state.info:
             state.info["finish_reason"] = FinishReason.MAX_TURNS
-        # The no-tool-call streak only counts within a run; the rest of info becomes
-        # the trajectory's metadata.
+        # The no-tool-call streak and the final turn only count within a run; the rest of info
+        # becomes the trajectory's metadata.
         state.info.pop("no_tool_call_streak", None)
+        state.info.pop("final_turn", None)
+        state.info.pop("final_turn_reason", None)
+        state.info.pop("context_full", None)
 
     def generation_filled_budget(
         self, agent, new_msg: Dict[str, Any], current_step: Step, tools, generation_config
@@ -373,7 +450,18 @@ class ChainRollout(Rollout):
                     )
 
         # 1. Pre-check: stop before generating if already at/over the context limit
-        # (or, under on_context_overflow="drop_oldest", drop old turns to make room).
+        # (or, under on_context_overflow="drop_oldest", drop old turns to make room; under
+        # "final_turn", give the run's last turn once the prompt reaches the working limit).
+        if (
+            self.final_turn_mode()
+            and max_model_len is not None
+            and self.final_turn_open(chain)
+            and (
+                current_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN - self.final_turn_reserve
+                or chain.info.get("context_full")  # a tool result no longer fitted
+            )
+        ):
+            current_step = self.add_final_turn_step(agent, chain, current_step, FinishReason.MAX_MODEL_LEN)
         if (
             max_model_len is not None
             and current_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
@@ -386,6 +474,9 @@ class ChainRollout(Rollout):
             chain.info["finish_reason"] = FinishReason.MAX_MODEL_LEN
             yield TurnResult(current_step, have_set_resources, False)
             return
+
+        if chain.info.get("final_turn") == "pending":
+            chain.info["final_turn"] = "taken"  # this reply is the run's last
 
         # 2. Generate the assistant message and record it as a thought step.
         # Agents may mutate current_step.messages (e.g. append a user nudge). Must run
@@ -463,7 +554,9 @@ class ChainRollout(Rollout):
         if tool_calls:
             # A tool-carrying turn resets mini-swe's consecutive format-error streak.
             chain.info["no_tool_call_streak"] = 0
-        ends_at_limit = self.on_context_overflow == CONTEXT_OVERFLOW_END
+        ends_at_limit = self.on_context_overflow == CONTEXT_OVERFLOW_END or (
+            self.final_turn_mode() and not self.final_turn_open(chain)
+        )
         if (
             ends_at_limit
             and max_model_len is not None
@@ -654,9 +747,26 @@ class ChainRollout(Rollout):
             )
             running_total_token_length = action_input_step.total_token_length
 
+            if (
+                self.final_turn_mode()
+                and max_model_len is not None
+                and self.final_turn_open(chain)
+                and action_input_step.total_token_length
+                > max_model_len - TOKEN_SAFETY_MARGIN - self.final_turn_reserve
+            ):
+                # The result would cut into the final turn's reserve: show a short note instead.
+                running_total_token_length -= obs_token_length
+                observation = FINAL_TURN_OMITTED
+                obs_token_length = observation_token_length(agent, observation)
+                running_total_token_length += obs_token_length
+                action_input_step.total_token_length = running_total_token_length
+                chain.info["omitted_results"] = chain.info.get("omitted_results", 0) + 1
+                chain.info["context_full"] = True  # the next turn is the final turn
+
             # Terminate if context length exceeded after this tool observation
             if (
-                self.on_context_overflow == CONTEXT_OVERFLOW_END
+                (self.on_context_overflow == CONTEXT_OVERFLOW_END
+                 or (self.final_turn_mode() and not self.final_turn_open(chain)))
                 and max_model_len is not None
                 and action_input_step.total_token_length >= max_model_len - TOKEN_SAFETY_MARGIN
             ):

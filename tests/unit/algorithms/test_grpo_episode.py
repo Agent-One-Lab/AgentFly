@@ -80,3 +80,15 @@ def test_zero_variance_groups_leave_the_loss():
     batch["action_mask"] = mask.clone()
     grpo_episode_per_segment(data, {"norm_adv_by_std_in_grpo": False})  # off by default
     assert batch["action_mask"].sum(dim=-1).tolist() == [3.0] * 5
+
+
+def test_discarded_episode_leaves_the_group_baseline():
+    """An episode with no policy tokens (discarded) gets no advantage and does not change the others' baseline."""
+    rewards = torch.tensor([[1.0, 0.0], [0.0, 0.0], [0.0, 0.0]])
+    mask = torch.tensor([[1, 1], [1, 1], [0, 0]], dtype=torch.float32)
+    advantages, _ = compute_grpo_episode_advantage(
+        rewards, mask, uid=np.array([7, 7, 7]), episode=np.array([0, 1, 2]), norm_adv_by_std_in_grpo=False
+    )
+    assert advantages[0, 0].item() == pytest.approx(0.5)  # mean of the two valid episodes is 0.5
+    assert advantages[1, 0].item() == pytest.approx(-0.5)
+    assert advantages[2].abs().sum().item() == 0

@@ -470,7 +470,11 @@ def chain_to_dataproto(
             ]
         )
     # For discarded trajectories, mask out all response tokens for every segment row.
-    discarded = [bool(t.model_dump(exclude={"segments"}).get("discarded", False)) for t in trajectories]
+    # ``discard_episode`` in the reward's metrics: the episode has no valid outcome (e.g. its environment was lost).
+    discarded = [
+        bool(t.model_dump(exclude={"segments"}).get("discarded", False)) or bool((t.metrics or {}).get("discard_episode"))
+        for t in trajectories
+    ]
     if any(discarded):
         discarded_tensor = torch.tensor(
             [discarded[b] for b, _ in row_indices],

@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 from .common import batch_field, config_value, episode_outcomes
-from .registry import register_estimator
+from .registry import register_estimator, register_metrics
 
 
 def tree_values(episode_score: Dict[Any, torch.Tensor], uid: np.ndarray, episode: np.ndarray, tree_id: np.ndarray):
@@ -96,6 +96,57 @@ def compute_grpo_tree_advantage(
             advantages[i] = leaf_adv
     advantages = advantages * response_mask
     return advantages, advantages
+
+
+@register_metrics("grpo_tree")
+def grpo_tree_metrics(batch: Any, config: Any) -> Dict[str, float]:
+    """How much signal branching gives, over the batch's trees (a tree with two or more leaves is branched):
+
+    * ``grpo_tree/branched_trees``: share of trees that are branched;
+    * ``grpo_tree/leaves_differ``: share of branched trees whose leaves got different outcomes;
+    * ``grpo_tree/leaves_split``: share of branched trees with a leaf above 0 and a leaf at or below 0 (with a
+      success-gated reward: one leaf succeeded, another failed);
+    * ``grpo_tree/leaf_gap``: mean (max - min) leaf outcome of branched trees;
+    * ``grpo_tree/within_term`` and ``grpo_tree/group_term``: mean ``lambda * |R - V|`` and ``|R - b|`` over the
+      leaves of branched trees, before the division by the group std (``b`` = the group's mean tree value; the
+      group term is 0 in a group with one tree, as in the estimator).
+    """
+
+    def field(name):
+        return batch_field(batch, name, "grpo_tree", "per_segment")
+
+    uid, episode, tree_id = field("uid"), field("batch_idx"), field("tree_id")
+    episode_score, _ = episode_outcomes(field("token_level_rewards"), uid, episode)
+    value, group_trees = tree_values(episode_score, uid, episode, tree_id)
+    leaves: Dict[Any, list] = defaultdict(list)  # (uid, tree) -> its leaves' outcomes
+    seen = set()
+    for i in range(len(uid)):
+        key = (uid[i], episode[i])
+        if key not in seen:
+            seen.add(key)
+            leaves[(uid[i], tree_id[i])].append(float(episode_score[key]))
+    branch_lambda = float((config_value(config, "estimator_kwargs", None) or {}).get("branch_lambda", 1.0))
+    group_mean = {
+        g: float(np.mean([float(value[k]) for k in keys])) for g, keys in group_trees.items() if len(keys) > 1
+    }
+
+    branched = {k: v for k, v in leaves.items() if len(v) > 1}
+    metrics: Dict[str, float] = {"grpo_tree/branched_trees": len(branched) / max(1, len(leaves))}
+    if not branched:
+        return metrics
+    outcomes = list(branched.values())
+    metrics["grpo_tree/leaves_differ"] = float(np.mean([max(v) - min(v) > 1e-6 for v in outcomes]))
+    metrics["grpo_tree/leaves_split"] = float(np.mean([max(v) > 0 and min(v) <= 0 for v in outcomes]))
+    metrics["grpo_tree/leaf_gap"] = float(np.mean([max(v) - min(v) for v in outcomes]))
+    within, group = [], []
+    for (g, t), v in branched.items():
+        V, b = float(value[(g, t)]), group_mean.get(g)
+        for R in v:
+            within.append(branch_lambda * abs(R - V))
+            group.append(abs(R - b) if b is not None else 0.0)
+    metrics["grpo_tree/within_term"] = float(np.mean(within))
+    metrics["grpo_tree/group_term"] = float(np.mean(group))
+    return metrics
 
 
 @register_estimator("grpo_tree", layout="per_segment")

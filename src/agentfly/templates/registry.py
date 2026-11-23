@@ -1,6 +1,6 @@
 """AgentFly's own chat templates, registered with chat-bricks on import.
 
-Adds templates that chat-bricks doesn't ship: ``search-r1``, ``action-agent``,
+Adds templates that chat-bricks doesn't ship: ``search-r1``, ``action-agent``, ``action-agent-qwen35``,
 ``qwen3-instruct-no-tool``, ``qwen3-think-no-tool``, ``qwen3-think``, ``qwen3-miniswe``,
 ``qwen-xml`` / ``qwen-xml-think`` (XML-style tool calls), and ``qwen3-think-no-tool-no-system``
 (the Qwen3 SFT models' format: no default system block, thinking on).
@@ -26,6 +26,37 @@ register_template(
         user_template="<|im_start|>user\n{content}\n<|im_end|>\n",
         assistant_template="<|im_start|>assistant\n{content}<|im_end|>\n",
         generation_prompt="<|im_start|>assistant\n",
+        observations_template="<observation>{observation}</observation>\n",
+        stop_words=["<|im_end|>"],
+    )
+)
+
+# ``action-agent`` for Qwen3.5 in non-thinking mode. Qwen3.5 thinks by default; its own template turns thinking
+# off with an empty think block after the generation prompt, but drops that block from earlier assistant turns,
+# so a multi-turn training row would score each turn in a different context than it was sampled in. Here every
+# assistant turn carries the empty block, in the generation prompt and in the history alike.
+register_template(
+    Template(
+        name="action-agent-qwen35",
+        system_template="<|im_start|>system\n{system_message}\n<|im_end|>\n",
+        user_template="<|im_start|>user\n{content}\n<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n<think>\n\n</think>\n\n{content}<|im_end|>\n",
+        generation_prompt="<|im_start|>assistant\n<think>\n\n</think>\n\n",
+        observations_template="<observation>{observation}</observation>\n",
+        stop_words=["<|im_end|>"],
+    )
+)
+
+# Thinking variant: the generation prompt opens <think> and the model reasons before acting. Past turns render
+# with an empty think block, as above (Qwen3.5's own template drops earlier reasoning); use it with ActionAgent's
+# strip_reasoning=True, which parses tool tags after </think> and stores only that text.
+register_template(
+    Template(
+        name="action-agent-qwen35-think",
+        system_template="<|im_start|>system\n{system_message}\n<|im_end|>\n",
+        user_template="<|im_start|>user\n{content}\n<|im_end|>\n",
+        assistant_template="<|im_start|>assistant\n<think>\n\n</think>\n\n{content}<|im_end|>\n",
+        generation_prompt="<|im_start|>assistant\n<think>\n",
         observations_template="<observation>{observation}</observation>\n",
         stop_words=["<|im_end|>"],
     )

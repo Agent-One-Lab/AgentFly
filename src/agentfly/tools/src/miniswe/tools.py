@@ -175,7 +175,9 @@ async def miniswe_bash(command: str, context: Context):
     # run_cmd only returns the output stream.
     wrapped = f"bash -c {shlex.quote(command)} 2>&1; printf '\\n{_RC_MARKER}%d' $?"
     try:
-        raw = await container.run_cmd(wrapped, timeout=timeout, workdir=workdir)
+        # The wait is bounded as well as the command: a reply may never come (a process the command left
+        # behind holds its output open), and that would hold the whole batch.
+        raw = await asyncio.wait_for(container.run_cmd(wrapped, timeout=timeout, workdir=workdir), timeout=timeout + 120)
     except asyncio.TimeoutError:
         # Mirror the collection environment's timeout observation.
         return ToolResult(

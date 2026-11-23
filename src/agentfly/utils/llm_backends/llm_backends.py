@@ -12,10 +12,12 @@ import copy
 import logging
 import os
 import random
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-from typing import TYPE_CHECKING, Any, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import httpx
 import numpy as np
@@ -254,6 +256,9 @@ class AsyncVLLMBackend(LLMBackend):
         sampling_params = {}
         if "temperature" in kwargs:
             sampling_params["temperature"] = kwargs["temperature"]
+        for key in ("top_p", "top_k"):  # nucleus / top-k sampling, when the generation config sets them
+            if kwargs.get(key) is not None:
+                sampling_params[key] = kwargs[key]
         if "max_tokens" in kwargs or "max_new_tokens" in kwargs:
             if "max_tokens" in kwargs and "max_new_tokens" in kwargs:
                 raise ValueError("max_tokens and max_new_tokens cannot be used together")
@@ -329,6 +334,18 @@ def extract_response_ids(batch) -> List[List[int]]:
     return [responses[i, : int(n)].tolist() for i, n in enumerate(resp_lens)]
 
 
+_RENDER_THREADS = 8
+_render_pool: Optional[ThreadPoolExecutor] = None
+_render_local = threading.local()
+
+
+def _render_executor() -> ThreadPoolExecutor:
+    global _render_pool
+    if _render_pool is None:
+        _render_pool = ThreadPoolExecutor(max_workers=_RENDER_THREADS, thread_name_prefix="prompt-render")
+    return _render_pool
+
+
 class AsyncVerlBackend(LLMBackend):
     """Asynchronous Verl implementation for distributed model inference.
 
@@ -358,6 +375,9 @@ class AsyncVerlBackend(LLMBackend):
         """
         from transformers import AutoTokenizer  # lazy: heavy import
 
+        from ..loop_sampler import start_loop_sampler
+
+        start_loop_sampler("task_runner")  # no-op unless AF_LOOP_SAMPLER_DIR is set
         super().__init__()
         self.model_name = model_name_or_path
         self.template = template
@@ -379,6 +399,8 @@ class AsyncVerlBackend(LLMBackend):
             "continuity_broken": 0,
         }
         self._warned_vision_fallback = False
+
+    supports_routing_key = True  # generate_async takes ``routing_key`` (one agent session -> one engine)
 
     # Check on the first call, then periodically; a few rows each time.
     _PROMPT_CHECK_EVERY = 200
@@ -408,6 +430,7 @@ class AsyncVerlBackend(LLMBackend):
         """
         from chat_bricks import Chat  # lazy: keep import cost off the hot path
 
+        tokenizer = self._thread_tokenizer()
         template = self.template or self.model_name
         rendered = []
         for messages in messages_list:
@@ -416,12 +439,25 @@ class AsyncVerlBackend(LLMBackend):
             chat = Chat(
                 template=template,
                 messages=list(messages),
-                tokenizer=self.tokenizer,
+                tokenizer=tokenizer,
                 ignore_tool_calls=True,
             )
-            ids = chat.tokenize(self.tokenizer, add_generation_prompt=True, tools=tools or None)
+            ids = chat.tokenize(tokenizer, add_generation_prompt=True, tools=tools or None)
             rendered.append(ids["input_ids"][0].tolist())
         return rendered
+
+    def _thread_tokenizer(self):
+        """``self.tokenizer``, or this render thread's own copy: a fast tokenizer's encode changes its padding and
+        truncation state, so threads must not share one."""
+        if not threading.current_thread().name.startswith("prompt-render"):
+            return self.tokenizer
+        copies = getattr(_render_local, "tokenizers", None)
+        if copies is None:
+            copies = _render_local.tokenizers = {}
+        key = id(self.tokenizer)
+        if key not in copies:
+            copies[key] = copy.deepcopy(self.tokenizer)
+        return copies[key]
 
     def _check_prompt_consistency(self, sent_prompt_ids, messages_list, tools, gb) -> None:
         """Guard: the prompt verl actually sampled from must equal what training renders.
@@ -550,7 +586,10 @@ class AsyncVerlBackend(LLMBackend):
         # training row's prefix. verl executes these ids instead of re-rendering the
         # messages from text (which re-tokenizes earlier assistant turns).
         original_messages_list = messages_list
-        prompt_ids = self._render_prompt_ids(messages_list, tools)
+        # Off the event loop: this tokenizes the whole conversation, and every episode shares the loop.
+        prompt_ids = await asyncio.get_running_loop().run_in_executor(
+            _render_executor(), self._render_prompt_ids, messages_list, tools
+        )
         if prompt_ids is None and not self._warned_vision_fallback:
             self._warned_vision_fallback = True
             logger.debug(
@@ -570,6 +609,8 @@ class AsyncVerlBackend(LLMBackend):
             "tools": tools_list,
             "data_source": data_source_list,
         }
+        if kwargs.get("routing_key"):
+            data["routing_key"] = np.array([kwargs["routing_key"]] * len(messages_list), dtype=object)
         routed_starts = None
         if prompt_ids is not None:
             # One object per row (rows differ in length; a plain np.array would try to
@@ -985,8 +1026,12 @@ class ClientBackend(LLMBackend):
                 delta = ch.get("delta") or {}
                 if delta.get("content"):
                     acc["message"]["content"] += delta["content"]
-                if delta.get("reasoning_content"):
-                    acc["message"]["reasoning_content"] += delta["reasoning_content"]
+                # Reasoning comes as ``reasoning_content`` or, from newer vLLM, as ``reasoning``. A server with a
+                # reasoning parser sends the key even when a turn has none; remember that, because such a server
+                # may reject assistant history that lacks a thinking field (K2), so an empty one must be kept.
+                if "reasoning_content" in delta or "reasoning" in delta:
+                    acc["has_reasoning_field"] = True
+                    acc["message"]["reasoning_content"] += delta.get("reasoning_content") or delta.get("reasoning") or ""
                 for tc in delta.get("tool_calls") or []:
                     ti = tc.get("index", 0)
                     tacc = acc["message"]["tool_calls"].setdefault(
@@ -1013,8 +1058,9 @@ class ClientBackend(LLMBackend):
             msg = acc["message"]
             tcs = [msg["tool_calls"][i] for i in sorted(msg["tool_calls"])]
             msg["tool_calls"] = tcs if tcs else None
-            if not msg["reasoning_content"]:
+            if not msg["reasoning_content"] and not acc.pop("has_reasoning_field", False):
                 msg.pop("reasoning_content")
+            acc.pop("has_reasoning_field", None)
             out_choices.append(acc)
         return {
             "id": resp_id,

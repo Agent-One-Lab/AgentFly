@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from ...core.context import Context
 from ..agent_base import BaseAgent
-from ..rollout.loop.generation import CONTENT_IS_PREFIX
+from ..rollout.loop.generation import CONTENT_IS_PREFIX, REASONING_STRIPPED
 from ..rollout.structures import Step
 
 # Tool tags: <action>, <summarize> and <tool attr="v">body</tool> for the agent's tools. Each
@@ -113,6 +113,7 @@ class ActionAgent(BaseAgent):
         context_trigger_message_type: Optional[str] = None,
         truncate_history_at_action: bool = False,
         close_unclosed_tags: bool = False,
+        strip_reasoning: bool = False,
         **kwargs,
     ):
         # The action format puts the environment interface in the prompt text
@@ -127,6 +128,7 @@ class ActionAgent(BaseAgent):
             context_trigger_message_type=context_trigger_message_type,
             truncate_history_at_action=truncate_history_at_action,
             close_unclosed_tags=close_unclosed_tags,
+            strip_reasoning=strip_reasoning,
             **kwargs,
         )
 
@@ -141,6 +143,7 @@ class ActionAgent(BaseAgent):
         context_trigger_message_type: Optional[str] = None,
         truncate_history_at_action: bool = False,
         close_unclosed_tags: bool = False,
+        strip_reasoning: bool = False,
         **settings,
     ) -> None:
         """The base settings plus the action format's own (see :meth:`BaseAgent.configure`)."""
@@ -150,6 +153,7 @@ class ActionAgent(BaseAgent):
             context_trigger_message_type=context_trigger_message_type,
             truncate_history_at_action=truncate_history_at_action,
             close_unclosed_tags=close_unclosed_tags,
+            strip_reasoning=strip_reasoning,
         )
         self.action_tool_name = self._find_action_tool_name()
         self.tag_tools = self._tag_tools()
@@ -175,6 +179,13 @@ class ActionAgent(BaseAgent):
         # is parsed as if closed at the end of the text, so its body still runs, as
         # RAO/SERA re-add a missing ``</python>``. The stored content stays as sampled.
         self.close_unclosed_tags = close_unclosed_tags
+        # True (for a template whose generation prompt opens ``<think>``, e.g. action-agent-qwen35-think): the
+        # text up to the last ``</think>`` is the model's native reasoning. Tool tags are parsed only after it, and
+        # the stored content keeps only that part, so later prompts show past turns without their reasoning (as
+        # Qwen3.5's own chat template does). A turn whose reasoning never closes holds no action. The sampled ids
+        # no longer match the content and are dropped (``REASONING_STRIPPED``), so this is for inference (floor
+        # checks); training on such turns would need the reasoning kept in the trained row.
+        self.strip_reasoning = strip_reasoning
         self.context_trigger_turns = resolve_context_trigger_turns(context_trigger_turns)
         message_type = context_trigger_message_type
         if message_type is None:
@@ -380,9 +391,21 @@ class ActionAgent(BaseAgent):
 
         return text
 
+    @staticmethod
+    def strip_reasoning_text(response: str) -> str:
+        """The text after the last ``</think>``; empty when the reasoning never closes."""
+        end = response.rfind("</think>")
+        return response[end + len("</think>"):].lstrip() if end >= 0 else ""
+
     def _parse_single_response(self, response: str, current_segment: List[Dict]) -> Dict:
         """:meth:`_parse_response`, marking content cut at a closing tool tag
-        (``truncate_history_at_action``) so the rollout cuts the sampled ids to match."""
+        (``truncate_history_at_action``) so the rollout cuts the sampled ids to match, and content with the
+        native reasoning removed (``strip_reasoning``) so the rollout drops the sampled ids."""
+        if self.strip_reasoning and isinstance(response, str):
+            message = self._parse_response(self.strip_reasoning_text(response), current_segment)
+            message.pop(CONTENT_IS_PREFIX, None)
+            message[REASONING_STRIPPED] = True
+            return message
         message = self._parse_response(response, current_segment)
         if (
             self.truncate_history_at_action

@@ -124,7 +124,7 @@ def _resolve_container_engine(spec: ContainerResourceSpec) -> str:
     """Pick the container engine for a container spec.
 
     Order: spec.container_engine -> AF_CONTAINER_ENGINE env -> "enroot".
-    Recognized: "enroot", "docker", "daytona", "sqs".
+    Recognized: "enroot", "docker", "daytona", "sqs", "sandbox360".
     """
     import os
 
@@ -250,6 +250,32 @@ async def _start_sqs_container(
     return resource
 
 
+async def _start_sandbox360_container(
+    spec: ContainerResourceSpec,
+    resource_id: Optional[str] = None,
+    timeout: Optional[float] = None,
+    *,
+    containers_registry: Dict[str, Any],
+) -> BaseResource:
+    """Create + start a remote Sandbox360 sandbox (``Sandbox360Container`` is its own resource)."""
+    from .containers.sandbox360_container import _in_thread, start_sandbox360_container
+
+    if spec.category != "container":
+        raise ValueError(f"sandbox360 engine supports only the 'container' category, got {spec.category!r}")
+    name = resource_id or random_name(prefix="res")
+    resource = await _in_thread(
+        start_sandbox360_container,
+        spec.image,
+        name,
+        spec.environment or {},
+        getattr(spec, "workdir", None),
+        1800.0 if timeout is None else timeout,
+        spec,
+    )
+    containers_registry[resource.name] = resource
+    return resource
+
+
 class BaseRunner(abc.ABC):
     """
     Backend that creates and manages resources on a given infrastructure.
@@ -362,6 +388,8 @@ class LocalRunner(BaseRunner):
                 containers_registry=self._containers,
                 runner_label="LocalRunner(sqs)",
             )
+        if engine == "sandbox360":
+            return await _start_sandbox360_container(spec, resource_id, timeout, containers_registry=self._containers)
         return await _start_enroot_container(
             self.client,
             spec,

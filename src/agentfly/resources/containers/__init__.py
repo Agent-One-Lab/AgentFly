@@ -22,6 +22,8 @@ from .enroot_containers import (
 _LAZY_EXPORTS = {
     "DockerContainer": "docker_container",
     "start_docker_container": "docker_container",
+    "Sandbox360Container": "sandbox360_container",
+    "start_sandbox360_container": "sandbox360_container",
     "DaytonaContainer": "daytona_container",
     "start_daytona_container": "daytona_container",
     "ensure_snapshot": "daytona_container",
@@ -51,6 +53,8 @@ __all__ = [
     "clear_agentfly_containers",
     "enroot_container_name",
     "sweep_orphaned_containers",
+    "Sandbox360Container",
+    "start_sandbox360_container",
     "DaytonaContainer",
     "start_daytona_container",
     "ensure_snapshot",

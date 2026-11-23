@@ -102,3 +102,45 @@ def test_registered_for_per_segment():
     fn = get_estimator("grpo_tree", "per_segment")
     adv, ret = fn(Data(), {"estimator_kwargs": {"branch_lambda": 1.0}, "norm_adv_by_std_in_grpo": True})
     assert adv.shape == (4, 4) and torch.equal(adv, ret)
+
+
+def test_metrics_measure_leaf_disagreement():
+    # Group G: t0 unbranched (R=0), t1 branched with leaves 1.0 and 0.0 (split), t2 branched with leaves 0.9 and 0.8
+    # (differ, no split). Group H: one tree, branched, both leaves 0 (tie). Episode 1 has two rows (two sessions).
+    import types
+
+    from agentfly.algorithms import compute_estimator_metrics
+
+    scores = [0.0, 1.0, 1.0, 0.0, 0.9, 0.8, 0.0, 0.0]
+    rewards, mask = rows(scores)
+    uid = obj(["G"] * 6 + ["H"] * 2)
+    episode = np.array([0, 1, 1, 2, 3, 4, 0, 1])
+    tree = obj(["t0", "t1", "t1", "t1", "t2", "t2", "h", "h"])
+    data = types.SimpleNamespace(
+        batch={"token_level_rewards": rewards, "action_mask": mask},
+        non_tensor_batch={"uid": uid, "batch_idx": episode, "tree_id": tree},
+    )
+    m = compute_estimator_metrics("grpo_tree", data, {"estimator_kwargs": {"branch_lambda": 2.0}})
+    assert m["grpo_tree/branched_trees"] == 0.75  # t1, t2, h of 4 trees
+    assert m["grpo_tree/leaves_differ"] == 2 / 3
+    assert m["grpo_tree/leaves_split"] == 1 / 3
+    assert abs(m["grpo_tree/leaf_gap"] - (1.0 + 0.1 + 0.0) / 3) < 1e-6
+    # within: lambda |R - V| -> t1: 2*0.5 twice, t2: 2*0.05 twice, h: 0 twice
+    assert abs(m["grpo_tree/within_term"] - (1.0 + 1.0 + 0.1 + 0.1) / 6) < 1e-6
+    # group: G's b = mean(0, 0.5, 0.85) = 0.45; H has one tree -> 0
+    b = 0.45
+    expected = (abs(1.0 - b) + abs(0.0 - b) + abs(0.9 - b) + abs(0.8 - b)) / 6
+    assert abs(m["grpo_tree/group_term"] - expected) < 1e-6
+
+
+def test_metrics_without_branching():
+    import types
+
+    from agentfly.algorithms import compute_estimator_metrics
+
+    rewards, mask = rows([1.0, 0.0])
+    data = types.SimpleNamespace(
+        batch={"token_level_rewards": rewards, "action_mask": mask},
+        non_tensor_batch={"uid": obj(["G", "G"]), "batch_idx": np.array([0, 1]), "tree_id": obj(["a", "b"])},
+    )
+    assert compute_estimator_metrics("grpo_tree", data, {}) == {"grpo_tree/branched_trees": 0.0}

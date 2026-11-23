@@ -57,7 +57,13 @@ def overlay_raw_message_fields(messages, responses) -> None:
             continue
         raw = (choices[i] or {}).get("message") or {}
         for k, v in raw.items():
-            if k in OWNED_MSG_KEYS or v is None:
+            if k in OWNED_MSG_KEYS:
+                continue
+            if v is None:
+                # A turn without reasoning comes back with a null reasoning field. A server that rejects assistant
+                # history lacking a thinking field (K2) needs it echoed as an empty one.
+                if k in REASONING_KEYS:
+                    msg.setdefault(k, "")
                 continue
             msg.setdefault(k, v)
 
@@ -142,6 +148,10 @@ def _content_text(msg: Dict[str, Any]) -> Optional[str]:
 
 
 CONTENT_IS_PREFIX = "content_is_prefix"
+# Set by a parser whose content leaves out part of the response that is not a suffix (ActionAgent's
+# ``strip_reasoning`` removes the native reasoning before the answer): the sampled ids no longer match the content,
+# so they are dropped and the turn is re-rendered from its text.
+REASONING_STRIPPED = "reasoning_stripped"
 
 
 def trim_token_ids_to_content(messages, response_texts, tokenizer, splits=None) -> int:
@@ -288,6 +298,10 @@ async def generate_response(
         skills_payload = agent.skills_payload()
         extra_kwargs = {"skills": skills_payload} if skills_payload else {}
         extra_kwargs["tool_call_source"] = getattr(agent, "default_tool_call_source", "parser")
+        if context is not None and getattr(getattr(agent, "llm_engine", None), "supports_routing_key", False):
+            # One key per agent session (a subagent has its own), so its turns reach the same engine.
+            running = getattr(context, "running", None) or [0]
+            extra_kwargs["routing_key"] = f"{context.rollout_id}:{running[-1]}"
         raw = await agent.generate_async(
             [current_step.messages.messages],
             return_dict=True,
@@ -314,6 +328,9 @@ async def generate_response(
     if use_token_ids:
         attach_token_ids(new_msg, responses)
         removed = trim_token_ids_to_content(new_msg, response_texts, getattr(agent, "tokenizer", None), splits)
+        for msg in new_msg or []:
+            if isinstance(msg, dict) and msg.pop(REASONING_STRIPPED, False):
+                msg.pop("token_ids", None)
         # The engine's log-probabilities and routed-expert rows describe the sampled ids one for one.
         attach_rollout_signals(new_msg, responses)
         sync_rollout_signals(new_msg)
@@ -324,6 +341,7 @@ async def generate_response(
             if isinstance(msg, dict):
                 msg.pop("token_ids", None)
                 msg.pop(CONTENT_IS_PREFIX, None)
+                msg.pop(REASONING_STRIPPED, None)
     total_length = extract_total_length(responses)
     if total_length is not None and removed:
         total_length -= removed
