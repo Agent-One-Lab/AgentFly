@@ -903,6 +903,15 @@ class ClientBackend(LLMBackend):
                 "total_lengths": None,
             }
 
+    @staticmethod
+    def _with_thinking_field(messages: List[Dict]) -> List[Dict]:
+        """``messages`` with an empty ``reasoning_content`` on every assistant message that has no thinking field."""
+        keys = ("reasoning_content", "reasoning", "think")
+        return [
+            {**m, "reasoning_content": ""} if m.get("role") == "assistant" and not any(k in m for k in keys) else m
+            for m in messages
+        ]
+
     def _blocking_call_openai(self, messages: List[Dict], **kwargs) -> Dict:
         """Make a blocking call to OpenAI API.
 
@@ -923,6 +932,8 @@ class ClientBackend(LLMBackend):
         # trajectory to one reset is far more expensive than re-issuing a turn.
         attempts = int(os.environ.get("AF_CONN_RETRIES", "8"))
         last_exc: Exception | None = None
+        if getattr(self, "_echo_empty_thinking", False):
+            messages = self._with_thinking_field(messages)
         for attempt in range(attempts):
             try:
                 if os.environ.get("AF_NO_STREAM"):
@@ -936,6 +947,16 @@ class ClientBackend(LLMBackend):
                 else:
                     resp_json = self._streaming_chat_call(messages, **kwargs)
                 break
+            except openai.BadRequestError as e:
+                # A server whose template requires a thinking field on every assistant message of the history
+                # (K2-Horizon) rejects a turn that had no reasoning, because nothing came back to echo. From the
+                # first such reply on, this backend sends an empty field for those turns.
+                if "thinking field" not in str(e) or getattr(self, "_echo_empty_thinking", False):
+                    raise
+                self._echo_empty_thinking = True
+                messages = self._with_thinking_field(messages)
+                last_exc = e
+                continue
             except (
                 openai.APIConnectionError,
                 openai.NotFoundError,

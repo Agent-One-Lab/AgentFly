@@ -176,7 +176,11 @@ class FileManager:
 
     def _safe_path(self, path: str) -> str:
         """Resolve path relative to workspace root; block escapes."""
-        if path.startswith("/"):
+        # An absolute path inside the workspace (models often write "/testbed/pkg/x.py") is used as it is; any
+        # other leading "/" is read as relative to the workspace, as before.
+        if os.path.isabs(path) and (os.path.realpath(path) + os.sep).startswith(self.root.rstrip(os.sep) + os.sep):
+            path = os.path.relpath(os.path.realpath(path), self.root)
+        elif path.startswith("/"):
             path = path[1:] or "."
         full = os.path.realpath(os.path.abspath(os.path.join(self.root, path)))
         if not full.startswith(self.root):

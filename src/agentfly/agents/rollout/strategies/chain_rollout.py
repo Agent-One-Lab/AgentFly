@@ -7,6 +7,7 @@ raises) follows the rollout's run policy.
 """
 
 import logging
+import math
 import os
 import sys
 import time
@@ -139,6 +140,8 @@ class ChainRollout(Rollout):
         final_turn_on_max_turns: bool = False,
         branch: bool = True,
         max_episode_seconds: Optional[float] = None,
+        stop_outliers_sd: Optional[float] = None,
+        stop_outliers_after: float = 0.8,
     ):
         """See :meth:`Rollout.__init__` for the loop-control policy.
 
@@ -189,6 +192,18 @@ class ChainRollout(Rollout):
         if max_episode_seconds is not None and float(max_episode_seconds) <= 0:
             raise ValueError(f"max_episode_seconds must be positive or None, got {max_episode_seconds!r}")
         self.max_episode_seconds = float(max_episode_seconds) if max_episode_seconds is not None else None
+        # Stopping the slowest episodes of a batch by the batch's own times (None: off). Once the share
+        # ``stop_outliers_after`` of the batch's episodes has finished, an episode running longer than the mean of
+        # the finished ones plus ``stop_outliers_sd`` standard deviations takes no further turn
+        # (``FinishReason.TIME_LIMIT``; the reward grades what it did). The limit follows the finished episodes
+        # and is never below the longest of them. Times are of the agents' work, without the grading.
+        if stop_outliers_sd is not None and float(stop_outliers_sd) < 0:
+            raise ValueError(f"stop_outliers_sd must be non-negative or None, got {stop_outliers_sd!r}")
+        if not 0 < float(stop_outliers_after) <= 1:
+            raise ValueError(f"stop_outliers_after must be in (0, 1], got {stop_outliers_after!r}")
+        self.stop_outliers_sd = float(stop_outliers_sd) if stop_outliers_sd is not None else None
+        self.stop_outliers_after = float(stop_outliers_after)
+        self.finished_episode_seconds: List[float] = []
         # verl-agent-faithful ALWAYS-STEP rollout (same semantics as StepRollout): a turn
         # with no extractable ``<action>`` steps the env with the last-30-chars garbage
         # fallback (format-invalid, penalized) instead of ending, and the episode ends
@@ -291,6 +306,19 @@ class ChainRollout(Rollout):
         state.current_step = step
         state.info.pop("finish_reason", None)
 
+    def episode_time_limit(self) -> Optional[float]:
+        """Seconds an episode may run before it takes no further turn, or None: ``max_episode_seconds`` and,
+        once enough of the batch has finished, the outlier limit from the finished episodes' times."""
+        limit = self.max_episode_seconds
+        times = self.finished_episode_seconds
+        total = getattr(self, "episode_total", 0)
+        if self.stop_outliers_sd is not None and total and len(times) >= max(2, math.ceil(self.stop_outliers_after * total)):
+            mean = sum(times) / len(times)
+            sd = (sum((t - mean) ** 2 for t in times) / len(times)) ** 0.5
+            outlier = max(mean + self.stop_outliers_sd * sd, max(times))
+            limit = outlier if limit is None else min(limit, outlier)
+        return limit
+
     async def run_loop(
         self,
         *,
@@ -314,10 +342,14 @@ class ChainRollout(Rollout):
         if getattr(context, "episode_started_at", None) is None:
             context.episode_started_at = time.monotonic()  # the main agent's first run; subagents' runs come later
         while not state.current_step.is_terminal:
-            if (
-                self.max_episode_seconds is not None
-                and time.monotonic() - context.episode_started_at > self.max_episode_seconds
-            ):
+            if getattr(context, "episode_ended", None):
+                # A tool found the episode's environment gone (e.g. its sandbox was killed): no agent of the episode
+                # can do anything more, so none takes another turn.
+                state.current_step.is_terminal = True
+                state.info["finish_reason"] = FinishReason.ENVIRONMENT_LOST
+                break
+            limit = self.episode_time_limit()
+            if limit is not None and time.monotonic() - context.episode_started_at > limit:
                 state.current_step.is_terminal = True
                 state.info["finish_reason"] = FinishReason.TIME_LIMIT
                 break

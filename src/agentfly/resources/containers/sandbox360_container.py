@@ -126,6 +126,8 @@ def _request(method: str, path: str, ok: Iterable[int] = (200, 202, 204), resend
         except httpx.HTTPError as e:
             _count(path, "transport_errors")
             message, code = f"{method} {path}: {type(e).__name__}: {e}", "TRANSPORT"
+            print(f"[sandbox360] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {method} {path} -> transport error "
+                  f"{type(e).__name__}: {str(e)[:300]}", flush=True)
             # A failed connect never sent the request, so it is safe to resend even an exec.
             never_sent = isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
             if not resend_on_transport and not never_sent:
@@ -142,9 +144,11 @@ def _request(method: str, path: str, ok: Iterable[int] = (200, 202, 204), resend
             if status >= 500:
                 _count(path, "5xx")
                 # Enough to tell a load balancer's reply from the service's, and to trace it on their side.
-                print(f"[sandbox360] {method} {path} -> {status} code={code!r} retryable={body.get('retryable')} "
-                      f"server={reply.headers.get('server')!r} trace={reply.headers.get('x-amzn-trace-id')!r} "
-                      f"body={reply.text[:200]!r}", flush=True)
+                # UTC time (ours and the replying server's) so a report can name the minute; the sandbox id is in path.
+                print(f"[sandbox360] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {method} {path} -> {status} "
+                      f"code={code!r} retryable={body.get('retryable')} server={reply.headers.get('server')!r} "
+                      f"date={reply.headers.get('date')!r} trace={reply.headers.get('x-amzn-trace-id')!r} "
+                      f"body={reply.text[:1500]!r}", flush=True)
             # A load balancer's bare 502/503/504: resend only what is safe to repeat (API docs, section 12).
             upstream = status in (502, 503, 504) and code in ("", "UPSTREAM_UNAVAILABLE")
             if not (body.get("retryable") or (resend_on_transport and upstream)):

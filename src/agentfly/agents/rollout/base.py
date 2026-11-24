@@ -374,6 +374,7 @@ class Rollout:
         self.trajectories = {}
         step = self.resolve_global_step(global_step)
         specs = self.make_specs(messages, group_size)
+        self.episode_total = len(specs)  # for rules that need to know how much of the batch has finished
 
         def run_episode(spec: EpisodeSpec):
             return self.run_episode(
@@ -795,6 +796,11 @@ class Rollout:
         ``sessions`` lists each session's stats (:meth:`session_entries`); its own
         stats and ``steps`` are the main session's.
         """
+        # The episode's agents are done: its time counts for a strategy that limits the batch's slowest episodes
+        # by the finished ones' times (ChainRollout ``stop_outliers_sd``).
+        finished = getattr(self, "finished_episode_seconds", None)
+        if finished is not None:
+            finished.append(time.monotonic() - getattr(context, "episode_started_at", started_at))
         info = state.info
         transcript = self.transcript(state)
         context.trajectory_format = "flat" if len(transcript) == 1 else "segmented"

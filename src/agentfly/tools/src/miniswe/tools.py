@@ -56,6 +56,14 @@ SUBMIT_MARKERS = (
     "MINI_SWE_AGENT_FINAL_OUTPUT",
 )
 
+# Errors of a container backend that mean the container is gone for good (Sandbox360's codes).
+ENVIRONMENT_GONE_CODES = ("SANDBOX_DEAD", "SANDBOX_NOT_FOUND", "SANDBOX_TERMINATING")
+LOST_COMMAND_MESSAGE = (
+    "Error: the connection failed and this command's result was lost. It may or may not have run; "
+    "check the repository state before running it again."
+)
+ENVIRONMENT_LOST_MESSAGE = "Error: the task environment was lost (its container stopped). Nothing more can run in it."
+
 _RC_MARKER = "__MINISWE_RC__"
 _RC_RE = re.compile(rf"\n?{_RC_MARKER}(-?\d+)\s*$")
 
@@ -174,11 +182,45 @@ async def miniswe_bash(command: str, context: Context):
     # subshell's exit code smuggled out through a trailing marker because
     # run_cmd only returns the output stream.
     wrapped = f"bash -c {shlex.quote(command)} 2>&1; printf '\\n{_RC_MARKER}%d' $?"
+    previous = getattr(context, "bash_last_command", None)
+    context.bash_last_command = command
     try:
         # The wait is bounded as well as the command: a reply may never come (a process the command left
         # behind holds its output open), and that would hold the whole batch.
         raw = await asyncio.wait_for(container.run_cmd(wrapped, timeout=timeout, workdir=workdir), timeout=timeout + 120)
     except asyncio.TimeoutError:
+        raise_timeout = True
+    except Exception as e:  # noqa: BLE001 -- only the container backend's own errors are handled here
+        code = getattr(e, "error_code", None)
+        if code is None:
+            raise
+        if code in ENVIRONMENT_GONE_CODES:
+            # The container is gone (e.g. killed for memory): the whole episode stops (the rollout checks
+            # context.episode_ended), and its grading will find it gone and discard it.
+            context.episode_ended = "environment_lost"
+            print(
+                f"[miniswe_bash] task container lost ({str(e)[:240]}); this command: {command[:300]!r}; "
+                f"the one before: {str(previous)[:300]!r}",
+                flush=True,
+            )
+            return ToolResult(
+                name="bash",
+                arguments={"command": command},
+                observation=format_observation(-1, "", exception_info=ENVIRONMENT_LOST_MESSAGE),
+                status="error",
+                control="end",
+            )
+        # The command was sent but its reply was lost (a gateway error): it may or may not have run, and it is
+        # not resent. Say so plainly instead of passing the backend's traceback to the model.
+        return ToolResult(
+            name="bash",
+            arguments={"command": command},
+            observation=format_observation(-1, "", exception_info=LOST_COMMAND_MESSAGE),
+            status="success",
+        )
+    else:
+        raise_timeout = False
+    if raise_timeout:
         # Mirror the collection environment's timeout observation.
         return ToolResult(
             name="bash",

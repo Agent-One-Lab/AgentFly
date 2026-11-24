@@ -36,6 +36,7 @@ class FinishReason(str, Enum):
     INVALID_END = "invalid_end"
     TOOL_ERROR_END = "tool_error_end"
     TOOL_END = "tool_end"
+    ENVIRONMENT_LOST = "environment_lost"  # a tool reported the episode's environment gone (context.episode_ended)
     TIME_LIMIT = "time_limit"  # the episode passed its wall-clock limit (ChainRollout max_episode_seconds)
 
 
